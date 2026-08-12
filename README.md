@@ -9,7 +9,7 @@ The core mission of IDguard PRO is to act as an intelligent edge-computing senti
 ## Key Features
 
 *   **Advanced AI Detection:** Powered by YOLOv10 for state-of-the-art object detection accuracy and speed.
-*   term **Event-Driven Recording:** Automatic MP4 recording triggered by person detection, including configurable pre-roll and post-roll buffers to capture the arrival and departure of subjects.
+*   **Event-Driven Recording:** Automatic MP4 recording triggered by person detection, including configurable pre-roll and post-roll buffers to capture the arrival and departure of subjects.
 *   **Web Dashboard:** A lightweight Flask-based web interface for real-time stream monitoring, system configuration, and viewing recent event alerts.
 *   **Multi-Threaded Architecture:** Each camera stream operates in its own independent thread, ensuring high stability and preventing a single connection failure from affecting the entire system.
 *   **Edge Computing Focus:** Designed to run entirely on local hardware, ensuring maximum privacy and data sovereignty.
