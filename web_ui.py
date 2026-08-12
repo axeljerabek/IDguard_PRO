@@ -1,9 +1,16 @@
 from flask import Flask, render_template_string, request, redirect, url_for, send_from_directory, Response
 import os
+import sys
 import json
 import subprocess
 import glob
 from datetime import datetime
+
+# Stellt sicher, dass das Arbeitsverzeichnis und der Import-Pfad immer das Verzeichnis dieser web_ui.py ist
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+os.chdir(SCRIPT_DIR)
 
 # Lade Konfiguration direkt
 from config import (STREAMS, OVERRIDE_F, SETTINGS_F, ALERTS_DIR, PROJECT_ROOT,
@@ -451,12 +458,20 @@ def dashboard():
 
 @app.route('/start', methods=['POST'])
 def start_pipeline():
-    subprocess.Popen(['/bin/bash', os.path.join(PROJECT_ROOT, 'start_detached.sh')], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.Popen(
+        ['/bin/bash', os.path.join(PROJECT_ROOT, 'start_detached.sh')],
+        cwd=PROJECT_ROOT,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
     return redirect(url_for('dashboard'))
 
 @app.route('/stop', methods=['POST'])
 def stop_pipeline():
-    subprocess.run(['/bin/bash', os.path.join(PROJECT_ROOT, 'stop.sh')])
+    subprocess.run(
+        ['/bin/bash', os.path.join(PROJECT_ROOT, 'stop.sh')],
+        cwd=PROJECT_ROOT
+    )
     return redirect(url_for('dashboard'))
 
 @app.route('/toggle/<name>', methods=['POST'])
