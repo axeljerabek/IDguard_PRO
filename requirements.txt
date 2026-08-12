@@ -1,0 +1,9 @@
+# IDguard PRO Requirements
+ultralytics
+opencv-python
+flask
+torch
+torchvision
+numpy
+psutil
+python-multipart

@@ -1,0 +1,90 @@
+import os
+import logging
+import json
+
+# ==============================================================================
+# IDENTITY-GUARD PRO - PRODUCTION CONFIGURATION (PORTABLE & STABLE)
+# ==============================================================================
+
+# AUTOMATISCHE PFAD-ERKENNUNG: Findet den Projektordner selbstständig.
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+
+# Alle Pfade werden jetzt RELATIV zum Projektordner berechnet
+ALERTS_DIR      = os.path.join(PROJECT_ROOT, "alerts")
+LOG_DIR         = os.path.join(PROJECT_ROOT, "logs")
+MODEL_PATH      = os.path.join(PROJECT_ROOT, "yolov10n.pt")
+OVERRIDE_F      = os.path.join(PROJECT_ROOT, "stream_overrides.json")
+SETTINGS_F      = os.path.join(PROJECT_ROOT, "pipeline_settings.json")
+
+# Stream Configuration Base
+STREAMS = [
+    {"name": "Entrance", "url":  "rtmp://172.168.178.25/cam1/test", "enabled": True, "type": "VIDEO"},
+    {"name": "Garden",  "url":  "rtmp://172.168.178.25/cam2/test", "enabled": True, "type": "VIDEO"},
+    {"name": "Cardock",   "url":  "rtmp://172.168.178.25/cam3/test", "enabled": True, "type": "VIDEO"},
+    {"name": "Backyard",   "url":  "rtmp://172.168.178.25/cam4/test", "enabled": True, "type": "VIDEO"}
+]
+
+# Web-UI Stream Overrides anwenden
+if os.path.exists(OVERRIDE_F):
+    try:
+        with open(OVERRIDE_F, 'r') as f:
+            overrides = json.load(f)
+            for stream in STREAMS:
+                if stream["name"] in overrides:
+                    stream["enabled"] = (overrides[stream["name"]] == "ON")
+    except Exception as e:
+        print(f"Config Override Fehler: {e}")
+
+# Standard Processing Parameters (Optimized for YOLOv10)
+PRE_ROLL_SEC  = 10
+POST_ROLL_SEC = 30
+TARGET_FPS    = 30
+CONFIDENCE_THRESHOLD = 0.5
+DETECTION_CLASSES = [0]
+
+# Web-UI Pipeline Settings anwenden
+if os.path.exists(SETTINGS_F):
+    try:
+        with open(SETTINGS_F, 'r') as f:
+            sett = json.load(f)
+            PRE_ROLL_SEC = int(sett.get('PRE_ROLL_SEC', PRE_ROLL_SEC))
+            POST_ROLL_SEC = int(sett.get('POST_ROLL_SEC', POST_ROLL_SEC))
+            TARGET_FPS = int(sett.get('TARGET_FPS', TARGET_FPS))
+            CONFIDENCE_THRESHOLD = float(sett.get('CONFIDENCE_THRESHOLD', CONFIDENCE_THRESHOLD))
+            if 'DETECTION_CLASSES' in sett:
+                DETECTION_CLASSES = [int(c) for c in sett['DETECTION_CLASSES']]
+    except Exception as e:
+        print(f"Pipeline Settings Fehler: {e}")
+
+# Recording Mode
+RECORDING_MODE = "EVENT_DRIVEN"
+
+# Sicherstellen, dass die Ordner im Projektverzeichnis existieren
+os.makedirs(ALERTS_DIR, exist_ok=True)
+os.makedirs(LOG_DIR, exist_ok=True)
+
+def get_stream_logger(stream_name):
+    logger = logging.getLogger(f"IDguard.{stream_name}")
+    if not logger.handlers:
+        logger.setLevel(logging.INFO)
+        log_file = os.path.join(LOG_DIR, f"{stream_name}.log")
+        fh = logging.FileHandler(log_file); fh.setLevel(logging.INFO)
+        ch = logging.StreamHandler(); ch.setLevel(logging.INFO)
+        formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        fh.setFormatter(formatter); ch.setFormatter(formatter)
+        logger.addHandler(fh); logger.addHandler(ch)
+    return logger
+
+# System Logger Setup
+system_logger = logging.getLogger("IDguard.SYSTEM")
+system_logger.setLevel(logging.INFO)
+if not system_logger.handlers:
+    s_log_file = os.path.join(LOG_DIR, "system_main.log")
+    sh = logging.FileHandler(s_log_file); sh.setLevel(logging.INFO)
+    formatter = logging.Formatter("%(asctime)s - [%(levelname)s] - %(message)s")
+    sh.setFormatter(formatter); system_logger.addHandler(sh)
+
+def global_log(msg, level="info"):
+    if level == "info": system_logger.info(msg)
+    elif level == "error": system_logger.error(msg)
+    elif level == "warning": system_logger.warning(msg)

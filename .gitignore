@@ -1,0 +1,34 @@
+# Python / Virtual Environment
+__pycache__/
+*.py[cod]
+*.pyc
+.venv/
+venv/
+
+# ML Weights
+*.pt
+*.weights
+*.onnx
+
+# Runtime data, alerts & logs (mit gitkeep Erhalt)
+alerts/*
+!alerts/.gitkeep
+logs/*
+!logs/.gitkeep
+database/*
+!database/.gitkeep
+*.log
+*.mp4
+*.db
+
+# Config, Environment & Backups / Overrides
+.env
+config.py
+*.bkp
+stream_overrides.json
+pipeline_settings.json
+
+# IDE / OS specific
+.vscode/
+.idea/
+.DS_Store
