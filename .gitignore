@@ -15,11 +15,9 @@ alerts/*
 !alerts/.gitkeep
 logs/*
 !logs/.gitkeep
-database/*
-!database/.gitkeep
+database/*.db
 *.log
 *.mp4
-*.db
 
 # Config, Environment & Backups / Overrides
 .env
