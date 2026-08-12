@@ -49,6 +49,10 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+Download the yolov10 model:
+
+wget https://github.com/THU-MIG/yolov10/releases/download/v1.1/yolov10n.pt
+
 ## 5. Configuration (Crucial!)
 
 Before starting, you must configure the paths and settings in the environment or via `config.py`:
