@@ -45,7 +45,18 @@ Detailed installation steps, including virtual environment setup and dependency 
 *   `alerts/`: Directory containing recorded event MP4 files (automatically generated).
 *   `logs/`: Application and system logs for debugging and auditing.
 
-*   ## Acknowledgements & Citation
+  ## Tested Hardware & Configurations
+
+The system has been thoroughly tested and runs rock-solid across both compact edge/SFF builds and high-end workstations:
+
+| System | Specs | Buffer Settings | Status |
+| :--- | :--- | :--- | :--- |
+| **Intel NUC 11 Enthusiast** | 32 GB RAM \| NVIDIA RTX 2060 (6 GB VRAM) | Pre-roll: 5s / Post-roll: 10s | Stable |
+| **High-End Workstation** | Intel Core Ultra 9 285K \| 64 GB RAM \| NVIDIA RTX 5090 (32 GB VRAM) | Pre-roll: 10s / Post-roll: 30s | Stable |
+
+---
+
+ ## Acknowledgements & Citation
 
 This project utilizes [YOLOv10](https://github.com/THU-MIG/yolov10) and is powered by the [Ultralytics](https://github.com/ultralytics/ultralytics) framework for real-time object detection.
 
