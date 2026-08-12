@@ -45,6 +45,20 @@ Detailed installation steps, including virtual environment setup and dependency 
 *   `alerts/`: Directory containing recorded event MP4 files (automatically generated).
 *   `logs/`: Application and system logs for debugging and auditing.
 
+*   ## Acknowledgements & Citation
+
+This project utilizes [YOLOv10](https://github.com/THU-MIG/yolov10) and is powered by the [Ultralytics](https://github.com/ultralytics/ultralytics) framework for real-time object detection.
+
+If you use this repository, please consider citing the original YOLOv10 paper:
+
+```bibtex
+@article{wang2024yolov10,
+  title={YOLOv10: Real-Time End-to-End Object Detection},
+  author={Wang, Ao and Chen, Hui and Liu, Lihao and Chen, Kai and Lin, Zijia and Han, Jungong and Ding, Guiguang},
+  journal={arXiv preprint arXiv:2405.14458},
+  year={2024}
+}
+
 ## Disclaimer
 
 This software is intended for educational and private security purposes. Users are responsible for ensuring that their use of surveillance technology complies with all local, regional, and international laws regarding privacy and data protection.
