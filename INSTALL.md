@@ -20,7 +20,7 @@ Before proceeding with the Python installation, your system must provide the nec
 Clone the repository onto your target machine:
 ```bash
 git clone https://github.com/axeljerabek/IDguard_PRO
-cd IDguard_PRO_COMPLETE
+cd IDguard_PRO
 ```
 
 ## 3. Setup Virtual Environment (Python venv)
