@@ -19,7 +19,7 @@ Before proceeding with the Python installation, your system must provide the nec
 
 Clone the repository onto your target machine:
 ```bash
-git clone <repository_url>
+git clone [<repository_url>](https://github.com/axeljerabek/IDguard_PRO)
 cd IDguard_PRO_COMPLETE
 ```
 
