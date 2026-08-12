@@ -1,0 +1,193 @@
+import os
+import sys
+import time
+import datetime
+import threading
+from collections import deque
+
+# 1. PATH RESOLUTION
+DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(DIR)
+
+try:
+    from config import (
+        STREAMS, ALERTS_DIR, MODEL_PATH, PRE_ROLL_SEC, 
+        POST_ROLL_SEC, TARGET_FPS, DETECTION_MS_CLASSES as DETECTION_CLASSES, 
+        get_stream_log_function as get_stream_logger,
+        system_logger
+    )
+except ImportError:
+    try:
+        from config import get_stream_logger, system_logger
+    except:
+        print("❌ CRITICAL ERROR: Could not load config.py")
+        sys.exit(1)
+
+# 2. Class Definition for the Camera Agent
+class CameraAgent(threading.Thread):
+    def __init__(self, stream_info):
+        super().__init__()
+        self.name = stream_info["name"]
+        self.url = stream_info["url"]
+        self.enabled = stream_info["enabled"]
+        try: 
+            from config import get_stream_logger as gs; self.logger = gs(self.name)
+        except:
+            import logging
+            self.logger = logging.getLogger(self.name)
+            
+        self.daemon = True 
+        self._stop_event = threading.Event()
+
+    def run(self):
+        """The primary execution loop for each camera thread."""
+        print(f"🚀 [Thread Start] Initializing camera: {self.name}")
+        
+        try:
+            import cv2
+            from ultralytics import YOLO
+        except ImportError as e:
+            self.logger.error(f"❌ Dependency Error in {self.name}: {e}")
+            return
+
+        # 1. Initialize AI Engine (YOLOv10)
+        detector = None
+        if os.path.exists(MODEL_PATH) and MODEL_PATH:
+            try:
+                detector = YOLO(MODEL_PATH)
+                self.logger.info("✅ AI Model loaded successfully.")
+            except Exception as e:
+                self.logger.error(f"❌ Failed to load model: {e}")
+        else:
+            self.logger.warning("⚠️ No valid YOLO path found; running in VISION-ONLY mode.")
+
+        # 2. Initialize Stream Connection (WITH ENHANCED ERROR LOGGING)
+        cap = None
+        try:
+            self.logger.info(f"🔗 Connecting to RTMP: {self.url}")
+            cap = cv2.VideoCapture(self.url)
+            if not cap or not cap.isOpened():
+                raise ConnectionError(f"Could not open stream at URL: {self.url}")
+            self.logger.info("✅ Stream connection established.")
+        except Exception as e:
+            error_msg = str(e)
+            self.logger.error(f"❌ [STREAM ERROR] '{self.name}' failed to connect at [{self.url}]. Error: {error_msg}")
+            return
+
+        # 3. State and Buffer setup (Pre-roll + Post-roll)
+        buffer_size = int((PRE_ROLL_SEC + POST_ROLL_SEC) * TARGET_FPS)
+        frame_buffer = deque(maxlen=buffer_size)
+        state = "IDLE" 
+        writer = None
+        post_roll_end_time = 0
+
+        # 4. Main Processing Loop
+        try:
+            while not self._stop_event.is_set():
+                loop_start = time.time()
+                ret, frame = cap.read()
+
+                if not ret:
+                    self.logger.error(f"⚠️ [CONNECTION LOST] '{self.url}' disconnected. Retrying in 5s...")
+                    cap.release()
+                    time.sleep(5)
+                    cap = cv2.VideoCapture(self.url)
+                    if cap and cap.isOpened():
+                        self.logger.info(f"✅ [RECONNECTED] '{self.name}' has recovered the stream at {self.url}!")
+                    elif cap:
+                        pass 
+                    else:
+                        continue
+
+                # A. Update rolling pre-roll buffer
+                frame_copy = frame.copy()
+                frame_buffer.append(frame_copy)
+
+                # B. Perform Detection (if model is available)
+                person_detected = False
+                if detector:
+                    results = detector(frame, verbose=False, classes=DETECTION_CLASSES)
+                    person_detected = len(results[0].boxes) > 0
+
+                # C. STATE MACHINE LOGIC (Continuous Recording Mode)
+                if state == "IDLE":
+                    if person_detected:
+                        state = "RECORDING"
+                        ts_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                        video_file_path = os.path.join(ALERTS_DIR, f"{self.name}_EVENT_{ts_str}.mp4")
+                        self.logger.warning("🚨 [DETECTED] Person found! Starting continuous recording.")
+                        h, w = frame.shape[:2]
+                        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                        writer = cv2.VideoWriter(video_file_path, fourcc, TARGET_FPS, (w, h))
+                        for hist_frame in frame_buffer: 
+                            writer.write(hist_frame)
+
+                elif state == "RECORDING":
+                    if person_detected:
+                        if writer: writer.write(frame)
+                    else:
+                        state = "POST_ROLL"
+                        post_roll_end_time = time.time() + POST_ROLL_SEC
+                        self.logger.info(f"🏠 [GONE] Person departed. Monitoring area for {POST_ROLL_SEC}s extra.")
+
+                elif state == "POST_ROLL":
+                    if writer: 
+                        writer.write(frame)
+                    if time.time() > post_roll_end_time:
+                        self.logger.info(f"✅ Session ended for {self.name}. Closing file.")
+                        if writer:
+                            writer.release()
+                            writer = None
+                        state = "IDLE"
+
+                # D. Frame Rate Control (Preventing CPU overload)
+                elapsed = time.time() - loop_start
+                sleep_duration = max(0, (1.0 / TARGET_FPS) - elapsed)
+                if sleep_duration > 0:
+                    time.sleep(sleep_duration)
+
+        except Exception as e:
+            self.logger.error(f"💥 Thread Crash [{self.name}]: {e}")
+        finally:
+            if writer: writer.release()
+            cap.release()
+            self.logger.info("🛑 Agent thread shutting down.")
+
+    def stop_agent(self):
+        self._stop_event.set()
+
+# ---------------------------------------------------------
+# MAIN ORCHESTRATOR (The Launcher)
+# ---------------------------------------------------------
+if __name__ == "__main__":
+    system_logger = get_stream_logger("SYSTEM")
+    system_logger.info("🚀 [MASTER] Initializing Multi-Agent Pipeline...")
+
+    all_agents = []
+    for stream in STREAMS:
+        if stream["enabled"]:
+            agent_thread = CameraAgent(stream)
+            agent_thread.start() 
+            all_agents.append(agent_thread)
+            system_logger.info(f"📡 [MASTER] Launched Thread Worker for: {stream['name']}")
+        else:
+            system_logger.info(f"⏭️ [MASTER] Skipping Disabled Stream: {stream['</strong>}")
+
+    if not all_agents:
+        system_logger.error("❌ No active streams found! Exiting.")
+        sys.exit(1)
+
+    system_logger.info("[MASTER] All threads running parallelly. Monitoring ACTIVE.")
+
+    try:
+        while True:
+            alive_count = sum(1 for t in all_agents if t.is_alive())
+            if alive_count < len(all_agents):
+                system_logger.warning(f"⚠️ ALERT: {len(all_agents) - alive_count} camera thread(s) have died/stopped!")
+            time.sleep(15)
+    except KeyboardInterrupt:
+        system_logger.info("[MASTER] Shutdown signal received.")
+
+    for a in all_agents:
+        a.stop_agent()
+    system_logger.info("[MASTER] Pipeline shutdown complete.")
