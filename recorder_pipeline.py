@@ -83,12 +83,10 @@ class CameraAgent(multiprocessing.Process):
         else:
             self.logger.warning("⚠️ No valid YOLO path found; running in VISION-ONLY mode.")
 
-        # Pre-Roll Puffer
-        video_buffer_size = int(PRE_ROLL_SEC * TARGET_FPS)
-        audio_buffer_size = int(PRE_ROLL_SEC * 50)  # ca. 50 Audio-Pakete/Sekunde
-
-        video_buffer = deque(maxlen=video_buffer_size)
-        audio_buffer = deque(maxlen=audio_buffer_size)
+        # Gemeinsamer Pre-Roll Puffer für Video und Audio (chronologisch sortiert)
+        # Bsp: ca. (FPS + 50 Audio-Pakete) * PRE_ROLL_SEC
+        max_buffer_items = int((TARGET_FPS + 50) * PRE_ROLL_SEC)
+        av_buffer = deque(maxlen=max_buffer_items)
 
         state = "IDLE"
         post_roll_end_time = 0
@@ -96,9 +94,11 @@ class CameraAgent(multiprocessing.Process):
         out_container = None
         out_video = None
         out_audio = None
+        resampler = None
+        video_frame_count = 0
 
         def close_writer():
-            nonlocal out_container, out_video, out_audio
+            nonlocal out_container, out_video, out_audio, resampler, video_frame_count
             if out_container:
                 try:
                     if out_video:
@@ -114,27 +114,50 @@ class CameraAgent(multiprocessing.Process):
                     out_container = None
                     out_video = None
                     out_audio = None
+                    resampler = None
+                    video_frame_count = 0
 
         def encode_video_frame(img_bgr):
+            nonlocal video_frame_count
             if not out_container or not out_video:
                 return
             try:
                 av_frame = av.VideoFrame.from_ndarray(img_bgr, format="bgr24")
-                av_frame.pts = None
+                av_frame.pts = video_frame_count
+                video_frame_count += 1
+                
                 for packet in out_video.encode(av_frame):
                     out_container.mux(packet)
             except Exception as e:
                 self.logger.error(f"❌ Video encoding error: {e}")
 
         def encode_audio_frame(a_frame):
+            nonlocal resampler
             if not out_container or not out_audio:
                 return
             try:
-                a_frame.pts = None
-                for packet in out_audio.encode(a_frame):
-                    out_container.mux(packet)
+                # Resampler initialisieren, falls Audio-Layout/Sample-Rate angepasst werden muss
+                if resampler is None:
+                    resampler = av.AudioResampler(
+                        format=out_audio.format.name,
+                        layout=out_audio.layout.name,
+                        rate=out_audio.rate
+                    )
+                
+                resampled_frames = resampler.resample(a_frame)
+                for rf in resampled_frames:
+                    rf.pts = None
+                    for packet in out_audio.encode(rf):
+                        out_container.mux(packet)
             except Exception as e:
                 self.logger.error(f"❌ Audio encoding error: {e}")
+
+        def write_buffered_item(item):
+            item_type, data = item
+            if item_type == "video":
+                encode_video_frame(data)
+            elif item_type == "audio":
+                encode_audio_frame(data)
 
         try:
             while not self._stop_event.is_set():
@@ -162,11 +185,10 @@ class CameraAgent(multiprocessing.Process):
                         # VIDEO FRAME PROCESSING
                         if packet.stream.type == 'video':
                             for frame in packet.decode():
-                                loop_start = time.time()
                                 img_bgr = frame.to_ndarray(format='bgr24')
 
-                                # 1. Pre-Roll Puffer
-                                video_buffer.append(img_bgr.copy())
+                                # 1. Pre-Roll Puffer (chronologisch)
+                                av_buffer.append(("video", img_bgr.copy()))
 
                                 # 2. YOLO Detection auf GPU (CUDA)
                                 person_detected = False
@@ -196,17 +218,16 @@ class CameraAgent(multiprocessing.Process):
                                             out_video.width = w
                                             out_video.height = h
                                             out_video.pix_fmt = 'yuv420p'
+                                            out_video.time_base = av.Rational(1, TARGET_FPS)
 
                                             # Audio Stream aus RTMP einrichten (falls vorhanden)
                                             audio_in_stream = next((s for s in container.streams if s.type == 'audio'), None)
                                             if audio_in_stream:
                                                 out_audio = out_container.add_stream('aac')
 
-                                            # Pre-Roll Video & Audio rausschreiben
-                                            for hist_v in video_buffer:
-                                                encode_video_frame(hist_v)
-                                            for hist_a in audio_buffer:
-                                                encode_audio_frame(hist_a)
+                                            # Synchronen A/V Pre-Roll rausschreiben
+                                            for item in av_buffer:
+                                                write_buffered_item(item)
 
                                         except Exception as e:
                                             self.logger.error(f"❌ Failed to initialize video writer: {e}")
@@ -234,16 +255,10 @@ class CameraAgent(multiprocessing.Process):
                                             close_writer()
                                             state = "IDLE"
 
-                                # Frame-Rate Kontrolle
-                                elapsed = time.time() - loop_start
-                                sleep_duration = max(0, (1.0 / TARGET_FPS) - elapsed)
-                                if sleep_duration > 0:
-                                    time.sleep(sleep_duration)
-
                         # AUDIO FRAME PROCESSING
                         elif packet.stream.type == 'audio':
                             for a_frame in packet.decode():
-                                audio_buffer.append(a_frame)
+                                av_buffer.append(("audio", a_frame))
                                 if state in ["RECORDING", "POST_ROLL"]:
                                     encode_audio_frame(a_frame)
 
