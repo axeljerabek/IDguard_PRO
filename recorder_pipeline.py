@@ -2,8 +2,15 @@ import os
 import sys
 import time
 import datetime
-import threading
+import multiprocessing
 from collections import deque
+
+# CPU-Thread-Wildwuchs von PyTorch/OpenBLAS global drosseln
+os.environ["OMP_NUM_THREADS"] = "2"
+os.environ["OPENBLAS_NUM_THREADS"] = "2"
+os.environ["MKL_NUM_THREADS"] = "2"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "2"
+os.environ["NUMEXPR_NUM_THREADS"] = "2"
 
 # 1. PATH RESOLUTION
 DIR = os.path.dirname(os.path.abspath(__file__))
@@ -24,27 +31,33 @@ except ImportError:
         sys.exit(1)
 
 # 2. Class Definition for the Camera Agent
-class CameraAgent(threading.Thread):
+class CameraAgent(multiprocessing.Process):
     def __init__(self, stream_info):
         super().__init__()
         self.name = stream_info["name"]
         self.url = stream_info.get("url", "")
         self.enabled = stream_info.get("enabled", False)
+        
+        self.daemon = True 
+        self._stop_event = multiprocessing.Event()
+
+    def run(self):
+        """The primary execution loop for each camera process."""
+        # Logger prozess-lokal initialisieren
         try: 
-            from config import get_stream_logger as gs; self.logger = gs(self.name)
+            from config import get_stream_logger as gs
+            self.logger = gs(self.name)
         except:
             import logging
             self.logger = logging.getLogger(self.name)
-            
-        self.daemon = True 
-        self._stop_event = threading.Event()
 
-    def run(self):
-        """The primary execution loop for each camera thread."""
-        print(f"🚀 [Thread Start] Initializing agent: {self.name}")
+        print(f"🚀 [Process Start] Initializing agent: {self.name}")
         
         try:
             import cv2
+            import torch
+            cv2.setNumThreads(2)
+            torch.set_num_threads(2)
             from ultralytics import YOLO
         except ImportError as e:
             self.logger.error(f"❌ Dependency Error in {self.name}: {e}")
@@ -75,7 +88,7 @@ class CameraAgent(threading.Thread):
 
                 # --- CONNECTION MANAGEMENT (RETRY LOGIC) ---
                 if cap is None or not cap.isOpened():
-                    self.logger.info(f"🔗 Attempting connection to RTMP: {self.url}")
+                    self.logger.info(f"🔗 Attempting connection to stream: {self.url}")
                     try:
                         temp_cap = cv2.VideoCapture(self.url)
                         if temp_cap and temp_cap.isOpened():
@@ -88,42 +101,39 @@ class CameraAgent(threading.Thread):
                         if cap: cap.release()
                         cap = None
                         time.sleep(5)
-                        continue # This keeps the thread alive!
+                        continue 
 
                 # --- STREAM PROCESSING ---
                 ret, frame = cap.read()
 
                 if not ret:
-                    self.logger.error(f"⚠️ [STREAM LOST] '{self.name}' lost connection to {self.url}. Retrying in 5s...")
+                    self.logger.error(f"⚠️ [STREAM LOST] '{self.name}' lost connection. Retrying in 5s...")
                     cap.release()
                     cap = None
                     time.sleep(5)
                     continue
 
                 # A. Update rolling pre-roll buffer
-                frame_copy = frame.copy()
-                frame_buffer.append(frame_copy)
+                frame_buffer.append(frame.copy())
 
-                # B. Perform Detection (if model is available)
+                # B. Perform Detection
                 person_detected = False
                 if detector:
                     results = detector(frame, verbose=False, classes=DETECTION_CLASSES)
                     person_detected = len(results[0].boxes) > 0
 
                 # C. STATE MACHINE LOGIC
-                if state == "ID_STATE": # Using a safe check via string
-                    pass # We'll use the logic below directly to avoid any confusion
-                
-                # Unified State Logic for clarity and stability
                 if state == "IDLE":
                     if person_detected:
                         state = "RECORDING"
                         ts_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                         video_file_path = os.path.join(ALERTS_DIR, f"{self.name}_EVENT_{ts_str}.mp4")
-                        self.logger.warning("🚨 [DETECTED] Person found! Starting continuous recording.")
+                        self.logger.warning("🚨 [DETECTED] Person found! Starting recording.")
+                        
                         h, w = frame.shape[:2]
                         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                         writer = cv2.VideoWriter(video_file_path, fourcc, TARGET_FPS, (w, h))
+                        
                         for hist_frame in frame_buffer: 
                             writer.write(hist_frame)
 
@@ -133,36 +143,41 @@ class CameraAgent(threading.Thread):
                     else:
                         state = "POST_ROLL"
                         post_roll_end_time = time.time() + POST_ROLL_SEC
-                        self.logger.info(f"🏠 [GONE] Person departed. Monitoring area for {POST_ROLL_SEC}s extra.")
+                        self.logger.info(f"🏠 [GONE] Person departed. Monitoring for {POST_ROLL_SEC}s extra.")
 
                 elif state == "POST_ROLL":
-                    if writer: 
-                        writer.write(frame)
-                    if time.time() > post_roll_end_time:
-                        self.logger.info(f"✅ Session ended for {self.name}. Closing file.")
-                        if writer:
-                            writer.release()
-                            writer = None
-                        state = "IDLE"
+                    if person_detected:
+                        state = "RECORDING"
+                        self.logger.info("🚨 [DETECTED] Person returned! Resuming continuous recording.")
+                        if writer: writer.write(frame)
+                    else:
+                        if writer: 
+                            writer.write(frame)
+                        if time.time() > post_roll_end_time:
+                            self.logger.info(f"✅ Session ended for {self.name}. Closing file.")
+                            if writer:
+                                writer.release()
+                                writer = None
+                            state = "IDLE"
 
-                # D. Frame Rate Control (Preventing CPU overload)
+                # D. Frame Rate Control
                 elapsed = time.time() - loop_start
                 sleep_duration = max(0, (1.0 / TARGET_FPS) - elapsed)
                 if sleep_duration > 0:
                     time.sleep(sleep_duration)
 
         except Exception as e:
-            self.logger.error(f"💥 Thread Crash [{self.name}]: {e}")
+            self.logger.error(f"💥 Process Crash [{self.name}]: {e}")
         finally:
             if writer: writer.release()
             if cap: cap.release()
-            self.logger.info("🛑 Agent thread shutting down.")
+            self.logger.info("🛑 Agent process shutting down.")
 
     def stop_agent(self):
         self._stop_event.set()
 
 # ---------------------------------------------------------
-# MAIN ORCHESTRATOR (The Launcher)
+# MAIN ORCHESTRATOR
 # ---------------------------------------------------------
 if __name__ == "__main__":
     system_logger = get_stream_logger("SYSTEM")
@@ -170,11 +185,11 @@ if __name__ == "__main__":
 
     all_agents = []
     for stream in STREAMS:
-        if stream["enabled"]:
-            agent_thread = CameraAgent(stream)
-            agent_thread.start() 
-            all_agents.append(agent_thread)
-            system_logger.info(f"📡 [MASTER] Launched Thread Worker for: {stream['name']}")
+        if stream.get("enabled", False):
+            agent_proc = CameraAgent(stream)
+            agent_proc.start() 
+            all_agents.append(agent_proc)
+            system_logger.info(f"📡 [MASTER] Launched Process Worker for: {stream['name']}")
         else:
             system_logger.info(f"⏭️ [MASTER] Skipping Disabled Stream: {stream['name']}")
 
@@ -182,17 +197,21 @@ if __name__ == "__main__":
         system_logger.error("❌ No active streams found! Exiting.")
         sys.exit(1)
 
-    system_logger.info("[MASTER] All threads running parallelly. Monitoring ACTIVE.")
+    system_logger.info("[MASTER] All processes running in parallel. Monitoring ACTIVE.")
 
     try:
         while True:
-            alive_count = sum(1 for t in all_agents if t.is_alive())
+            alive_count = sum(1 for p in all_agents if p.is_alive())
             if alive_count < len(all_agents):
-                system_logger.warning(f"⚠️ ALERT: {len(all_agents) - alive_count} camera thread(s) have died/stopped!")
+                system_logger.warning(f"⚠️ ALERT: {len(all_agents) - alive_count} camera process(es) died!")
             time.sleep(15)
     except KeyboardInterrupt:
         system_logger.info("[MASTER] Shutdown signal received.")
 
     for a in all_agents:
         a.stop_agent()
+        a.join(timeout=2)
+        if a.is_alive():
+            a.terminate() # Erzwingt Beenden, falls OpenCV hängt
+            
     system_logger.info("[MASTER] Pipeline shutdown complete.")
