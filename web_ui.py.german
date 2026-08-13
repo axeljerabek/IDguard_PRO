@@ -22,21 +22,21 @@ from config import (STREAMS, OVERRIDE_F, SETTINGS_F, ALERTS_DIR, PROJECT_ROOT,
 app = Flask(__name__)
 
 AVAILABLE_CLASSES = {
-    0: "Person", 1: "Bicycle", 2: "Car", 3: "Motorcycle", 4: "Airplane", 5: "Bus",
-    6: "Train", 7: "Truck", 8: "Boat", 9: "Traffic light", 10: "Fire hydrant", 11: "Stop sign",
-    12: "Parking meter", 13: "Bench", 14: "Bird", 15: "Cat", 16: "Dog", 17: "Horse",
-    18: "Sheep", 19: "Cow", 20: "Elephant", 21: "Bear", 22: "Zebra", 23: "Giraffe",
-    24: "Backpack", 25: "Umbrella", 26: "Handbag", 27: "Tie", 28: "Suitcase",
-    29: "Frisbee", 30: "Skis", 31: "Snowboard", 32: "Sports ball", 33: "Kite",
-    34: "Baseballschläger", 35: "Baseball glove", 36: "Skateboard", 37: "Surfboard",
-    38: "Tennis racquet", 39: "Bottle", 40: "Wine glass", 41: "Cup", 42: "Fork",
-    43: "Knife", 44: "Spoon", 45: "Bowl", 46: "Banana", 47: "Apple", 48: "Sandwich",
-    49: "Orange", 50: "Broccoli", 51: "Carrot", 52: "Hotdog", 53: "Pizza", 54: "Don: Donut",
-    55: "Cake", 56: "Chair", 57: "Couch", 58: "Potted plant", 59: "Bed", 60: "Dining table",
-    61: "Toilet", 62: "Television", 63: "Laptop", 64: "Mouse", 65: "Remote control",
-    66: "Keyboard", 67: "Mobile phone", 68: "Microwave", 69: "Oven", 70: "Toaster",
-    71: "Sink", 72: "Refrigerator", 73: "Book", 74: "Clock", 75: "Vase", 76: "Scissors",
-    77: "Teddy bear", 78: "Hair dryer", 79: "Toothbrush"
+    0: "Mensch", 1: "Fahrrad", 2: "Auto", 3: "Motorrad", 4: "Flugzeug", 5: "Bus",
+    6: "Zug", 7: "LKW", 8: "Boot", 9: "Ampel", 10: "Feuerhydrant", 11: "Stoppschild",
+    12: "Parkuhr", 13: "Bank", 14: "Vogel", 15: "Katze", 16: "Hund", 17: "Pferd",
+    18: "Schaf", 19: "Kuh", 20: "Elefant", 21: "Bär", 22: "Zebra", 23: "Giraffe",
+    24: "Rucksack", 25: "Regenschirm", 26: "Handtasche", 27: "Krawatte", 28: "Koffer",
+    29: "Frisbee", 30: "Skier", 31: "Snowboard", 32: "Sportball", 33: "Drachen",
+    34: "Baseballschläger", 35: "Baseballhandschuh", 36: "Skateboard", 37: "Surfbrett",
+    38: "Tennisschläger", 39: "Flasche", 40: "Weinglas", 41: "Tasse", 42: "Gabel",
+    43: "Messer", 44: "Löffel", 45: "Schüssel", 46: "Banane", 47: "Apfel", 48: "Sandwich",
+    49: "Orange", 50: "Brokkoli", 51: "Karotte", 52: "Hotdog", 53: "Pizza", 54: "Donut",
+    55: "Kuchen", 56: "Stuhl", 57: "Couch", 58: "Topfpflanze", 59: "Bett", 60: "Esstisch",
+    61: "Toilette", 62: "Fernseher", 63: "Laptop", 64: "Maus", 65: "Fernbedienung",
+    66: "Tastatur", 67: "Handy", 68: "Mikrowelle", 69: "Backofen", 70: "Toaster",
+    71: "Spülbecken", 72: "Kühlschrank", 73: "Buch", 74: "Uhr", 75: "Vase", 76: "Schere",
+    77: "Teddybär", 78: "Föhn", 79: "Zahnbürste"
 }
 
 # Globaler Speicher für die neuesten Frames der Streams
@@ -131,7 +131,7 @@ def dashboard():
 
     template = """
     <!DOCTYPE html>
-    <html lang="en">
+    <html lang="de">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -253,7 +253,7 @@ def dashboard():
                         <h2>
                             <i class="fa-solid fa-power-off"></i> Pipeline Control
                             <span id="pipeline-status" class="status-badge {{ 'status-active' if pipeline_active else 'status-inactive' }}">
-                                {{ 'Active' if pipeline_active else 'Inactive' }}
+                                {{ 'Aktiv' if pipeline_active else 'Inaktiv' }}
                             </span>
                         </h2>
                         <div style="display: flex; gap: 15px;">
@@ -267,7 +267,7 @@ def dashboard():
                     </div>
 
                     <div class="card">
-                        <h2><i class="fa-solid fa-video"></i> Camera Activation</h2>
+                        <h2><i class="fa-solid fa-video"></i> Kamera Aktivierung</h2>
                         <div>
                             {% for stream in streams %}
                             <div class="stream-container">
@@ -288,7 +288,7 @@ def dashboard():
                     </div>
 
                     <div class="card">
-                        <h2><i class="fa-solid fa-sliders"></i> System Settings</h2>
+                        <h2><i class="fa-solid fa-sliders"></i> System Einstellungen</h2>
                         <form action="/save_settings" method="POST">
                             <div class="settings-grid">
                                 <div class="settings-group">
@@ -303,21 +303,21 @@ def dashboard():
                                     </div>
                                 </div>
                                 <div class="settings-group">
-                                    <label>Pre-Roll (Sec)</label>
+                                    <label>Pre-Roll (Sek)</label>
                                     <input type="number" name="PRE_ROLL_SEC" value="{{ settings.PRE_ROLL_SEC }}" required>
                                 </div>
                                 <div class="settings-group">
-                                    <label>Post-Roll (Sec)</label>
+                                    <label>Post-Roll (Sek)</label>
                                     <input type="number" name="POST_ROLL_SEC" value="{{ settings.POST_ROLL_SEC }}" required>
                                 </div>
                             </div>
 
                             <div class="settings-group" style="margin-top: 15px;">
-                                <label>Object Categories (YOLOv10)</label>
+                                <label>Objekt-Kategorien (YOLOv10)</label>
                                 <div class="multiselect">
                                     <div class="selectBox" onclick="toggleCheckboxes()">
                                         <select>
-                                            <option id="category-summary">Loading categories...</option>
+                                            <option id="category-summary">Lade Kategorien...</option>
                                         </select>
                                         <div class="overSelect"></div>
                                     </div>
@@ -334,7 +334,7 @@ def dashboard():
                                 </div>
                             </div>
 
-                            <button type="submit" class="btn-save"><i class="fa-solid fa-floppy-disk"></i> Apply Settings</button>
+                            <button type="submit" class="btn-save"><i class="fa-solid fa-floppy-disk"></i> Einstellungen anwenden</button>
                         </form>
                     </div>
                 </div>
@@ -343,7 +343,7 @@ def dashboard():
                 <div>
                     <div class="card" style="height: calc(100% - 3rem);">
                         <h2>
-                            <i class="fa-solid fa-clapperboard"></i> Recent Recordings
+                            <i class="fa-solid fa-clapperboard"></i> Letzte Aufzeichnungen
                             <span id="event-count" style="background: var(--border); padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; margin-left: 10px;">{{ recent_events|length }}</span>
                         </h2>
                         <div class="event-list">
@@ -356,7 +356,7 @@ def dashboard():
                                         <span><i class="fa-solid fa-hard-drive"></i> {{ event.size }}</span>
                                     </span>
                                 </div>
-                                <form action="/delete/{{ event.filename }}" method="POST" style="margin: 0;" onsubmit="return confirm('Are you sure you want to delete this video?');">
+                                <form action="/delete/{{ event.filename }}" method="POST" style="margin: 0;" onsubmit="return confirm('Video wirklich löschen?');">
                                     <button type="submit" class="btn-delete" title="Video löschen" onclick="event.stopPropagation()">
                                         <i class="fa-solid fa-trash-can"></i>
                                     </button>
@@ -366,7 +366,7 @@ def dashboard():
                             {% if not recent_events %}
                             <div style="text-align: center; padding: 3rem 0; color: var(--text-muted);">
                                 <i class="fa-solid fa-film" style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.5;"></i>
-                                <p>No events recorded yet.</p>
+                                <p>Bisher keine Events aufgezeichnet.</p>
                             </div>
                             {% endif %}
                         </div>
@@ -411,9 +411,9 @@ def dashboard():
             function updateCategorySummary() {
                 const checkedBoxes = document.querySelectorAll('#checkboxes input[type="checkbox"]:checked');
                 const summary = document.getElementById("category-summary");
-                if (checkedBoxes.length === 0) { summary.innerText = "No classes selected"; }
-                else if (checkedBoxes.length === 1) { summary.innerText = "1 class selected"; }
-                else { summary.innerText = checkedBoxes.length + " classes selected"; }
+                if (checkedBoxes.length === 0) { summary.innerText = "Keine Klassen gewählt"; }
+                else if (checkedBoxes.length === 1) { summary.innerText = "1 Klasse ausgewählt"; }
+                else { summary.innerText = checkedBoxes.length + " Klassen ausgewählt"; }
             }
             updateCategorySummary();
 
@@ -499,18 +499,18 @@ def dashboard():
 
             function openLightbox(filename) {
                 loader.style.display = 'block';
-                statusText.innerText = 'Loading & transcoding video...';
+                statusText.innerText = 'Lade & transkodiere Video...';
                 videoSource.src = '/video/' + filename;
                 videoPlayer.load();
 
                 videoPlayer.onloadeddata = () => {
                     loader.style.display = 'none';
                     statusText.innerText = '';
-                    videoPlayer.play().catch(e => { statusText.innerText = 'Playback paused. Click play.'; });
+                    videoPlayer.play().catch(e => { statusText.innerText = 'Wiedergabe pausiert. Klicke Play.'; });
                 };
                 videoPlayer.onerror = () => {
                     loader.style.display = 'none';
-                    statusText.innerText = 'Error loading file.';
+                    statusText.innerText = 'Fehler beim Laden der Datei.';
                 };
 
                 setSpeed(1.0, document.getElementById('defaultSpeedBtn'));

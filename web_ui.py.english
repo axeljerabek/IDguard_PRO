@@ -267,7 +267,7 @@ def dashboard():
                     </div>
 
                     <div class="card">
-                        <h2><i class="fa-solid fa-video"></i> Camera Activation</h2>
+                        <h2><i class="fa-solid fa-video"></i> Kamera Activeierung</h2>
                         <div>
                             {% for stream in streams %}
                             <div class="stream-container">
