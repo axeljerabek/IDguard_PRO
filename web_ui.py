@@ -5,6 +5,9 @@ import json
 import subprocess
 import glob
 from datetime import datetime
+import threading
+import time
+import cv2
 
 # Stellt sicher, dass das Arbeitsverzeichnis und der Import-Pfad immer das Verzeichnis dieser web_ui.py ist
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -35,6 +38,36 @@ AVAILABLE_CLASSES = {
     71: "Spülbecken", 72: "Kühlschrank", 73: "Buch", 74: "Uhr", 75: "Vase", 76: "Schere",
     77: "Teddybär", 78: "Föhn", 79: "Zahnbürste"
 }
+
+# Globaler Speicher für die neuesten Frames der Streams
+LATEST_FRAMES = {}
+
+def update_thumbnails():
+    """Hintergrund-Thread: Zieht kontinuierlich 1 Frame aus den Streams in den RAM"""
+    while True:
+        for s in STREAMS:
+            url = s.get("url")  # Falls der Key in der config.py anders heißt, hier anpassen
+            name = s["name"]
+            if not url:
+                continue
+            try:
+                cap = cv2.VideoCapture(url)
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) # Puffer reduzieren für geringere Latenz
+                ret, frame = cap.read()
+                cap.release()
+                
+                if ret:
+                    # Resize reduziert Netzwerklast beim Abruf durch den Browser
+                    frame = cv2.resize(frame, (640, 360))
+                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                    if ret:
+                        LATEST_FRAMES[name] = buffer.tobytes()
+            except Exception:
+                pass
+        time.sleep(1) # Ziel-Aktualisierungsrate (~1 fps)
+
+# Starte den Thumbnail-Thread beim Start der App
+threading.Thread(target=update_thumbnails, daemon=True).start()
 
 def is_pipeline_running():
     result = subprocess.run(['pgrep', '-f', 'recorder_pipeline.py'], capture_output=True)
@@ -200,6 +233,9 @@ def dashboard():
             .loader { border: 3px solid var(--border); border-top: 3px solid var(--primary); border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; display: none; margin: 10px auto; }
             @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
             #status-text { font-size: 0.85rem; color: var(--text-muted); text-align: center; margin-top: 5px; }
+            
+            .stream-container { background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 15px; }
+            .stream-thumb { width: 100%; border-radius: 6px; aspect-ratio: 16/9; object-fit: cover; background: #000; border: 1px solid var(--border); }
         </style>
     </head>
     <body>
@@ -230,14 +266,18 @@ def dashboard():
                         <h2><i class="fa-solid fa-video"></i> Kamera Aktivierung</h2>
                         <div>
                             {% for stream in streams %}
-                            <div class="stream-item" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                <span style="font-weight: 500;">{{ stream }}</span>
-                                <form action="/toggle/{{ stream }}" method="POST" style="margin: 0;">
-                                    <label class="switch">
-                                        <input type="checkbox" onchange="this.form.submit()" {% if overrides.get(stream, 'ON') == 'ON' %}checked{% endif %}>
-                                        <span class="slider"></span>
-                                    </label>
-                                </form>
+                            <div class="stream-container">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                                    <span style="font-weight: 500;">{{ stream }}</span>
+                                    <form action="/toggle/{{ stream }}" method="POST" style="margin: 0;">
+                                        <label class="switch">
+                                            <input type="checkbox" onchange="this.form.submit()" {% if overrides.get(stream, 'ON') == 'ON' %}checked{% endif %}>
+                                            <span class="slider"></span>
+                                        </label>
+                                    </form>
+                                </div>
+                                <!-- Thumbnail Container -->
+                                <img id="thumb-{{ stream }}" class="stream-thumb" src="/thumbnail/{{ stream }}" alt="{{ stream }} Thumbnail" onerror="this.onerror=null; this.src='data:image/svg+xml,%3Csvg xmlns=\\'http://www.w3.org/2000/svg\\' viewBox=\\'0 0 16 9\\'%3E%3Crect width=\\'16\\' height=\\'9\\' fill=\\'%23111\\'/%3E%3Ctext x=\\'50%25\\' y=\\'50%25\\' dominant-baseline=\\'middle\\' text-anchor=\\'middle\\' font-family=\\'sans-serif\\' font-size=\\'1\\' fill=\\'%23555\\'%3ENo Signal%3C/text%3E%3C/svg%3E';">
                             </div>
                             {% endfor %}
                         </div>
@@ -372,8 +412,19 @@ def dashboard():
                 }
             });
 
-            // --- Auto-Refresh (Hintergrund-Update) ---
-            function autoRefresh() {
+            // --- Thumbnail Auto-Refresh ---
+            setInterval(() => {
+                const streams = {{ streams | tojson }};
+                streams.forEach(stream => {
+                    const img = document.getElementById('thumb-' + stream);
+                    if (img) {
+                        img.src = '/thumbnail/' + stream + '?t=' + new Date().getTime();
+                    }
+                });
+            }, 1000); // 1 fps
+
+            // --- DOM Auto-Refresh (Hintergrund-Update) ---
+            function autoRefreshDOM() {
                 fetch(window.location.href)
                     .then(response => response.text())
                     .then(html => {
@@ -403,8 +454,7 @@ def dashboard():
                     })
                     .catch(err => console.error('Refresh fehlgeschlagen:', err));
             }
-            // Alle 10 Sekunden automatisch aktualisieren
-            setInterval(autoRefresh, 10000);
+            setInterval(autoRefreshDOM, 10000);
 
             // --- Lightbox-Logik ---
             const lightbox = document.getElementById('lightbox'),
@@ -455,6 +505,13 @@ def dashboard():
     </html>
     """
     return render_template_string(template, streams=streams, overrides=overrides, settings=settings, available_classes=AVAILABLE_CLASSES, recent_events=recent_events, pipeline_active=pipeline_active)
+
+@app.route('/thumbnail/<stream_name>')
+def get_thumbnail(stream_name):
+    # Liefere das aktuellste Bild direkt aus dem Arbeitsspeicher
+    if stream_name in LATEST_FRAMES:
+        return Response(LATEST_FRAMES[stream_name], mimetype='image/jpeg')
+    return Response("", status=204) # NoContent
 
 @app.route('/start', methods=['POST'])
 def start_pipeline():

@@ -1,6 +1,7 @@
 import os
 import logging
 import json
+import urllib.request
 
 # ==============================================================================
 # IDENTITY-GUARD PRO - PRODUCTION CONFIGURATION (PORTABLE & STABLE)
@@ -16,12 +17,22 @@ MODEL_PATH      = os.path.join(PROJECT_ROOT, "yolov10n.pt")
 OVERRIDE_F      = os.path.join(PROJECT_ROOT, "stream_overrides.json")
 SETTINGS_F      = os.path.join(PROJECT_ROOT, "pipeline_settings.json")
 
+# AUTO-DOWNLOAD: Falls das YOLOv10-Modell im Projektordner fehlt
+if not os.path.exists(MODEL_PATH):
+    YOLO_URL = "https://github.com/THU-MIG/yolov10/releases/download/v1.1/yolov10n.pt"
+    print(f"📥 Modell 'yolov10n.pt' nicht gefunden. Lade herunter...")
+    try:
+        urllib.request.urlretrieve(YOLO_URL, MODEL_PATH)
+        print("✅ YOLO-Modell erfolgreich heruntergeladen.")
+    except Exception as e:
+        print(f"❌ Fehler beim automatischen Download des YOLO-Modells: {e}")
+
 # Stream Configuration Base
 STREAMS = [
-    {"name": "Entrance", "url":  "rtmp://172.168.178.25/cam1/test", "enabled": True, "type": "VIDEO"},
-    {"name": "Garden",  "url":  "rtmp://172.168.178.25/cam2/test", "enabled": True, "type": "VIDEO"},
-    {"name": "Cardock",   "url":  "rtmp://172.168.178.25/cam3/test", "enabled": True, "type": "VIDEO"},
-    {"name": "Backyard",   "url":  "rtmp://172.168.178.25/cam4/test", "enabled": True, "type": "VIDEO"}
+    {"name": "Entrance", "url":  "rtmp://172.16.10.10/pi/test", "enabled": True, "type": "VIDEO"},
+    {"name": "Carport",  "url":  "rtmp://172.16.10.10/zero/test", "enabled": True, "type": "VIDEO"},
+    {"name": "Backdoor",   "url":  "rtmp://172.16.10.10/mevo/test", "enabled": True, "type": "VIDEO"},
+    {"name": "Garden",   "url":  "rtmp://172.16.10.10/zero2/test", "enabled": True, "type": "VIDEO"}
 ]
 
 # Web-UI Stream Overrides anwenden
