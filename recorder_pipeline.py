@@ -84,7 +84,6 @@ class CameraAgent(multiprocessing.Process):
             self.logger.warning("⚠️ No valid YOLO path found; running in VISION-ONLY mode.")
 
         # Gemeinsamer Pre-Roll Puffer für Video und Audio (chronologisch sortiert)
-        # Bsp: ca. (FPS + 50 Audio-Pakete) * PRE_ROLL_SEC
         max_buffer_items = int((TARGET_FPS + 50) * PRE_ROLL_SEC)
         av_buffer = deque(maxlen=max_buffer_items)
 
@@ -116,6 +115,7 @@ class CameraAgent(multiprocessing.Process):
                     out_audio = None
                     resampler = None
                     video_frame_count = 0
+                    av_buffer.clear()
 
         def encode_video_frame(img_bgr):
             nonlocal video_frame_count
@@ -136,7 +136,6 @@ class CameraAgent(multiprocessing.Process):
             if not out_container or not out_audio:
                 return
             try:
-                # Resampler initialisieren, falls Audio-Layout/Sample-Rate angepasst werden muss
                 if resampler is None:
                     resampler = av.AudioResampler(
                         format=out_audio.format.name,
@@ -224,6 +223,8 @@ class CameraAgent(multiprocessing.Process):
                                             audio_in_stream = next((s for s in container.streams if s.type == 'audio'), None)
                                             if audio_in_stream:
                                                 out_audio = out_container.add_stream('aac')
+                                                out_audio.rate = audio_in_stream.rate if audio_in_stream.rate else 44100
+                                                out_audio.layout = audio_in_stream.layout.name if audio_in_stream.layout else 'stereo'
 
                                             # Synchronen A/V Pre-Roll rausschreiben
                                             for item in av_buffer:
