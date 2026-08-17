@@ -8,6 +8,7 @@ from datetime import datetime
 import threading
 import time
 import cv2
+from functools import wraps
 
 # Stellt sicher, dass das Arbeitsverzeichnis und der Import-Pfad immer das Verzeichnis dieser web_ui.py ist
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -39,6 +40,26 @@ AVAILABLE_CLASSES = {
     77: "Teddy bear", 78: "Hair dryer", 79: "Toothbrush"
 }
 
+# --- HTTP Basic Auth Setup ---
+def check_auth(username, password):
+    return username == 'admin' and password == 'changethispasswd12'
+
+def authenticate():
+    return Response(
+        'Zugriff verweigert. Bitte Zugangsdaten eingeben.\n', 401,
+        {'WWW-Authenticate': 'Basic realm="IDguard PRO Login"'}
+    )
+
+def requires_auth(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        if not auth or not check_auth(auth.username, auth.password):
+            return authenticate()
+        return f(*args, **kwargs)
+    return decorated
+# -----------------------------
+
 # Globaler Speicher für die neuesten Frames der Streams
 LATEST_FRAMES = {}
 
@@ -55,7 +76,7 @@ def update_thumbnails():
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) # Puffer reduzieren für geringere Latenz
                 ret, frame = cap.read()
                 cap.release()
-                
+
                 if ret:
                     # Resize reduziert Netzwerklast beim Abruf durch den Browser
                     frame = cv2.resize(frame, (640, 360))
@@ -107,6 +128,7 @@ def format_size(size_bytes):
     return f"{size_bytes / (1024 * 1024):.1f} MB"
 
 @app.route('/')
+@requires_auth
 def dashboard():
     overrides = load_overrides()
     settings = load_settings()
@@ -134,7 +156,7 @@ def dashboard():
     <html lang="en">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
         <title>IDguard PRO</title>
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -160,7 +182,6 @@ def dashboard():
             .status-inactive { background: var(--border); color: var(--text-muted); }
 
             .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
-            @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
 
             .card {
                 background: var(--surface); backdrop-filter: blur(10px); border-radius: 12px;
@@ -211,8 +232,8 @@ def dashboard():
             .event-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: rgba(255,255,255,0.02); margin-bottom: 8px; border-radius: 8px; border: 1px solid var(--border); transition: all 0.2s; cursor: pointer; }
             .event-item:hover { background: var(--surface-hover); border-color: var(--primary); transform: translateX(2px); }
             .event-info { display: flex; flex-direction: column; gap: 4px; }
-            .event-name { font-weight: 500; font-size: 0.95rem; color: var(--primary); }
-            .event-meta { color: var(--text-muted); font-size: 0.8rem; display: flex; gap: 10px; }
+            .event-name { font-weight: 500; font-size: 0.95rem; color: var(--primary); word-break: break-all; }
+            .event-meta { color: var(--text-muted); font-size: 0.8rem; display: flex; gap: 10px; flex-wrap: wrap; }
 
             ::-webkit-scrollbar { width: 6px; }
             ::-webkit-scrollbar-track { background: transparent; }
@@ -221,25 +242,36 @@ def dashboard():
 
             .lightbox { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); backdrop-filter: blur(5px); justify-content: center; align-items: center; flex-direction: column; opacity: 0; transition: opacity 0.3s ease; }
             .lightbox.active { display: flex; opacity: 1; }
-            .lightbox-content { position: relative; max-width: 90%; max-height: 85%; width: 1000px; transform: scale(0.95); transition: transform 0.3s ease; }
+            .lightbox-content { position: relative; max-width: 95%; max-height: 85%; width: 1000px; transform: scale(0.95); transition: transform 0.3s ease; }
             .lightbox.active .lightbox-content { transform: scale(1); }
-            
-            /* Für das Live-Bild und die Videos in der Lightbox */
+
             video, #live-image-view { width: 100%; border-radius: 10px; background: #000; box-shadow: 0 10px 40px rgba(0,0,0,0.5); border: 1px solid var(--border); }
-            
+
             .close-btn { position: absolute; top: -40px; right: 0; color: white; font-size: 28px; cursor: pointer; transition: color 0.2s; }
             .close-btn:hover { color: var(--danger); }
-            .player-controls { display: flex; gap: 8px; justify-content: center; margin-top: 15px; }
+            .player-controls { display: flex; gap: 8px; justify-content: center; margin-top: 15px; flex-wrap: wrap; }
             .player-controls button { background: var(--input-bg); color: var(--text); border: 1px solid var(--border); border-radius: 20px; padding: 6px 16px; font-size: 0.85rem; }
             .player-controls button.active { background: var(--primary); color: white; border-color: var(--primary); }
 
             .loader { border: 3px solid var(--border); border-top: 3px solid var(--primary); border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; display: none; margin: 10px auto; }
             @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
             #status-text { font-size: 0.85rem; color: var(--text-muted); text-align: center; margin-top: 5px; }
-            
+
             .stream-container { background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 15px; }
             .stream-thumb { width: 100%; border-radius: 6px; aspect-ratio: 16/9; object-fit: cover; background: #000; border: 1px solid var(--border); cursor: pointer; transition: filter 0.2s; }
             .stream-thumb:hover { filter: brightness(1.2); }
+
+            /* Mobile Anpassungen */
+            @media (max-width: 900px) { 
+                body { padding: 1rem; }
+                .grid { grid-template-columns: 1fr; gap: 1rem; } 
+                h1 { font-size: 1.5rem; margin-bottom: 1rem; }
+                .card { padding: 1rem; height: auto !important; }
+                .settings-grid { grid-template-columns: 1fr; gap: 10px; }
+                .lightbox-content { width: 100%; }
+                .event-list { max-height: 400px; }
+                .close-btn { right: 10px; z-index: 1001; }
+            }
         </style>
     </head>
     <body>
@@ -379,7 +411,7 @@ def dashboard():
         <div id="lightbox" class="lightbox" onclick="closeLightbox(event)">
             <div class="lightbox-content" onclick="event.stopPropagation()">
                 <span class="close-btn" onclick="closeLightbox(event)"><i class="fa-solid fa-xmark"></i></span>
-                <video id="videoPlayer" controls muted><source id="videoSource" src="" type="video/mp4"></video>
+                <video id="videoPlayer" playsinline controls muted><source id="videoSource" src="" type="video/mp4"></video>
                 <div id="loader" class="loader"></div>
                 <div id="status-text"></div>
                 <div class="player-controls">
@@ -444,7 +476,7 @@ def dashboard():
             function openLiveView(streamName) {
                 liveLightbox.classList.add('active');
                 liveImageView.src = '/thumbnail/' + streamName + '?t=' + new Date().getTime();
-                
+
                 liveInterval = setInterval(() => {
                     liveImageView.src = '/thumbnail/' + streamName + '?t=' + new Date().getTime();
                 }, 250); // 4 FPS Refresh-Rate
@@ -543,6 +575,7 @@ def dashboard():
     return render_template_string(template, streams=streams, overrides=overrides, settings=settings, available_classes=AVAILABLE_CLASSES, recent_events=recent_events, pipeline_active=pipeline_active)
 
 @app.route('/thumbnail/<stream_name>')
+@requires_auth
 def get_thumbnail(stream_name):
     # Liefere das aktuellste Bild direkt aus dem Arbeitsspeicher
     if stream_name in LATEST_FRAMES:
@@ -550,6 +583,7 @@ def get_thumbnail(stream_name):
     return Response("", status=204) # NoContent
 
 @app.route('/start', methods=['POST'])
+@requires_auth
 def start_pipeline():
     subprocess.Popen(
         ['/bin/bash', os.path.join(PROJECT_ROOT, 'start_detached.sh')],
@@ -560,6 +594,7 @@ def start_pipeline():
     return redirect(url_for('dashboard'))
 
 @app.route('/stop', methods=['POST'])
+@requires_auth
 def stop_pipeline():
     subprocess.run(
         ['/bin/bash', os.path.join(PROJECT_ROOT, 'stop.sh')],
@@ -568,6 +603,7 @@ def stop_pipeline():
     return redirect(url_for('dashboard'))
 
 @app.route('/toggle/<name>', methods=['POST'])
+@requires_auth
 def toggle_stream(name):
     overrides = load_overrides()
     overrides[name] = 'ON' if overrides.get(name, 'OFF') == 'OFF' else 'OFF'
@@ -575,6 +611,7 @@ def toggle_stream(name):
     return redirect(url_for('dashboard'))
 
 @app.route('/save_settings', methods=['POST'])
+@requires_auth
 def save_pipeline_settings():
     settings = {
         "TARGET_FPS": int(request.form.get('TARGET_FPS', 30)),
@@ -588,6 +625,7 @@ def save_pipeline_settings():
     return redirect(url_for('dashboard'))
 
 @app.route('/delete/<filename>', methods=['POST'])
+@requires_auth
 def delete_video(filename):
     file_path = os.path.abspath(os.path.join(ALERTS_DIR, filename))
     if file_path.startswith(os.path.abspath(ALERTS_DIR)) and os.path.exists(file_path):
@@ -598,6 +636,7 @@ def delete_video(filename):
     return redirect(url_for('dashboard'))
 
 @app.route('/video/<filename>')
+@requires_auth
 def serve_annot_video(filename):
     input_file = os.path.join(ALERTS_DIR, filename)
     if not os.path.exists(input_file): return f"File not found: {filename}", 404
