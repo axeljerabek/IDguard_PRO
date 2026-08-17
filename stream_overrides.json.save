@@ -1,0 +1,8 @@
+{
+    "Entrance": "ON",
+    "Bedroom": "ON",
+    "Livingroom": "OFF",
+    "Diningroom": "OFF",
+    "Living": "OFF",
+    "Dining": "OFF"
+}
