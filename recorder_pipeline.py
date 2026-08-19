@@ -4,6 +4,7 @@ import time
 import datetime
 import multiprocessing
 from collections import deque
+from fractions import Fraction
 
 # CPU-Thread-Wildwuchs von PyTorch/OpenBLAS global drosseln
 os.environ["OMP_NUM_THREADS"] = "2"
@@ -56,11 +57,11 @@ class CameraAgent(multiprocessing.Process):
         try:
             import av
             import torch
-            
+
             # Umgeht den cuDNN Sublibrary Mismatch. CUDA läuft voll weiter!
             torch.backends.cudnn.enabled = False
             torch.set_num_threads(2)
-            
+
             from ultralytics import YOLO
         except ImportError as e:
             self.logger.error(f"❌ Dependency Error in {self.name}: {e}")
@@ -69,7 +70,7 @@ class CameraAgent(multiprocessing.Process):
         # 1. Initialize AI Engine (YOLO) auf CUDA GPU
         detector = None
         device_target = "cuda:0" if torch.cuda.is_available() else "cpu"
-        
+
         if os.path.exists(MODEL_PATH) and MODEL_PATH:
             try:
                 detector = YOLO(MODEL_PATH)
@@ -100,12 +101,24 @@ class CameraAgent(multiprocessing.Process):
             nonlocal out_container, out_video, out_audio, resampler, video_frame_count
             if out_container:
                 try:
+                    # Flush Resampler zuerst
+                    if out_audio and resampler:
+                        try:
+                            for rf in resampler.resample(None):
+                                rf.pts = None
+                                for packet in out_audio.encode(rf):
+                                    out_container.mux(packet)
+                        except Exception as e:
+                            self.logger.warning(f"⚠️ Audio resampler flush error: {e}")
+
+                    # Flush Encoders
                     if out_video:
                         for packet in out_video.encode(None):
                             out_container.mux(packet)
                     if out_audio:
                         for packet in out_audio.encode(None):
                             out_container.mux(packet)
+                            
                     out_container.close()
                 except Exception as e:
                     self.logger.error(f"❌ Error closing output file: {e}")
@@ -125,7 +138,7 @@ class CameraAgent(multiprocessing.Process):
                 av_frame = av.VideoFrame.from_ndarray(img_bgr, format="bgr24")
                 av_frame.pts = video_frame_count
                 video_frame_count += 1
-                
+
                 for packet in out_video.encode(av_frame):
                     out_container.mux(packet)
             except Exception as e:
@@ -142,7 +155,7 @@ class CameraAgent(multiprocessing.Process):
                         layout=out_audio.layout.name,
                         rate=out_audio.rate
                     )
-                
+
                 resampled_frames = resampler.resample(a_frame)
                 for rf in resampled_frames:
                     rf.pts = None
@@ -200,13 +213,14 @@ class CameraAgent(multiprocessing.Process):
                                     if person_detected:
                                         state = "RECORDING"
                                         ts_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                                        os.makedirs(ALERTS_DIR, exist_ok=True) # <-- KORRIGIERT: Verzeichnis erstellen
                                         video_file_path = os.path.join(ALERTS_DIR, f"{self.name}_EVENT_{ts_str}.mp4")
                                         self.logger.warning("🚨 [DETECTED] Person found! Starting recording (NVENC + Audio).")
 
                                         h, w = img_bgr.shape[:2]
                                         try:
                                             out_container = av.open(video_file_path, mode='w')
-                                            
+
                                             # NVENC mit Libx264 Fallback
                                             try:
                                                 out_video = out_container.add_stream('h264_nvenc', rate=TARGET_FPS)
@@ -217,7 +231,7 @@ class CameraAgent(multiprocessing.Process):
                                             out_video.width = w
                                             out_video.height = h
                                             out_video.pix_fmt = 'yuv420p'
-                                            out_video.time_base = av.Rational(1, TARGET_FPS)
+                                            out_video.time_base = Fraction(1, TARGET_FPS) # <-- KORRIGIERT
 
                                             # Audio Stream aus RTMP einrichten (falls vorhanden)
                                             audio_in_stream = next((s for s in container.streams if s.type == 'audio'), None)
