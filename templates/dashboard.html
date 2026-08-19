@@ -57,8 +57,8 @@
         .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
         .settings-group { display: flex; flex-direction: column; }
         .settings-group label { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 6px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
-        .settings-group input { padding: 10px; background: var(--input-bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px; font-size: 0.95rem; font-family: 'Inter', sans-serif; }
-        .settings-group input:focus { border-color: var(--primary); outline: none; box-shadow: 0 0 0 2px rgba(47, 129, 247, 0.2); }
+        .settings-group input, .settings-group select { padding: 10px; background: var(--input-bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px; font-size: 0.95rem; font-family: 'Inter', sans-serif; }
+        .settings-group input:focus, .settings-group select:focus { border-color: var(--primary); outline: none; box-shadow: 0 0 0 2px rgba(47, 129, 247, 0.2); }
 
         .range-wrap { display: flex; align-items: center; gap: 10px; }
         .range-wrap input[type=range] { flex: 1; -webkit-appearance: none; background: transparent; padding: 0; border: none; }
@@ -107,9 +107,9 @@
         .stream-thumb { width: 100%; border-radius: 6px; aspect-ratio: 16/9; object-fit: cover; background: #000; border: 1px solid var(--border); cursor: pointer; transition: filter 0.2s; }
         .stream-thumb:hover { filter: brightness(1.2); }
 
-        @media (max-width: 900px) { 
+        @media (max-width: 900px) {
             body { padding: 1rem; }
-            .grid { grid-template-columns: 1fr; gap: 1rem; } 
+            .grid { grid-template-columns: 1fr; gap: 1rem; }
             h1 { font-size: 1.5rem; margin-bottom: 1rem; }
             .card { padding: 1rem; height: auto !important; }
             .settings-grid { grid-template-columns: 1fr; gap: 10px; }
@@ -168,6 +168,24 @@
                     <form action="/save_settings" method="POST">
                         <div class="settings-grid">
                             <div class="settings-group">
+                                <label>YOLO Version</label>
+                                <select name="YOLO_VERSION">
+                                    <option value="v10" {% if settings.get('YOLO_VERSION', 'v10') == 'v10' %}selected{% endif %}>YOLOv10</option>
+                                    <option value="v12" {% if settings.get('YOLO_VERSION') == 'v12' %}selected{% endif %}>YOLOv12</option>
+                                </select>
+                            </div>
+                            <div class="settings-group">
+                                <label>Model Size</label>
+                                <select name="MODEL_SIZE">
+                                    <option value="n" {% if settings.get('MODEL_SIZE') == 'n' %}selected{% endif %}>Nano (n)</option>
+                                    <option value="s" {% if settings.get('MODEL_SIZE') == 's' %}selected{% endif %}>Small (s)</option>
+                                    <option value="m" {% if settings.get('MODEL_SIZE') == 'm' %}selected{% endif %}>Medium (m)</option>
+                                    <option value="b" {% if settings.get('MODEL_SIZE') == 'b' %}selected{% endif %}>Big (b - nur v10)</option>
+                                    <option value="l" {% if settings.get('MODEL_SIZE') == 'l' %}selected{% endif %}>Large (l)</option>
+                                    <option value="x" {% if settings.get('MODEL_SIZE', 'x') == 'x' %}selected{% endif %}>Extra Large (x - RTX 5090)</option>
+                                </select>
+                            </div>
+                            <div class="settings-group">
                                 <label>Target FPS</label>
                                 <input type="number" name="TARGET_FPS" value="{{ settings.TARGET_FPS }}" required>
                             </div>
@@ -189,7 +207,7 @@
                         </div>
 
                         <div class="settings-group" style="margin-top: 15px;">
-                            <label>Object Categories (YOLOv10)</label>
+                            <label>Object Categories</label>
                             <div class="multiselect">
                                 <div class="selectBox" onclick="toggleCheckboxes()">
                                     <select>

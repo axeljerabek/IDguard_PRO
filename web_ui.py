@@ -3,6 +3,7 @@ import os
 import sys
 import glob
 import subprocess
+import json
 from datetime import datetime
 
 # Stellt sicher, dass das Arbeitsverzeichnis und der Import-Pfad passen
@@ -114,20 +115,23 @@ def toggle_stream(name):
 @requires_auth
 def save_pipeline_settings():
     settings = {
+        "YOLO_VERSION": request.form.get('YOLO_VERSION', 'v12'),
+        "MODEL_SIZE": request.form.get('MODEL_SIZE', 'x'),
         "TARGET_FPS": int(request.form.get('TARGET_FPS', 30)),
         "CONFIDENCE_THRESHOLD": float(request.form.get('CONFIDENCE_THRESHOLD', 0.5)),
         "PRE_ROLL_SEC": int(request.form.get('PRE_ROLL_SEC', 10)),
         "POST_ROLL_SEC": int(request.form.get('POST_ROLL_SEC', 30)),
         "DETECTION_CLASSES": [int(x) for x in request.form.getlist('DETECTION_CLASSES')] or [0]
     }
+
     with open(SETTINGS_F, 'w') as f:
-        import json
         json.dump(settings, f, indent=4)
+
     return redirect(url_for('dashboard'))
 
 @app.route('/delete/<filename>', methods=['POST'])
 @requires_auth
-def delete_video(filename):
+def delete_video(filename: str):
     file_path = os.path.abspath(os.path.join(ALERTS_DIR, filename))
     if file_path.startswith(os.path.abspath(ALERTS_DIR)) and os.path.exists(file_path):
         try:
@@ -140,20 +144,20 @@ def delete_video(filename):
 @requires_auth
 def serve_annot_video(filename):
     input_file = os.path.join(ALERTS_DIR, filename)
-    if not os.path.exists(input_file): 
+    if not os.path.exists(input_file):
         return f"File not found: {filename}", 404
 
     def generate():
         process = subprocess.Popen(
-            ['ffmpeg', '-i', input_file, '-c:v', 'libx264', '-preset', 'ultrafast', 
-             '-tune', 'zerolatency', '-crf', '28', '-c:a', 'mp3', '-f', 'mp4', 
+            ['ffmpeg', '-i', input_file, '-c:v', 'libx264', '-preset', 'ultrafast',
+             '-tune', 'zerolatency', '-crf', '28', '-c:a', 'mp3', '-f', 'mp4',
              '-movflags', 'frag_keyframe+empty_moov', 'pipe:1'],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=-1
         )
         try:
             while True:
                 chunk = process.stdout.read(8192)
-                if not chunk: 
+                if not chunk:
                     break
                 yield chunk
         except Exception:

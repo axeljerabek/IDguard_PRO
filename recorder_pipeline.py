@@ -22,7 +22,7 @@ try:
         STREAMS, ALERTS_DIR, MODEL_PATH, PRE_ROLL_SEC,
         POST_ROLL_SEC, TARGET_FPS, DETECTION_CLASSES,
         get_stream_log_function as get_stream_logger,
-        system_logger
+        system_logger, YOLO_VERSION  # Neu: Erwartet YOLO_VERSION in config
     )
 except ImportError:
     try:
@@ -46,13 +46,14 @@ class CameraAgent(multiprocessing.Process):
     def run(self):
         """The primary execution loop for each camera process using PyAV and CUDA GPU."""
         try:
-            from config import get_stream_logger as gs
+            from config import get_stream_logger as gs, YOLO_VERSION
             self.logger = gs(self.name)
         except:
             import logging
             self.logger = logging.getLogger(self.name)
+            YOLO_VERSION = "v10" # Fallback
 
-        print(f"🚀 [Process Start] Initializing agent: {self.name}")
+        print(f"🚀 [Process Start] Initializing agent: {self.name} (Using YOLO {YOLO_VERSION})")
 
         try:
             import av
@@ -67,20 +68,21 @@ class CameraAgent(multiprocessing.Process):
             self.logger.error(f"❌ Dependency Error in {self.name}: {e}")
             return
 
-        # 1. Initialize AI Engine (YOLO) auf CUDA GPU
+        # 1. Initialize AI Engine (YOLO v10 or v12) auf CUDA GPU
         detector = None
         device_target = "cuda:0" if torch.cuda.is_available() else "cpu"
 
         if os.path.exists(MODEL_PATH) and MODEL_PATH:
             try:
+                # YOLOv10/v12 laden
                 detector = YOLO(MODEL_PATH)
                 if device_target == "cuda:0":
                     detector.to("cuda:0")
-                    self.logger.info(f"✅ AI Model loaded successfully on CUDA GPU ({torch.cuda.get_device_name(0)}).")
+                    self.logger.info(f"✅ AI Model (YOLO {YOLO_VERSION}) loaded successfully on CUDA GPU ({torch.cuda.get_device_name(0)}).")
                 else:
                     self.logger.warning("⚠️ CUDA not available, falling back to CPU.")
             except Exception as e:
-                self.logger.error(f"❌ Failed to load model on CUDA: {e}")
+                self.logger.error(f"❌ Failed to load model ({YOLO_VERSION}) on CUDA: {e}")
         else:
             self.logger.warning("⚠️ No valid YOLO path found; running in VISION-ONLY mode.")
 
@@ -118,7 +120,7 @@ class CameraAgent(multiprocessing.Process):
                     if out_audio:
                         for packet in out_audio.encode(None):
                             out_container.mux(packet)
-                            
+
                     out_container.close()
                 except Exception as e:
                     self.logger.error(f"❌ Error closing output file: {e}")
@@ -213,9 +215,9 @@ class CameraAgent(multiprocessing.Process):
                                     if person_detected:
                                         state = "RECORDING"
                                         ts_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                                        os.makedirs(ALERTS_DIR, exist_ok=True) # <-- KORRIGIERT: Verzeichnis erstellen
+                                        os.makedirs(ALERTS_DIR, exist_ok=True)
                                         video_file_path = os.path.join(ALERTS_DIR, f"{self.name}_EVENT_{ts_str}.mp4")
-                                        self.logger.warning("🚨 [DETECTED] Person found! Starting recording (NVENC + Audio).")
+                                        self.logger.warning(f"🚨 [DETECTED] Person found! Starting recording (YOLO {YOLO_VERSION}, NVENC + Audio).")
 
                                         h, w = img_bgr.shape[:2]
                                         try:
@@ -231,7 +233,7 @@ class CameraAgent(multiprocessing.Process):
                                             out_video.width = w
                                             out_video.height = h
                                             out_video.pix_fmt = 'yuv420p'
-                                            out_video.time_base = Fraction(1, TARGET_FPS) # <-- KORRIGIERT
+                                            out_video.time_base = Fraction(1, TARGET_FPS)
 
                                             # Audio Stream aus RTMP einrichten (falls vorhanden)
                                             audio_in_stream = next((s for s in container.streams if s.type == 'audio'), None)
