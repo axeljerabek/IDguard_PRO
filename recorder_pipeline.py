@@ -20,17 +20,12 @@ sys.path.append(DIR)
 try:
     from config import (
         STREAMS, ALERTS_DIR, MODEL_PATH, PRE_ROLL_SEC,
-        POST_ROLL_SEC, TARGET_FPS, DETECTION_CLASSES,
-        get_stream_log_function as get_stream_logger,
-        system_logger, YOLO_VERSION  # Neu: Erwartet YOLO_VERSION in config
+        POST_ROLL_SEC, TARGET_FPS, DETECTION_CLASSES, CONFIDENCE_THRESHOLD,
+        get_stream_logger, system_logger, YOLO_VERSION
     )
-except ImportError:
-    try:
-        from config import get_stream_logger, system_logger
-    except:
-        print("❌ CRITICAL ERROR: Could not load config.py")
-        sys.exit(1)
-
+except ImportError as e:
+    print(f"❌ CRITICAL ERROR: Could not load config.py: {e}")
+    sys.exit(1)
 
 # 2. Class Definition for the Camera Agent
 class CameraAgent(multiprocessing.Process):
@@ -74,7 +69,6 @@ class CameraAgent(multiprocessing.Process):
 
         if os.path.exists(MODEL_PATH) and MODEL_PATH:
             try:
-                # YOLOv10/v12 laden
                 detector = YOLO(MODEL_PATH)
                 if device_target == "cuda:0":
                     detector.to("cuda:0")
@@ -175,7 +169,6 @@ class CameraAgent(multiprocessing.Process):
 
         try:
             while not self._stop_event.is_set():
-                # --- VERBINDUNGSAUFBAU VIA PYAV ---
                 if container is None:
                     self.logger.info(f"🔗 Attempting connection to RTMP: {self.url}")
                     try:
@@ -190,7 +183,6 @@ class CameraAgent(multiprocessing.Process):
                         time.sleep(5)
                         continue
 
-                # --- DEMUXING & FRAME PROCESSING ---
                 try:
                     for packet in container.demux():
                         if self._stop_event.is_set():
@@ -201,16 +193,14 @@ class CameraAgent(multiprocessing.Process):
                             for frame in packet.decode():
                                 img_bgr = frame.to_ndarray(format='bgr24')
 
-                                # 1. Pre-Roll Puffer (chronologisch)
                                 av_buffer.append(("video", img_bgr.copy()))
 
-                                # 2. YOLO Detection auf GPU (CUDA)
                                 person_detected = False
                                 if detector:
-                                    results = detector(img_bgr, verbose=False, classes=DETECTION_CLASSES, device=device_target)
+                                    # HIER wird die CONFIDENCE_THRESHOLD direkt genutzt
+                                    results = detector(img_bgr, verbose=False, classes=DETECTION_CLASSES, conf=CONFIDENCE_THRESHOLD, device=device_target)
                                     person_detected = len(results[0].boxes) > 0
 
-                                # 3. STATE MACHINE
                                 if state == "IDLE":
                                     if person_detected:
                                         state = "RECORDING"
@@ -223,7 +213,6 @@ class CameraAgent(multiprocessing.Process):
                                         try:
                                             out_container = av.open(video_file_path, mode='w')
 
-                                            # NVENC mit Libx264 Fallback
                                             try:
                                                 out_video = out_container.add_stream('h264_nvenc', rate=TARGET_FPS)
                                             except Exception:
@@ -235,14 +224,12 @@ class CameraAgent(multiprocessing.Process):
                                             out_video.pix_fmt = 'yuv420p'
                                             out_video.time_base = Fraction(1, TARGET_FPS)
 
-                                            # Audio Stream aus RTMP einrichten (falls vorhanden)
                                             audio_in_stream = next((s for s in container.streams if s.type == 'audio'), None)
                                             if audio_in_stream:
                                                 out_audio = out_container.add_stream('aac')
                                                 out_audio.rate = audio_in_stream.rate if audio_in_stream.rate else 44100
                                                 out_audio.layout = audio_in_stream.layout.name if audio_in_stream.layout else 'stereo'
 
-                                            # Synchronen A/V Pre-Roll rausschreiben
                                             for item in av_buffer:
                                                 write_buffered_item(item)
 
