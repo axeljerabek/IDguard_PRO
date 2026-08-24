@@ -45,24 +45,19 @@ start_thumbnail_thread()
 
 def get_detailed_system_status():
     """Ermittelt Modell, VRAM, RAM, CPU und GPU passend für das Dashboard-JS"""
-    active_version = YOLO_VERSION
-    active_size = MODEL_SIZE
-    active_filename = MODEL_FILENAME
+    # Settings zentral über helpers.load_settings() laden (inkl. Fallbacks auf config.py)
+    settings = load_settings()
+    active_version = settings.get('YOLO_VERSION', YOLO_VERSION)
+    active_size = settings.get('MODEL_SIZE', MODEL_SIZE)
 
-    if os.path.exists(SETTINGS_F):
-        try:
-            with open(SETTINGS_F, 'r') as f:
-                sett = json.load(f)
-                active_version = sett.get('YOLO_VERSION', active_version)
-                active_size = sett.get('MODEL_SIZE', active_size)
-                if active_version == "v26":
-                    active_filename = f"yolo26{active_size}.pt"
-                elif active_version == "v12":
-                    active_filename = f"yolo12{active_size}.pt"
-                else:
-                    active_filename = f"yolov10{active_size}.pt"
-        except Exception:
-            pass
+    if active_version == "v26":
+        active_filename = f"yolo26{active_size}.pt"
+    elif active_version == "v12":
+        active_filename = f"yolo12{active_size}.pt"
+    else:
+        active_filename = f"yolov10{active_size}.pt"
+
+    formatted_model_name = f"YOLO {active_version} ({active_size})"
 
     # Gesamtes System (CPU & RAM via psutil)
     cpu_percent = psutil.cpu_percent(interval=None)
@@ -105,7 +100,7 @@ def get_detailed_system_status():
     except Exception:
         pass
 
-    # Worker-Prozesse ermitteln
+    # Worker-Prozesse ermitteln (inklusive des robusten CPU-Zeit-Filters)
     enabled_streams = [s["name"] for s in STREAMS if s.get("enabled", False)]
     worker_procs = []
     for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'memory_info', 'create_time']):
@@ -114,7 +109,8 @@ def get_detailed_system_status():
             if cmdline:
                 cmd_str = " ".join(cmdline)
                 if 'recorder_pipeline.py' in cmd_str and 'forkserver' in cmd_str:
-                    worker_procs.append(proc)
+                    if proc.cpu_times().user + proc.cpu_times().system > 0.5:
+                        worker_procs.append(proc)
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
 
@@ -123,7 +119,11 @@ def get_detailed_system_status():
 
     for idx, proc in enumerate(worker_procs):
         try:
-            stream_name = enabled_streams[idx] if idx < len(enabled_streams) else f"Worker #{idx + 1}"
+            if idx < len(enabled_streams):
+                stream_name = enabled_streams[idx]
+            else:
+                stream_name = f"Worker #{idx + 1}"
+
             cpu = proc.cpu_percent(interval=None)
             mem = round(proc.memory_info().rss / (1024 ** 2), 1)
 
@@ -160,6 +160,8 @@ def get_detailed_system_status():
         'model_version': active_version,
         'model_size': active_size,
         'model_filename': active_filename,
+        'yolo_version': active_version,
+        'active_model': formatted_model_name,
         'gpu_name': gpu_name,
         'processes': processes_data,
         'active_count': len(processes_data)
@@ -285,7 +287,7 @@ def serve_annot_video(filename):
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=-1
         )
         try:
-            while true:
+            while True:
                 chunk = process.stdout.read(8192)
                 if not chunk:
                     break

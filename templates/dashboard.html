@@ -1,134 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="de">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>IDguard PRO</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IDguard PRO Dashboard</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        :root {
-            --bg: #0d1117; --surface: rgba(33, 38, 45, 0.7); --surface-hover: rgba(48, 54, 61, 0.9);
-            --primary: #2f81f7; --primary-hover: #388bfd;
-            --success: #2ea043; --danger: #f85149; --text: #c9d1d9;
-            --text-muted: #8b949e; --border: #30363d; --input-bg: #010409;
-        }
-        body {
-            font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text);
-            margin: 0; padding: 2rem; background-image: radial-gradient(circle at top right, #1f2937, #0d1117);
-            min-height: 100vh;
-        }
-        .container { max-width: 1200px; margin: 0 auto; }
-        h1 { font-weight: 300; margin-bottom: 2rem; display: flex; align-items: center; gap: 10px; }
-        h1 i { color: var(--primary); }
-        h2 { font-weight: 500; font-size: 1.1rem; border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-top: 0; margin-bottom: 20px; display: flex; align-items: center; gap: 8px;}
-
-        .status-badge { font-size: 0.75rem; padding: 3px 10px; border-radius: 12px; margin-left: auto; text-transform: uppercase; font-weight: 600; }
-        .status-active { background: var(--success); color: white; }
-        .status-inactive { background: var(--border); color: var(--text-muted); }
-
-        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
-
-        .card {
-            background: var(--surface); backdrop-filter: blur(10px); border-radius: 12px;
-            padding: 1.5rem; border: 1px solid var(--border); margin-bottom: 1.5rem;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
-        }
-
-        button {
-            padding: 10px 16px; cursor: pointer; border: none; border-radius: 6px;
-            font-weight: 500; transition: all 0.2s ease; font-family: 'Inter', sans-serif;
-            display: flex; align-items: center; justify-content: center; gap: 8px;
-        }
-        button:hover { filter: brightness(1.1); transform: translateY(-1px); }
-        .btn-start { background: var(--success); color: white; flex: 1; }
-        .btn-stop { background: var(--danger); color: white; flex: 1; }
-        .btn-save { background: var(--primary); color: white; width: 100%; margin-top: 20px; font-size: 1rem; padding: 12px; }
-        .btn-delete { background: transparent; color: var(--danger); border: 1px solid var(--danger); padding: 6px 12px; font-size: 0.8rem; border-radius: 4px; }
-        .btn-delete:hover { background: var(--danger); color: white; }
-
-        .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
-        .switch input { opacity: 0; width: 0; height: 0; }
-        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--border); transition: .3s; border-radius: 24px; }
-        .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; }
-        input:checked + .slider { background-color: var(--success); }
-        input:checked + .slider:before { transform: translateX(20px); }
-
-        .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-        .settings-group { display: flex; flex-direction: column; }
-        .settings-group label { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 6px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
-        .settings-group input, .settings-group select { padding: 10px; background: var(--input-bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px; font-size: 0.95rem; font-family: 'Inter', sans-serif; }
-        .settings-group input:focus, .settings-group select:focus { border-color: var(--primary); outline: none; box-shadow: 0 0 0 2px rgba(47, 129, 247, 0.2); }
-
-        .range-wrap { display: flex; align-items: center; gap: 10px; }
-        .range-wrap input[type=range] { flex: 1; -webkit-appearance: none; background: transparent; padding: 0; border: none; }
-        .range-wrap input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 16px; width: 16px; border-radius: 50%; background: var(--primary); cursor: pointer; margin-top: -6px; }
-        .range-wrap input[type=range]::-webkit-slider-runnable-track { width: 100%; height: 4px; cursor: pointer; background: var(--border); border-radius: 2px; }
-        .range-val { background: var(--input-bg); padding: 4px 8px; border-radius: 4px; font-size: 0.85rem; border: 1px solid var(--border); width: 35px; text-align: center; }
-
-        .multiselect { position: relative; width: 100%; }
-        .selectBox select { width: 100%; padding: 10px; background: var(--input-bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px; font-size: 0.95rem; cursor: pointer; appearance: none; }
-        .selectBox::after { content: "\f0d7"; font-family: "Font Awesome 5 Free"; font-weight: 900; position: absolute; right: 15px; top: 10px; color: var(--text-muted); pointer-events: none; }
-        .overSelect { position: absolute; left: 0; right: 0; top: 0; bottom: 0; cursor: pointer; }
-        #checkboxes { display: none; position: absolute; background: var(--surface); backdrop-filter: blur(15px); border: 1px solid var(--border); border-radius: 6px; width: 100%; max-height: 300px; overflow-y: auto; z-index: 100; box-shadow: 0 10px 30px rgba(0,0,0,0.8); margin-top: 5px; }
-        #checkboxes label { display: flex; align-items: center; gap: 10px; padding: 10px 15px; cursor: pointer; color: var(--text); border-bottom: 1px solid var(--border); margin: 0; text-transform: none; font-size: 0.9rem; transition: background 0.2s; }
-        #checkboxes label:hover { background-color: var(--primary); color: white; }
-
-        /* System Status Styles (status.py integration) */
-        .system-status-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-        .status-metric-box { background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
-        .status-metric-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; font-weight: 500; }
-        .status-metric-value { font-size: 1.2rem; font-weight: 600; color: var(--text); }
-        .status-progress-bar { width: 100%; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: 4px; }
-        .status-progress-fill { height: 100%; background: var(--primary); border-radius: 3px; transition: width 0.3s ease; }
-        .status-progress-fill.warning { background: #d29922; }
-        .status-progress-fill.danger { background: var(--danger); }
-
-        .event-list { max-height: 600px; overflow-y: auto; padding-right: 5px; }
-        .event-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: rgba(255,255,255,0.02); margin-bottom: 8px; border-radius: 8px; border: 1px solid var(--border); transition: all 0.2s; cursor: pointer; }
-        .event-item:hover { background: var(--surface-hover); border-color: var(--primary); transform: translateX(2px); }
-        .event-info { display: flex; flex-direction: column; gap: 4px; }
-        .event-name { font-weight: 500; font-size: 0.95rem; color: var(--primary); word-break: break-all; }
-        .event-meta { color: var(--text-muted); font-size: 0.8rem; display: flex; gap: 10px; flex-wrap: wrap; }
-
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
-
-        .lightbox { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); backdrop-filter: blur(5px); justify-content: center; align-items: center; flex-direction: column; opacity: 0; transition: opacity 0.3s ease; }
-        .lightbox.active { display: flex; opacity: 1; }
-        .lightbox-content { position: relative; max-width: 95%; max-height: 85%; width: 1000px; transform: scale(0.95); transition: transform 0.3s ease; }
-        .lightbox.active .lightbox-content { transform: scale(1); }
-
-        video, #live-image-view { width: 100%; border-radius: 10px; background: #000; box-shadow: 0 10px 40px rgba(0,0,0,0.5); border: 1px solid var(--border); }
-
-        .close-btn { position: absolute; top: -40px; right: 0; color: white; font-size: 28px; cursor: pointer; transition: color 0.2s; }
-        .close-btn:hover { color: var(--danger); }
-        .player-controls { display: flex; gap: 8px; justify-content: center; margin-top: 15px; flex-wrap: wrap; }
-        .player-controls button { background: var(--input-bg); color: var(--text); border: 1px solid var(--border); border-radius: 20px; padding: 6px 16px; font-size: 0.85rem; }
-        .player-controls button.active { background: var(--primary); color: white; border-color: var(--primary); }
-
-        .loader { border: 3px solid var(--border); border-top: 3px solid var(--primary); border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; display: none; margin: 10px auto; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        #status-text { font-size: 0.85rem; color: var(--text-muted); text-align: center; margin-top: 5px; }
-
-        .stream-container { background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 15px; }
-        .stream-thumb { width: 100%; border-radius: 6px; aspect-ratio: 16/9; object-fit: cover; background: #000; border: 1px solid var(--border); cursor: pointer; transition: filter 0.2s; }
-        .stream-thumb:hover { filter: brightness(1.2); }
-
-        @media (max-width: 900px) {
-            body { padding: 1rem; }
-            .grid { grid-template-columns: 1fr; gap: 1rem; }
-            h1 { font-size: 1.5rem; margin-bottom: 1rem; }
-            .card { padding: 1rem; height: auto !important; }
-            .settings-grid { grid-template-columns: 1fr; gap: 10px; }
-            .system-status-grid { grid-template-columns: 1fr; }
-            .lightbox-content { width: 100%; }
-            .event-list { max-height: 400px; }
-            .close-btn { right: 10px; z-index: 1001; }
-        }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <div class="container">
@@ -144,7 +21,7 @@
                             {{ 'Active' if pipeline_active else 'Inactive' }}
                         </span>
                     </h2>
-                    <div style="display: flex; gap: 15px;">
+                    <div class="control-row">
                         <form action="/start" method="POST" style="flex:1; margin:0;">
                             <button type="submit" class="btn-start"><i class="fa-solid fa-play"></i> START</button>
                         </form>
@@ -159,7 +36,7 @@
                     <div>
                         {% for stream in streams %}
                         <div class="stream-container">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                            <div class="stream-header">
                                 <span style="font-weight: 500;">{{ stream }}</span>
                                 <form action="/toggle/{{ stream }}" method="POST" style="margin: 0;">
                                     <label class="switch">
@@ -244,9 +121,34 @@
                     </form>
                 </div>
 
-                <!-- System Status Card (Integration von status.py) -->
+                <!-- System Status Card (Hardware & AI Model) -->
                 <div class="card">
-                    <h2><i class="fa-solid fa-server"></i> Hardware Status</h2>
+                    <h2><i class="fa-solid fa-server"></i> Hardware & System Status</h2>
+
+                    <!-- Aktives KI-Modell Info Box -->
+                    <div class="ai-model-box">
+                        <div class="ai-model-row">
+                            <span class="ai-model-label"><i class="fa-solid fa-robot"></i> Aktives KI-Modell</span>
+                            <span class="ai-model-val" id="stat-active-model">
+                                {% if system_status and system_status.active_model %}
+                                    {{ system_status.active_model }}
+                                {% else %}
+                                    --
+                                {% endif %}
+                            </span>
+                        </div>
+                        <div class="ai-model-row">
+                            <span class="ai-model-label"><i class="fa-solid fa-folder-open"></i> Modell-Datei</span>
+                            <span style="font-family: monospace; color: var(--text); word-break: break-all;" id="stat-model-file">
+                                {% if system_status and system_status.model_filename %}
+                                    {{ system_status.model_filename }}
+                                {% else %}
+                                    --
+                                {% endif %}
+                            </span>
+                        </div>
+                    </div>
+
                     <div class="system-status-grid">
                         <div class="status-metric-box">
                             <div class="status-metric-header">
@@ -289,12 +191,45 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- Aktive Streams & Pipeline-Prozesse Tabelle -->
+                    <h3 style="font-size: 0.95rem; margin-top: 20px; margin-bottom: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Active Streams & Processes</h3>
+                    <div class="table-scroll">
+                        <table class="status-table">
+                            <thead>
+                                <tr>
+                                    <th>Stream-Name</th>
+                                    <th>PID</th>
+                                    <th>Status</th>
+                                    <th>CPU (%)</th>
+                                    <th>RAM (MB)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="processes-tbody">
+                                {% if system_status and system_status.processes %}
+                                    {% for proc in system_status.processes %}
+                                    <tr>
+                                        <td>{{ proc.name }}</td>
+                                        <td>{{ proc.pid }}</td>
+                                        <td><span class="badge-running">{{ proc.status }}</span></td>
+                                        <td>{{ proc.cpu }}</td>
+                                        <td>{{ proc.ram }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                {% else %}
+                                <tr>
+                                    <td colspan="5" style="text-align: center; color: var(--text-muted);">Keine aktiven Pipeline-Prozesse gefunden.</td>
+                                </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
             <!-- Rechte Spalte -->
             <div>
-                <div class="card" style="height: calc(100% - 3rem);">
+                <div class="card">
                     <h2>
                         <i class="fa-solid fa-clapperboard"></i> Recent Recordings
                         <span id="event-count" style="background: var(--border); padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; margin-left: 10px;">{{ recent_events|length }}</span>
@@ -406,12 +341,19 @@
             liveLightbox.classList.remove('active');
         }
 
-        // Fetch Hardware Status from status.py API endpoint (e.g., /api/status)
+        // Fetch Hardware & Model Status from status API endpoint (/api/status)
         function updateSystemStatus() {
             fetch('/api/status')
                 .then(res => res.json())
                 .then(data => {
                     if (!data) return;
+                    // AI Model Info
+                    if (data.active_model) {
+                        document.getElementById('stat-active-model').innerText = data.active_model;
+                    }
+                    if (data.model_filename) {
+                        document.getElementById('stat-model-file').innerText = data.model_filename;
+                    }
                     // CPU
                     if (data.cpu) {
                         document.getElementById('stat-cpu-text').innerText = data.cpu.percent + '%';
@@ -444,6 +386,27 @@
                         let tempPercent = Math.min(100, (data.gpu.temp / 90) * 100);
                         tempBar.style.width = tempPercent + '%';
                         tempBar.className = 'status-progress-fill ' + (data.gpu.temp > 80 ? 'danger' : data.gpu.temp > 70 ? 'warning' : '');
+                    }
+                    // Processes Table Update
+                    if (data.processes) {
+                        const tbody = document.getElementById('processes-tbody');
+                        if (tbody) {
+                            if (data.processes.length === 0) {
+                                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Keine aktiven Pipeline-Prozesse gefunden.</td></tr>';
+                            } else {
+                                let rowsHtml = '';
+                                data.processes.forEach(proc => {
+                                    rowsHtml += `<tr>
+                                        <td>${proc.name}</td>
+                                        <td>${proc.pid}</td>
+                                        <td><span class="badge-running">${proc.status}</span></td>
+                                        <td>${proc.cpu}</td>
+                                        <td>${proc.ram}</td>
+                                    </tr>`;
+                                });
+                                tbody.innerHTML = rowsHtml;
+                            }
+                        }
                     }
                 })
                 .catch(err => console.error('Status fetch failed:', err));
