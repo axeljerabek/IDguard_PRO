@@ -48,7 +48,10 @@
                                     </label>
                                 </form>
                             </div>
-                            <img id="thumb-{{ stream }}" class="stream-thumb" src="/thumbnail/{{ stream }}" alt="{{ stream }} Thumbnail" onclick="openLiveView('{{ stream }}')" onerror="this.onerror=null; this.src='data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 16 9\'%3E%3Crect width=\'16\' height=\'9\' fill=\'%23111\'/%3E%3Ctext x=\'50%25\' y=\'50%25\' dominant-baseline=\'middle\' text-anchor=\'middle\' font-family=\'sans-serif\' font-size=\'1\' fill=\'%23555\'%3ENo Signal%3C/text%3E%3C/svg%3E';">
+                            <div class="thumb-wrap">
+                                <img id="thumb-{{ stream }}" class="stream-thumb" src="/thumbnail/{{ stream }}" alt="{{ stream }} Thumbnail" onclick="openLiveView('{{ stream }}')" onerror="this.onerror=null; this.src='data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 16 9\'%3E%3Crect width=\'16\' height=\'9\' fill=\'%23111\'/%3E%3Ctext x=\'50%25\' y=\'50%25\' dominant-baseline=\'middle\' text-anchor=\'middle\' font-family=\'sans-serif\' font-size=\'1\' fill=\'%23555\'%3ENo Signal%3C/text%3E%3C/svg%3E';">
+                                {% if overrides.get(stream, 'ON') == 'ON' %}<span class="thumb-live-dot" title="Aktiv"></span>{% endif %}
+                            </div>
                         </div>
                         {% endfor %}
                     </div>
@@ -56,32 +59,36 @@
 
                 <div class="card">
                     <h2><i class="fa-solid fa-sliders"></i> System Settings</h2>
-                    <form action="/save_settings" method="POST">
-                        <div class="settings-grid">
-                            <div class="settings-group">
-                                <label>YOLO Version</label>
-                                <select name="YOLO_VERSION">
-                                    <option value="v10" {% if settings.get('YOLO_VERSION', 'v10') == 'v10' %}selected{% endif %}>YOLOv10</option>
-                                    <option value="v12" {% if settings.get('YOLO_VERSION') == 'v12' %}selected{% endif %}>YOLOv12</option>
-                                    <option value="v26" {% if settings.get('YOLO_VERSION') == 'v26' %}selected{% endif %}>YOLO26</option>
-                                </select>
+                    <form action="/save_settings" method="POST" id="settingsForm">
+
+                        <div class="settings-section">
+                            <div class="settings-section-label"><i class="fa-solid fa-robot"></i> KI-Modell</div>
+                            <div class="settings-grid">
+                                <div class="settings-group">
+                                    <label>YOLO Version</label>
+                                    <select name="YOLO_VERSION">
+                                        <option value="v10" {% if settings.get('YOLO_VERSION', 'v10') == 'v10' %}selected{% endif %}>YOLOv10</option>
+                                        <option value="v12" {% if settings.get('YOLO_VERSION') == 'v12' %}selected{% endif %}>YOLOv12</option>
+                                        <option value="v26" {% if settings.get('YOLO_VERSION') == 'v26' %}selected{% endif %}>YOLO26</option>
+                                    </select>
+                                </div>
+                                <div class="settings-group">
+                                    <label>Model Size</label>
+                                    <select name="MODEL_SIZE">
+                                        <option value="n" {% if settings.get('MODEL_SIZE') == 'n' %}selected{% endif %}>Nano (n)</option>
+                                        <option value="s" {% if settings.get('MODEL_SIZE') == 's' %}selected{% endif %}>Small (s)</option>
+                                        <option value="m" {% if settings.get('MODEL_SIZE') == 'm' %}selected{% endif %}>Medium (m)</option>
+                                        <option value="b" {% if settings.get('MODEL_SIZE') == 'b' %}selected{% endif %}>Big (b - nur v10)</option>
+                                        <option value="l" {% if settings.get('MODEL_SIZE') == 'l' %}selected{% endif %}>Large (l)</option>
+                                        <option value="x" {% if settings.get('MODEL_SIZE', 'x') == 'x' %}selected{% endif %}>Extra Large (x - RTX 5090)</option>
+                                    </select>
+                                </div>
                             </div>
-                            <div class="settings-group">
-                                <label>Model Size</label>
-                                <select name="MODEL_SIZE">
-                                    <option value="n" {% if settings.get('MODEL_SIZE') == 'n' %}selected{% endif %}>Nano (n)</option>
-                                    <option value="s" {% if settings.get('MODEL_SIZE') == 's' %}selected{% endif %}>Small (s)</option>
-                                    <option value="m" {% if settings.get('MODEL_SIZE') == 'm' %}selected{% endif %}>Medium (m)</option>
-                                    <option value="b" {% if settings.get('MODEL_SIZE') == 'b' %}selected{% endif %}>Big (b - nur v10)</option>
-                                    <option value="l" {% if settings.get('MODEL_SIZE') == 'l' %}selected{% endif %}>Large (l)</option>
-                                    <option value="x" {% if settings.get('MODEL_SIZE', 'x') == 'x' %}selected{% endif %}>Extra Large (x - RTX 5090)</option>
-                                </select>
-                            </div>
-                            <div class="settings-group">
-                                <label>Target FPS</label>
-                                <input type="number" name="TARGET_FPS" value="{{ settings.TARGET_FPS }}" required>
-                            </div>
-                            <div class="settings-group">
+                        </div>
+
+                        <div class="settings-section">
+                            <div class="settings-section-label"><i class="fa-solid fa-crosshairs"></i> Erkennung</div>
+                            <div class="settings-group" style="margin-bottom: 14px;">
                                 <label>Confidence Threshold</label>
                                 <div class="range-wrap">
                                     <input type="range" min="0.1" max="1.0" step="0.05" name="CONFIDENCE_THRESHOLD" value="{{ settings.CONFIDENCE_THRESHOLD }}" oninput="document.getElementById('conf_val').innerText = this.value">
@@ -89,38 +96,51 @@
                                 </div>
                             </div>
                             <div class="settings-group">
-                                <label>Pre-Roll (Sec)</label>
-                                <input type="number" name="PRE_ROLL_SEC" value="{{ settings.PRE_ROLL_SEC }}" required>
-                            </div>
-                            <div class="settings-group">
-                                <label>Post-Roll (Sec)</label>
-                                <input type="number" name="POST_ROLL_SEC" value="{{ settings.POST_ROLL_SEC }}" required>
-                            </div>
-                        </div>
-
-                        <div class="settings-group" style="margin-top: 15px;">
-                            <label>Object Categories</label>
-                            <div class="multiselect">
-                                <div class="selectBox" onclick="toggleCheckboxes()">
-                                    <select>
-                                        <option id="category-summary">Loading categories...</option>
-                                    </select>
-                                    <div class="overSelect"></div>
-                                </div>
-                                <div id="checkboxes">
-                                    {% for class_id, class_name in available_classes.items() %}
-                                        <label for="cls_{{ class_id }}">
-                                            <input type="checkbox" id="cls_{{ class_id }}" name="DETECTION_CLASSES" value="{{ class_id }}"
-                                            {% if class_id in settings.DETECTION_CLASSES %}checked{% endif %}
-                                            onchange="updateCategorySummary()" />
-                                            {{ class_name }}
-                                        </label>
-                                    {% endfor %}
+                                <label>Object Categories</label>
+                                <div class="multiselect">
+                                    <div class="selectBox" onclick="toggleCheckboxes()">
+                                        <select>
+                                            <option id="category-summary">Loading categories...</option>
+                                        </select>
+                                        <div class="overSelect"></div>
+                                    </div>
+                                    <div id="checkboxes">
+                                        {% for class_id, class_name in available_classes.items() %}
+                                            <label for="cls_{{ class_id }}">
+                                                <input type="checkbox" id="cls_{{ class_id }}" name="DETECTION_CLASSES" value="{{ class_id }}"
+                                                {% if class_id in settings.DETECTION_CLASSES %}checked{% endif %}
+                                                onchange="updateCategorySummary()" />
+                                                {{ class_name }}
+                                            </label>
+                                        {% endfor %}
+                                    </div>
                                 </div>
                             </div>
                         </div>
 
-                        <button type="submit" class="btn-save"><i class="fa-solid fa-floppy-disk"></i> Apply Settings</button>
+                        <div class="settings-section">
+                            <div class="settings-section-label"><i class="fa-solid fa-film"></i> Aufnahme-Timing</div>
+                            <div class="settings-grid settings-grid-3">
+                                <div class="settings-group">
+                                    <label>Target FPS</label>
+                                    <input type="number" name="TARGET_FPS" value="{{ settings.TARGET_FPS }}" required>
+                                </div>
+                                <div class="settings-group">
+                                    <label>Pre-Roll (Sec)</label>
+                                    <input type="number" name="PRE_ROLL_SEC" value="{{ settings.PRE_ROLL_SEC }}" required>
+                                </div>
+                                <div class="settings-group">
+                                    <label>Post-Roll (Sec)</label>
+                                    <input type="number" name="POST_ROLL_SEC" value="{{ settings.POST_ROLL_SEC }}" required>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn-save" id="applyBtn">
+                            <i class="fa-solid fa-arrows-rotate"></i>
+                            <span id="applyBtnText">Einstellungen anwenden</span>
+                        </button>
+                        <p class="settings-hint">Läuft die Pipeline bereits, wird sie automatisch neu gestartet, damit die neuen Einstellungen sofort greifen.</p>
                     </form>
                 </div>
 
@@ -306,6 +326,13 @@
             else { summary.innerText = checkedBoxes.length + " classes selected"; }
         }
         updateCategorySummary();
+
+        document.getElementById('settingsForm').addEventListener('submit', function() {
+            const btn = document.getElementById('applyBtn');
+            btn.disabled = true;
+            document.getElementById('applyBtnText').innerText = 'Wird angewendet…';
+            btn.querySelector('i').className = 'fa-solid fa-spinner fa-spin';
+        });
 
         document.addEventListener('click', function(event) {
             const multiselect = document.querySelector('.multiselect');

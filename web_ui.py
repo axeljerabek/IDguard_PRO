@@ -259,6 +259,21 @@ def save_pipeline_settings():
     with open(SETTINGS_F, 'w') as f:
         json.dump(settings, f, indent=4)
 
+    # Läuft die Pipeline bereits, neu starten, damit z.B. ein geändertes
+    # YOLO-Modell oder neue Erkennungsklassen sofort greifen. Läuft sie
+    # nicht, wird nur gespeichert (kein ungewollter Autostart).
+    if is_pipeline_running():
+        subprocess.run(
+            ['/bin/bash', os.path.join(PROJECT_ROOT, 'stop.sh')],
+            cwd=PROJECT_ROOT
+        )
+        subprocess.Popen(
+            ['/bin/bash', os.path.join(PROJECT_ROOT, 'start_detached.sh')],
+            cwd=PROJECT_ROOT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
     return redirect(url_for('dashboard'))
 
 @app.route('/delete/<filename>', methods=['POST'])
