@@ -10,12 +10,18 @@ import urllib.request
 # AUTOMATISCHE PFAD-ERKENNUNG: Findet den Projektordner selbstständig.
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
-# UMSCHALTUNG DER YOLO-VERSION ("v10" oder "v12") und MODELLGRÖSSE ("n", "s", "m", "b", "l", "x")
-YOLO_VERSION = "v12"
+# UMSCHALTUNG DER YOLO-VERSION ("v10", "v12" oder "v26") und MODELLGRÖSSE ("n", "s", "m", "b", "l", "x")
+YOLO_VERSION = "v26"
 MODEL_SIZE   = "x"  # Wähle: "n", "s", "m", "b" (nur v10), "l", "x"
 
 # Dynamische Dateinamen und Download-URLs generieren
-if YOLO_VERSION == "v12":
+if YOLO_VERSION == "v26":
+    # YOLO26 unterstützt: n, s, m, l, x
+    if MODEL_SIZE not in ["n", "s", "m", "l", "x"]:
+        MODEL_SIZE = "x"  # Fallback
+    MODEL_FILENAME = f"yolo26{MODEL_SIZE}.pt"
+    YOLO_URL = f"https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26{MODEL_SIZE}.pt"
+elif YOLO_VERSION == "v12":
     # YOLOv12 unterstützt: n, s, m, l, x
     if MODEL_SIZE not in ["n", "s", "m", "l", "x"]:
         MODEL_SIZE = "x"  # Fallback
@@ -46,7 +52,11 @@ if os.path.exists(SETTINGS_F):
                 MODEL_SIZE = sett['MODEL_SIZE']
 
             # Erneut auflösen nach Settings-Laden
-            if YOLO_VERSION == "v12":
+            if YOLO_VERSION == "v26":
+                if MODEL_SIZE not in ["n", "s", "m", "l", "x"]: MODEL_SIZE = "x"
+                MODEL_FILENAME = f"yolo26{MODEL_SIZE}.pt"
+                YOLO_URL = f"https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo26{MODEL_SIZE}.pt"
+            elif YOLO_VERSION == "v12":
                 if MODEL_SIZE not in ["n", "s", "m", "l", "x"]: MODEL_SIZE = "x"
                 MODEL_FILENAME = f"yolo12{MODEL_SIZE}.pt"
                 YOLO_URL = f"https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo12{MODEL_SIZE}.pt"
@@ -54,7 +64,7 @@ if os.path.exists(SETTINGS_F):
                 if MODEL_SIZE not in ["n", "s", "m", "b", "l", "x"]: MODEL_SIZE = "x"
                 MODEL_FILENAME = f"yolov10{MODEL_SIZE}.pt"
                 YOLO_URL = f"https://github.com/THU-MIG/yolov10/releases/download/v1.1/yolov10{MODEL_SIZE}.pt"
-            
+
             MODEL_PATH = os.path.join(PROJECT_ROOT, MODEL_FILENAME)
     except Exception as e:
         print(f"Pipeline Settings Vorab-Lese-Fehler: {e}")
@@ -70,10 +80,10 @@ if not os.path.exists(MODEL_PATH):
 
 # Stream Configuration Base
 STREAMS = [
-    {"name": "Entrance", "url":  "rtmp://172.16.100.25/pi/test", "enabled": True, "type": "VIDEO"},
-    {"name": "Backyard",  "url":  "rtmp://172.16.100.25/zero/test", "enabled": True, "type": "VIDEO"},
-    {"name": "Garden",   "url":  "rtmp://172.16.100.25/mevo/test", "enabled": False, "type": "VIDEO"},
-    {"name": "Carport",   "url":  "rtmp://172.16.100.25/zero2/test", "enabled": False, "type": "VIDEO"}
+    {"name": "Entrance", "url":  "rtmp://172.168.178.25/pi/test", "enabled": True, "type": "VIDEO"},
+    {"name": "Garden",  "url":  "rtmp://172.168.178.25/zero/test", "enabled": True, "type": "VIDEO"},
+    {"name": "Backyard",   "url":  "rtmp://172.168.178.25/mevo/test", "enabled": False, "type": "VIDEO"},
+    {"name": "Carport",   "url":  "rtmp://172.168.178.25/zero2/test", "enabled": False, "type": "VIDEO"}
 ]
 
 # Web-UI Stream Overrides anwenden

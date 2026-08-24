@@ -4,6 +4,7 @@ import sys
 import glob
 import subprocess
 import json
+import psutil
 from datetime import datetime
 
 # Stellt sicher, dass das Arbeitsverzeichnis und der Import-Pfad passen
@@ -12,7 +13,7 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 os.chdir(SCRIPT_DIR)
 
-from config import STREAMS, ALERTS_DIR, PROJECT_ROOT, SETTINGS_F
+from config import STREAMS, ALERTS_DIR, PROJECT_ROOT, SETTINGS_F, YOLO_VERSION, MODEL_SIZE, MODEL_FILENAME
 from auth import requires_auth
 from helpers import (
     LATEST_FRAMES, start_thumbnail_thread, is_pipeline_running,
@@ -42,12 +43,135 @@ AVAILABLE_CLASSES = {
 # Worker-Thread starten
 start_thumbnail_thread()
 
+def get_detailed_system_status():
+    """Ermittelt Modell, VRAM, RAM, CPU und GPU passend für das Dashboard-JS"""
+    active_version = YOLO_VERSION
+    active_size = MODEL_SIZE
+    active_filename = MODEL_FILENAME
+
+    if os.path.exists(SETTINGS_F):
+        try:
+            with open(SETTINGS_F, 'r') as f:
+                sett = json.load(f)
+                active_version = sett.get('YOLO_VERSION', active_version)
+                active_size = sett.get('MODEL_SIZE', active_size)
+                if active_version == "v26":
+                    active_filename = f"yolo26{active_size}.pt"
+                elif active_version == "v12":
+                    active_filename = f"yolo12{active_size}.pt"
+                else:
+                    active_filename = f"yolov10{active_size}.pt"
+        except Exception:
+            pass
+
+    # Gesamtes System (CPU & RAM via psutil)
+    cpu_percent = psutil.cpu_percent(interval=None)
+    virtual_mem = psutil.virtual_memory()
+    ram_total_gb = round(virtual_mem.total / (1024 ** 3), 1)
+    ram_used_gb = round(virtual_mem.used / (1024 ** 3), 1)
+    ram_percent = virtual_mem.percent
+
+    # GPU / VRAM über nvidia-smi
+    gpu_name = "NVIDIA GeForce RTX 5090"
+    vram_used = 0.0
+    vram_total = 32.6  # Standardwert in GB
+    vram_percent = 0.0
+    gpu_temp = 35.0
+
+    try:
+        cmd = ["nvidia-smi", "--query-gpu=name,memory.used,memory.total,temperature.gpu", "--format=csv,noheader,nounits"]
+        output = subprocess.check_output(cmd, encoding='utf-8').strip().split('\n')[0]
+        parts = [p.strip() for p in output.split(',')]
+        if len(parts) >= 4:
+            gpu_name = parts[0]
+            vram_used = round(float(parts[1]) / 1024.0, 1)   # Umrechnung MB -> GB
+            vram_total = round(float(parts[2]) / 1024.0, 1)  # Umrechnung MB -> GB
+            vram_percent = round((vram_used / vram_total) * 100, 1) if vram_total > 0 else 0.0
+            gpu_temp = float(parts[3])
+    except Exception:
+        pass
+
+    # CPU-Temperatur (falls unter Linux verfügbar)
+    cpu_temp = 42.0
+    try:
+        temps = psutil.sensors_temperatures()
+        if temps:
+            for name, entries in temps.items():
+                if 'coretemp' in name.lower() or 'cpu' in name.lower():
+                    for entry in entries:
+                        if entry.current:
+                            cpu_temp = entry.current
+                            break
+    except Exception:
+        pass
+
+    # Worker-Prozesse ermitteln
+    enabled_streams = [s["name"] for s in STREAMS if s.get("enabled", False)]
+    worker_procs = []
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'memory_info', 'create_time']):
+        try:
+            cmdline = proc.info.get('cmdline')
+            if cmdline:
+                cmd_str = " ".join(cmdline)
+                if 'recorder_pipeline.py' in cmd_str and 'forkserver' in cmd_str:
+                    worker_procs.append(proc)
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            continue
+
+    worker_procs.sort(key=lambda p: p.create_time())
+    processes_data = []
+
+    for idx, proc in enumerate(worker_procs):
+        try:
+            stream_name = enabled_streams[idx] if idx < len(enabled_streams) else f"Worker #{idx + 1}"
+            cpu = proc.cpu_percent(interval=None)
+            mem = round(proc.memory_info().rss / (1024 ** 2), 1)
+
+            processes_data.append({
+                'name': stream_name,
+                'pid': proc.pid,
+                'status': 'LÄUFT',
+                'cpu': round(cpu, 1),
+                'ram': mem
+            })
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
+    # Exakte Datenstruktur, die das Frontend (Dashboard JS) erwartet
+    return {
+        'cpu': {
+            'percent': cpu_percent,
+            'temp': cpu_temp
+        },
+        'ram': {
+            'percent': ram_percent,
+            'used': ram_used_gb,
+            'total': ram_total_gb
+        },
+        'vram': {
+            'percent': vram_percent,
+            'used': vram_used,
+            'total': vram_total
+        },
+        'gpu': {
+            'temp': gpu_temp,
+            'status': 'Normal' if gpu_temp < 80 else 'Warning'
+        },
+        'model_version': active_version,
+        'model_size': active_size,
+        'model_filename': active_filename,
+        'gpu_name': gpu_name,
+        'processes': processes_data,
+        'active_count': len(processes_data)
+    }
+
 @app.route('/')
 @requires_auth
 def dashboard():
     overrides = load_overrides()
     settings = load_settings()
     pipeline_active = is_pipeline_running()
+    system_status = get_detailed_system_status()
 
     alerts = sorted(glob.glob(os.path.join(ALERTS_DIR, '*.mp4')), key=os.path.getmtime, reverse=True)
     recent_events = []
@@ -73,8 +197,14 @@ def dashboard():
         settings=settings,
         available_classes=AVAILABLE_CLASSES,
         recent_events=recent_events,
-        pipeline_active=pipeline_active
+        pipeline_active=pipeline_active,
+        system_status=system_status
     )
+
+@app.route('/api/status')
+@requires_auth
+def api_status():
+    return json.dumps(get_detailed_system_status())
 
 @app.route('/thumbnail/<stream_name>')
 @requires_auth
@@ -115,7 +245,7 @@ def toggle_stream(name):
 @requires_auth
 def save_pipeline_settings():
     settings = {
-        "YOLO_VERSION": request.form.get('YOLO_VERSION', 'v12'),
+        "YOLO_VERSION": request.form.get('YOLO_VERSION', 'v26'),
         "MODEL_SIZE": request.form.get('MODEL_SIZE', 'x'),
         "TARGET_FPS": int(request.form.get('TARGET_FPS', 30)),
         "CONFIDENCE_THRESHOLD": float(request.form.get('CONFIDENCE_THRESHOLD', 0.5)),
@@ -155,7 +285,7 @@ def serve_annot_video(filename):
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=-1
         )
         try:
-            while True:
+            while true:
                 chunk = process.stdout.read(8192)
                 if not chunk:
                     break

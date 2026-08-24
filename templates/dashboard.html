@@ -74,6 +74,16 @@
         #checkboxes label { display: flex; align-items: center; gap: 10px; padding: 10px 15px; cursor: pointer; color: var(--text); border-bottom: 1px solid var(--border); margin: 0; text-transform: none; font-size: 0.9rem; transition: background 0.2s; }
         #checkboxes label:hover { background-color: var(--primary); color: white; }
 
+        /* System Status Styles (status.py integration) */
+        .system-status-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+        .status-metric-box { background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+        .status-metric-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; font-weight: 500; }
+        .status-metric-value { font-size: 1.2rem; font-weight: 600; color: var(--text); }
+        .status-progress-bar { width: 100%; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: 4px; }
+        .status-progress-fill { height: 100%; background: var(--primary); border-radius: 3px; transition: width 0.3s ease; }
+        .status-progress-fill.warning { background: #d29922; }
+        .status-progress-fill.danger { background: var(--danger); }
+
         .event-list { max-height: 600px; overflow-y: auto; padding-right: 5px; }
         .event-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: rgba(255,255,255,0.02); margin-bottom: 8px; border-radius: 8px; border: 1px solid var(--border); transition: all 0.2s; cursor: pointer; }
         .event-item:hover { background: var(--surface-hover); border-color: var(--primary); transform: translateX(2px); }
@@ -113,6 +123,7 @@
             h1 { font-size: 1.5rem; margin-bottom: 1rem; }
             .card { padding: 1rem; height: auto !important; }
             .settings-grid { grid-template-columns: 1fr; gap: 10px; }
+            .system-status-grid { grid-template-columns: 1fr; }
             .lightbox-content { width: 100%; }
             .event-list { max-height: 400px; }
             .close-btn { right: 10px; z-index: 1001; }
@@ -172,6 +183,7 @@
                                 <select name="YOLO_VERSION">
                                     <option value="v10" {% if settings.get('YOLO_VERSION', 'v10') == 'v10' %}selected{% endif %}>YOLOv10</option>
                                     <option value="v12" {% if settings.get('YOLO_VERSION') == 'v12' %}selected{% endif %}>YOLOv12</option>
+                                    <option value="v26" {% if settings.get('YOLO_VERSION') == 'v26' %}selected{% endif %}>YOLO26</option>
                                 </select>
                             </div>
                             <div class="settings-group">
@@ -230,6 +242,53 @@
 
                         <button type="submit" class="btn-save"><i class="fa-solid fa-floppy-disk"></i> Apply Settings</button>
                     </form>
+                </div>
+
+                <!-- System Status Card (Integration von status.py) -->
+                <div class="card">
+                    <h2><i class="fa-solid fa-server"></i> Hardware Status</h2>
+                    <div class="system-status-grid">
+                        <div class="status-metric-box">
+                            <div class="status-metric-header">
+                                <span><i class="fa-solid fa-microchip"></i> CPU Usage</span>
+                                <span id="stat-cpu-text">--%</span>
+                            </div>
+                            <div class="status-metric-value" id="stat-cpu-val">--°C</div>
+                            <div class="status-progress-bar">
+                                <div id="stat-cpu-bar" class="status-progress-fill" style="width: 0%;"></div>
+                            </div>
+                        </div>
+                        <div class="status-metric-box">
+                            <div class="status-metric-header">
+                                <span><i class="fa-solid fa-memory"></i> RAM Usage</span>
+                                <span id="stat-ram-text">--%</span>
+                            </div>
+                            <div class="status-metric-value" id="stat-ram-val">-- / -- GB</div>
+                            <div class="status-progress-bar">
+                                <div id="stat-ram-bar" class="status-progress-fill" style="width: 0%;"></div>
+                            </div>
+                        </div>
+                        <div class="status-metric-box">
+                            <div class="status-metric-header">
+                                <span><i class="fa-solid fa-bolt"></i> RTX 5090 VRAM</span>
+                                <span id="stat-vram-text">--%</span>
+                            </div>
+                            <div class="status-metric-value" id="stat-vram-val">-- / -- GB</div>
+                            <div class="status-progress-bar">
+                                <div id="stat-vram-bar" class="status-progress-fill" style="width: 0%;"></div>
+                            </div>
+                        </div>
+                        <div class="status-metric-box">
+                            <div class="status-metric-header">
+                                <span><i class="fa-solid fa-temperature-half"></i> GPU Temp</span>
+                                <span id="stat-temp-status">Normal</span>
+                            </div>
+                            <div class="status-metric-value" id="stat-temp-val">--°C</div>
+                            <div class="status-progress-bar">
+                                <div id="stat-temp-bar" class="status-progress-fill" style="width: 0%;"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -346,6 +405,51 @@
             liveImageView.src = '';
             liveLightbox.classList.remove('active');
         }
+
+        // Fetch Hardware Status from status.py API endpoint (e.g., /api/status)
+        function updateSystemStatus() {
+            fetch('/api/status')
+                .then(res => res.json())
+                .then(data => {
+                    if (!data) return;
+                    // CPU
+                    if (data.cpu) {
+                        document.getElementById('stat-cpu-text').innerText = data.cpu.percent + '%';
+                        document.getElementById('stat-cpu-val').innerText = (data.cpu.temp || '--') + '°C';
+                        const cpuBar = document.getElementById('stat-cpu-bar');
+                        cpuBar.style.width = data.cpu.percent + '%';
+                        cpuBar.className = 'status-progress-fill ' + (data.cpu.percent > 85 ? 'danger' : data.cpu.percent > 65 ? 'warning' : '');
+                    }
+                    // RAM
+                    if (data.ram) {
+                        document.getElementById('stat-ram-text').innerText = data.ram.percent + '%';
+                        document.getElementById('stat-ram-val').innerText = data.ram.used + ' / ' + data.ram.total + ' GB';
+                        const ramBar = document.getElementById('stat-ram-bar');
+                        ramBar.style.width = data.ram.percent + '%';
+                        ramBar.className = 'status-progress-fill ' + (data.ram.percent > 85 ? 'danger' : data.ram.percent > 65 ? 'warning' : '');
+                    }
+                    // VRAM (RTX 5090)
+                    if (data.vram) {
+                        document.getElementById('stat-vram-text').innerText = data.vram.percent + '%';
+                        document.getElementById('stat-vram-val').innerText = data.vram.used + ' / ' + data.vram.total + ' GB';
+                        const vramBar = document.getElementById('stat-vram-bar');
+                        vramBar.style.width = data.vram.percent + '%';
+                        vramBar.className = 'status-progress-fill ' + (data.vram.percent > 85 ? 'danger' : data.vram.percent > 65 ? 'warning' : '');
+                    }
+                    // GPU Temp
+                    if (data.gpu) {
+                        document.getElementById('stat-temp-val').innerText = data.gpu.temp + '°C';
+                        document.getElementById('stat-temp-status').innerText = data.gpu.status || 'Normal';
+                        const tempBar = document.getElementById('stat-temp-bar');
+                        let tempPercent = Math.min(100, (data.gpu.temp / 90) * 100);
+                        tempBar.style.width = tempPercent + '%';
+                        tempBar.className = 'status-progress-fill ' + (data.gpu.temp > 80 ? 'danger' : data.gpu.temp > 70 ? 'warning' : '');
+                    }
+                })
+                .catch(err => console.error('Status fetch failed:', err));
+        }
+        setInterval(updateSystemStatus, 3000);
+        updateSystemStatus();
 
         function autoRefreshDOM() {
             fetch(window.location.href)

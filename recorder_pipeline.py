@@ -63,7 +63,7 @@ class CameraAgent(multiprocessing.Process):
             self.logger.error(f"❌ Dependency Error in {self.name}: {e}")
             return
 
-        # 1. Initialize AI Engine (YOLO v10 or v12) auf CUDA GPU
+        # 1. Initialize AI Engine (YOLO v10, v12 or v26) auf CUDA GPU
         detector = None
         device_target = "cuda:0" if torch.cuda.is_available() else "cpu"
 
