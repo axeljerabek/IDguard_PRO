@@ -49,15 +49,17 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Download the yolov10 model:
-
-wget https://github.com/THU-MIG/yolov10/releases/download/v1.1/yolov10n.pt
+The models fiels are downloaded automatically during startup.
 
 ## 5. Configuration (Crucial!)
 
 Before starting, you must configure the paths and settings in the environment or via `config.py`:
 *   Verify that camera paths (`RTSP` or local `/dev/videoX`) are correct.
 *   Ensure the project directory permissions allow writing to `alerts/` and `logs/`.
+
+*   Copy the config.py.example file to config.py and edit it (stream locations etc):
+  cp config.py.example config.py
+
 
 ## 6. Starting the System
 
