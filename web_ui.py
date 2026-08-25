@@ -3,6 +3,7 @@ import os
 import sys
 import glob
 import subprocess
+import shutil
 import json
 import psutil
 from datetime import datetime
@@ -21,6 +22,10 @@ from helpers import (
 )
 
 app = Flask(__name__)
+
+# Archiv-Unterordner für aufbewahrte Aufnahmen (getrennt von den aktiven Alerts)
+ARCHIVE_DIR = os.path.join(ALERTS_DIR, 'archive')
+os.makedirs(ARCHIVE_DIR, exist_ok=True)
 
 AVAILABLE_CLASSES = {
     0: "Person", 1: "Bicycle", 2: "Car", 3: "Motorcycle", 4: "Airplane", 5: "Bus",
@@ -42,6 +47,23 @@ AVAILABLE_CLASSES = {
 
 # Worker-Thread starten
 start_thumbnail_thread()
+
+def build_event_list(directory):
+    """Baut die Event-Liste (Dateiname, Datum, Größe) für ein gegebenes Verzeichnis."""
+    files = sorted(glob.glob(os.path.join(directory, '*.mp4')), key=os.path.getmtime, reverse=True)
+    events = []
+    for f in files:
+        try:
+            mtime = os.path.getmtime(f)
+            size = os.path.getsize(f)
+            events.append({
+                'filename': os.path.basename(f),
+                'datetime': datetime.fromtimestamp(mtime).strftime('%d.%m.%Y %H:%M'),
+                'size': format_size(size)
+            })
+        except OSError:
+            pass
+    return events
 
 def get_detailed_system_status():
     """Ermittelt Modell, VRAM, RAM, CPU und GPU passend für das Dashboard-JS"""
@@ -175,20 +197,8 @@ def dashboard():
     pipeline_active = is_pipeline_running()
     system_status = get_detailed_system_status()
 
-    alerts = sorted(glob.glob(os.path.join(ALERTS_DIR, '*.mp4')), key=os.path.getmtime, reverse=True)
-    recent_events = []
-    for alert in alerts:
-        try:
-            mtime = os.path.getmtime(alert)
-            size = os.path.getsize(alert)
-            dt_str = datetime.fromtimestamp(mtime).strftime('%d.%m.%Y %H:%M')
-            recent_events.append({
-                'filename': os.path.basename(alert),
-                'datetime': dt_str,
-                'size': format_size(size)
-            })
-        except OSError:
-            pass
+    recent_events = build_event_list(ALERTS_DIR)
+    archived_events = build_event_list(ARCHIVE_DIR)
 
     streams = [s["name"] for s in STREAMS]
 
@@ -199,6 +209,7 @@ def dashboard():
         settings=settings,
         available_classes=AVAILABLE_CLASSES,
         recent_events=recent_events,
+        archived_events=archived_events,
         pipeline_active=pipeline_active,
         system_status=system_status
     )
@@ -287,13 +298,32 @@ def delete_video(filename: str):
             print(f"Fehler beim Löschen: {e}")
     return redirect(url_for('dashboard'))
 
-@app.route('/video/<filename>')
+@app.route('/archive/<filename>', methods=['POST'])
 @requires_auth
-def serve_annot_video(filename):
-    input_file = os.path.join(ALERTS_DIR, filename)
-    if not os.path.exists(input_file):
-        return f"File not found: {filename}", 404
+def archive_video(filename: str):
+    src_path = os.path.abspath(os.path.join(ALERTS_DIR, filename))
+    # Sicherheitscheck: Datei muss direkt (nicht rekursiv) im ALERTS_DIR liegen
+    if src_path.startswith(os.path.abspath(ALERTS_DIR)) and os.path.isfile(src_path) \
+            and os.path.dirname(src_path) == os.path.abspath(ALERTS_DIR):
+        try:
+            shutil.move(src_path, os.path.join(ARCHIVE_DIR, os.path.basename(src_path)))
+        except Exception as e:
+            print(f"Fehler beim Archivieren: {e}")
+    return redirect(url_for('dashboard'))
 
+@app.route('/delete_archived/<filename>', methods=['POST'])
+@requires_auth
+def delete_archived_video(filename: str):
+    file_path = os.path.abspath(os.path.join(ARCHIVE_DIR, filename))
+    if file_path.startswith(os.path.abspath(ARCHIVE_DIR)) and os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+        except Exception as e:
+            print(f"Fehler beim Löschen: {e}")
+    return redirect(url_for('dashboard'))
+
+def _transcode_stream(input_file):
+    """Transcodiert eine Datei on-the-fly per ffmpeg und streamt sie als MP4-Response."""
     def generate():
         process = subprocess.Popen(
             ['ffmpeg', '-i', input_file, '-c:v', 'libx264', '-preset', 'ultrafast',
@@ -313,6 +343,22 @@ def serve_annot_video(filename):
             process.stdout.close()
 
     return Response(generate(), mimetype='video/mp4')
+
+@app.route('/video/<filename>')
+@requires_auth
+def serve_annot_video(filename):
+    input_file = os.path.join(ALERTS_DIR, filename)
+    if not os.path.exists(input_file):
+        return f"File not found: {filename}", 404
+    return _transcode_stream(input_file)
+
+@app.route('/video/archive/<filename>')
+@requires_auth
+def serve_archived_video(filename):
+    input_file = os.path.join(ARCHIVE_DIR, filename)
+    if not os.path.exists(input_file):
+        return f"File not found: {filename}", 404
+    return _transcode_stream(input_file)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=19473)

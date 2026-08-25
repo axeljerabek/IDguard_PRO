@@ -426,16 +426,13 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
 }
 
 /* System Status Metrics */
+/* auto-fit statt fixer Viewport-Breakpoints: die Spaltenzahl richtet sich nach
+   der tatsächlich verfügbaren Breite der Karte, nicht nach dem Viewport —
+   verhindert das Zusammenquetschen der Labels bei bestimmten Fensterbreiten. */
 .system-status-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     gap: 12px;
-}
-@media (max-width: 480px) {
-    .system-status-grid { grid-template-columns: 1fr; }
-}
-@media (min-width: 1300px) {
-    .system-status-grid { grid-template-columns: repeat(4, 1fr); }
 }
 
 .status-metric-box {
@@ -447,18 +444,41 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
 }
 .status-metric-header {
     display: flex;
+    align-items: baseline;
     justify-content: space-between;
+    flex-wrap: nowrap;
+    gap: 8px;
     font-size: 0.82rem;
     color: var(--text-muted);
     margin-bottom: 6px;
 }
-.status-metric-header span:last-child { font-family: var(--font-mono); }
+.status-metric-header .metric-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+.status-metric-header span:last-child { font-family: var(--font-mono); white-space: nowrap; flex-shrink: 0; }
 .status-metric-value {
     font-family: var(--font-mono);
     font-size: 1.4rem;
     font-weight: 600;
-    margin-bottom: 9px;
     letter-spacing: -0.01em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.status-metric-sub {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-bottom: 9px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Segment-Meter statt schlichtem Balken — Anlehnung an Rack-Equipment-VU-Meter */
@@ -517,9 +537,9 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
     font-weight: 600;
 }
 
-/* Recent Recordings Event List */
+/* Recent Recordings / Archived Event Lists */
 .event-list {
-    max-height: 680px;
+    max-height: 420px;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
@@ -541,6 +561,16 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
 .event-info { display: flex; flex-direction: column; gap: 4px; overflow: hidden; min-width: 0; }
 .event-name { font-weight: 600; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .event-meta { font-size: 0.8rem; color: var(--text-muted); display: flex; gap: 15px; flex-wrap: wrap; font-family: var(--font-mono); }
+.event-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.btn-archive {
+    background: transparent;
+    color: var(--primary);
+    padding: 8px;
+    min-height: 40px;
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+}
+.btn-archive:hover { background: var(--primary-soft); }
 .btn-delete {
     background: transparent;
     color: var(--danger);

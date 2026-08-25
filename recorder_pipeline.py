@@ -1,6 +1,8 @@
 import os
 import sys
 import time
+import signal
+import threading
 import datetime
 import multiprocessing
 from collections import deque
@@ -12,6 +14,13 @@ os.environ["OPENBLAS_NUM_THREADS"] = "2"
 os.environ["MKL_NUM_THREADS"] = "2"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "2"
 os.environ["NUMEXPR_NUM_THREADS"] = "2"
+
+# Fix 4: cuDNN war hart deaktiviert (Kommentar: "cuDNN Sublibrary Mismatch"),
+# was auf der RTX 5090 spürbar Performance kostet, da cuDNN die
+# GPU-beschleunigten Convolutions übernimmt. Jetzt per ENV-Var umschaltbar,
+# damit sich ohne Codeänderung testen lässt, ob ein aktuelles PyTorch/cuDNN-
+# Paar das eigentliche Versionsproblem behebt: DISABLE_CUDNN=0 python3 ...
+DISABLE_CUDNN = os.environ.get("DISABLE_CUDNN", "0") == "1"
 
 # 1. PATH RESOLUTION
 DIR = os.path.dirname(os.path.abspath(__file__))
@@ -26,6 +35,13 @@ try:
 except ImportError as e:
     print(f"❌ CRITICAL ERROR: Could not load config.py: {e}")
     sys.exit(1)
+
+
+class GracefulShutdown(BaseException):
+    """Eigene Exception statt Exception-Basisklasse, damit sie nicht versehentlich
+    vom generischen 'except Exception' als Crash geloggt wird (siehe Fix 2)."""
+    pass
+
 
 # 2. Class Definition for the Camera Agent
 class CameraAgent(multiprocessing.Process):
@@ -43,10 +59,22 @@ class CameraAgent(multiprocessing.Process):
         try:
             from config import get_stream_logger as gs, YOLO_VERSION
             self.logger = gs(self.name)
-        except:
+        except Exception:
             import logging
             self.logger = logging.getLogger(self.name)
-            YOLO_VERSION = "v10" # Fallback
+            YOLO_VERSION = "v10"  # Fallback
+
+        # Fix 2: SIGTERM (Standard-Signal von `pkill`/`kill`, siehe stop.sh) hat
+        # ohne eigenen Handler die Default-Disposition "sofort beenden" — das
+        # überspringt jeden Python-Code inkl. finally-Blöcken. Ohne diesen
+        # Handler wird eine laufende Aufnahme beim Stoppen NIE sauber
+        # geschlossen (kein Flush, potenziell kaputte MP4-Datei).
+        def _handle_signal(signum, frame):
+            self._stop_event.set()
+            raise GracefulShutdown()
+
+        signal.signal(signal.SIGTERM, _handle_signal)
+        signal.signal(signal.SIGINT, _handle_signal)
 
         print(f"🚀 [Process Start] Initializing agent: {self.name} (Using YOLO {YOLO_VERSION})")
 
@@ -54,8 +82,9 @@ class CameraAgent(multiprocessing.Process):
             import av
             import torch
 
-            # Umgeht den cuDNN Sublibrary Mismatch. CUDA läuft voll weiter!
-            torch.backends.cudnn.enabled = False
+            # Umgeht den cuDNN Sublibrary Mismatch, kostet dafür GPU-Performance.
+            # Siehe DISABLE_CUDNN-Kommentar oben.
+            torch.backends.cudnn.enabled = not DISABLE_CUDNN
             torch.set_num_threads(2)
 
             from ultralytics import YOLO
@@ -67,7 +96,11 @@ class CameraAgent(multiprocessing.Process):
         detector = None
         device_target = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-        if os.path.exists(MODEL_PATH) and MODEL_PATH:
+        # Fix 1: Reihenfolge war `os.path.exists(MODEL_PATH) and MODEL_PATH` —
+        # os.path.exists(None) wirft TypeError, wenn MODEL_PATH mal None/leer
+        # ist, BEVOR die and-Kurzschlussauswertung das prüfen kann. Erst auf
+        # MODEL_PATH prüfen, dann erst exists() aufrufen.
+        if MODEL_PATH and os.path.exists(MODEL_PATH):
             try:
                 detector = YOLO(MODEL_PATH)
                 if device_target == "cuda:0":
@@ -80,9 +113,20 @@ class CameraAgent(multiprocessing.Process):
         else:
             self.logger.warning("⚠️ No valid YOLO path found; running in VISION-ONLY mode.")
 
-        # Gemeinsamer Pre-Roll Puffer für Video und Audio (chronologisch sortiert)
-        max_buffer_items = int((TARGET_FPS + 50) * PRE_ROLL_SEC)
-        av_buffer = deque(maxlen=max_buffer_items)
+        # Fix 5: Gemeinsamer Pre-Roll Puffer für Video und Audio, jetzt primär
+        # nach Timestamp statt nach geschätzter Item-Anzahl getrimmt. Die alte
+        # Formel `(TARGET_FPS + 50) * PRE_ROLL_SEC` war nur eine Annahme über
+        # die Audio-Frame-Rate — kam mehr Audio rein als angenommen, flogen
+        # Video-Frames früher raus als der eingestellte PRE_ROLL_SEC vorsah,
+        # ohne dass das irgendwo sichtbar wurde. maxlen bleibt als grobzügiges
+        # Sicherheitsnetz gegen Speicher-Runaway, trimmt aber nicht mehr aktiv.
+        safety_cap = int((TARGET_FPS + 60) * PRE_ROLL_SEC) * 3
+        av_buffer = deque(maxlen=safety_cap)
+
+        def trim_buffer():
+            cutoff = time.time() - PRE_ROLL_SEC
+            while av_buffer and av_buffer[0][2] < cutoff:
+                av_buffer.popleft()
 
         state = "IDLE"
         post_roll_end_time = 0
@@ -160,8 +204,7 @@ class CameraAgent(multiprocessing.Process):
             except Exception as e:
                 self.logger.error(f"❌ Audio encoding error: {e}")
 
-        def write_buffered_item(item):
-            item_type, data = item
+        def write_buffered_item(item_type, data):
             if item_type == "video":
                 encode_video_frame(data)
             elif item_type == "audio":
@@ -192,22 +235,29 @@ class CameraAgent(multiprocessing.Process):
                         if packet.stream.type == 'video':
                             for frame in packet.decode():
                                 img_bgr = frame.to_ndarray(format='bgr24')
+                                now = time.time()
 
-                                av_buffer.append(("video", img_bgr.copy()))
+                                av_buffer.append(("video", img_bgr.copy(), now))
+                                trim_buffer()
 
-                                person_detected = False
+                                # Fix 6: "person_detected"/"Person" umbenannt, da
+                                # DETECTION_CLASSES inzwischen beliebige Objektarten
+                                # sein können (Tiere, Pakete, ...) — die alten Logs
+                                # sagten irreführend "Person found", auch wenn z.B.
+                                # eine Katze erkannt wurde.
+                                target_detected = False
                                 if detector:
                                     # HIER wird die CONFIDENCE_THRESHOLD direkt genutzt
                                     results = detector(img_bgr, verbose=False, classes=DETECTION_CLASSES, conf=CONFIDENCE_THRESHOLD, device=device_target)
-                                    person_detected = len(results[0].boxes) > 0
+                                    target_detected = len(results[0].boxes) > 0
 
                                 if state == "IDLE":
-                                    if person_detected:
+                                    if target_detected:
                                         state = "RECORDING"
                                         ts_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                                         os.makedirs(ALERTS_DIR, exist_ok=True)
                                         video_file_path = os.path.join(ALERTS_DIR, f"{self.name}_EVENT_{ts_str}.mp4")
-                                        self.logger.warning(f"🚨 [DETECTED] Person found! Starting recording (YOLO {YOLO_VERSION}, NVENC + Audio).")
+                                        self.logger.warning(f"🚨 [DETECTED] Target object found! Starting recording (YOLO {YOLO_VERSION}, NVENC + Audio).")
 
                                         h, w = img_bgr.shape[:2]
                                         try:
@@ -230,8 +280,8 @@ class CameraAgent(multiprocessing.Process):
                                                 out_audio.rate = audio_in_stream.rate if audio_in_stream.rate else 44100
                                                 out_audio.layout = audio_in_stream.layout.name if audio_in_stream.layout else 'stereo'
 
-                                            for item in av_buffer:
-                                                write_buffered_item(item)
+                                            for item_type, data, _ts in av_buffer:
+                                                write_buffered_item(item_type, data)
 
                                         except Exception as e:
                                             self.logger.error(f"❌ Failed to initialize video writer: {e}")
@@ -239,18 +289,18 @@ class CameraAgent(multiprocessing.Process):
                                             state = "IDLE"
 
                                 elif state == "RECORDING":
-                                    if person_detected:
+                                    if target_detected:
                                         encode_video_frame(img_bgr)
                                     else:
                                         state = "POST_ROLL"
                                         post_roll_end_time = time.time() + POST_ROLL_SEC
-                                        self.logger.info(f"🏠 [GONE] Person departed. Monitoring for {POST_ROLL_SEC}s extra.")
+                                        self.logger.info(f"🏠 [GONE] Target object left frame. Monitoring for {POST_ROLL_SEC}s extra.")
                                         encode_video_frame(img_bgr)
 
                                 elif state == "POST_ROLL":
-                                    if person_detected:
+                                    if target_detected:
                                         state = "RECORDING"
-                                        self.logger.info("🚨 [DETECTED] Person returned! Resuming recording.")
+                                        self.logger.info("🚨 [DETECTED] Target object returned! Resuming recording.")
                                         encode_video_frame(img_bgr)
                                     else:
                                         encode_video_frame(img_bgr)
@@ -262,27 +312,37 @@ class CameraAgent(multiprocessing.Process):
                         # AUDIO FRAME PROCESSING
                         elif packet.stream.type == 'audio':
                             for a_frame in packet.decode():
-                                av_buffer.append(("audio", a_frame))
+                                now = time.time()
+                                av_buffer.append(("audio", a_frame, now))
+                                trim_buffer()
                                 if state in ["RECORDING", "POST_ROLL"]:
                                     encode_audio_frame(a_frame)
 
+                except GracefulShutdown:
+                    raise
                 except Exception as e:
                     self.logger.error(f"⚠️ [STREAM LOST] '{self.name}': {e}. Retrying in 5s...")
                     close_writer()
                     state = "IDLE"
                     if container:
-                        try: container.close()
-                        except: pass
+                        try:
+                            container.close()
+                        except Exception:
+                            pass
                     container = None
                     time.sleep(5)
 
+        except GracefulShutdown:
+            self.logger.info(f"🛑 [{self.name}] Shutdown-Signal empfangen, schließe sauber ab...")
         except Exception as e:
             self.logger.error(f"💥 Process Crash [{self.name}]: {e}")
         finally:
             close_writer()
             if container:
-                try: container.close()
-                except: pass
+                try:
+                    container.close()
+                except Exception:
+                    pass
             self.logger.info("🛑 Agent process shutting down.")
 
     def stop_agent(self):
@@ -296,35 +356,63 @@ if __name__ == "__main__":
     system_logger = get_stream_logger("SYSTEM")
     system_logger.info("🚀 [MASTER] Initializing Multi-Agent Pipeline...")
 
-    all_agents = []
+    # Fix 2 (Master-Seite): stop.sh killt per `pkill -f "recorder_pipeline.py"`,
+    # was auch den Master-Prozess selbst trifft (SIGTERM, nicht SIGINT) — ohne
+    # eigenen Handler wäre `except KeyboardInterrupt` unten wirkungslos und die
+    # Cleanup-Schleife für alle Worker würde nie laufen.
+    shutdown_requested = threading.Event()
+
+    def _handle_master_signal(signum, frame):
+        system_logger.info(f"[MASTER] Signal {signum} empfangen — fahre Pipeline sauber herunter...")
+        shutdown_requested.set()
+
+    signal.signal(signal.SIGTERM, _handle_master_signal)
+    signal.signal(signal.SIGINT, _handle_master_signal)
+
+    # Fix 3: statt nur (proc) merken wir uns auch die Stream-Config, damit ein
+    # abgestürzter Worker mit denselben Settings automatisch neu gestartet
+    # werden kann, statt nur eine Warnung zu loggen.
+    agents = []
     for stream in STREAMS:
         if stream.get("enabled", False):
             agent_proc = CameraAgent(stream)
             agent_proc.start()
-            all_agents.append(agent_proc)
+            agents.append({'process': agent_proc, 'stream': stream})
             system_logger.info(f"📡 [MASTER] Launched Process Worker for: {stream['name']}")
         else:
             system_logger.info(f"⏭️ [MASTER] Skipping Disabled Stream: {stream['name']}")
 
-    if not all_agents:
+    if not agents:
         system_logger.error("❌ No active streams found! Exiting.")
         sys.exit(1)
 
     system_logger.info("[MASTER] All processes running in parallel. Monitoring ACTIVE.")
 
-    try:
-        while True:
-            alive_count = sum(1 for p in all_agents if p.is_alive())
-            if alive_count < len(all_agents):
-                system_logger.warning(f"⚠️ ALERT: {len(all_agents) - alive_count} camera process(es) died!")
-            time.sleep(15)
-    except KeyboardInterrupt:
-        system_logger.info("[MASTER] Shutdown signal received.")
+    while not shutdown_requested.is_set():
+        for entry in agents:
+            proc = entry['process']
+            if not proc.is_alive():
+                stream = entry['stream']
+                exitcode = proc.exitcode
+                system_logger.warning(
+                    f"⚠️ [MASTER] Worker '{stream['name']}' ist beendet (exitcode={exitcode}) — starte automatisch neu..."
+                )
+                new_proc = CameraAgent(stream)
+                new_proc.start()
+                entry['process'] = new_proc
 
-    for a in all_agents:
-        a.stop_agent()
-        a.join(timeout=2)
-        if a.is_alive():
-            a.terminate()
+        # Interruptible statt time.sleep(15): reagiert sofort auf ein Signal
+        # statt bis zu 15s zu blockieren.
+        shutdown_requested.wait(15)
+
+    system_logger.info("[MASTER] Shutting down all workers...")
+    for entry in agents:
+        proc = entry['process']
+        proc.stop_agent()
+        proc.join(timeout=5)
+        if proc.is_alive():
+            system_logger.warning(f"⚠️ [MASTER] '{entry['stream']['name']}' reagiert nicht — erzwinge Terminate.")
+            proc.terminate()
+            proc.join(timeout=2)
 
     system_logger.info("[MASTER] Pipeline shutdown complete.")
