@@ -51,8 +51,8 @@ The system has been thoroughly tested and runs rock-solid across both compact ed
 
 | System | Specs | Buffer Settings | Status |
 | :--- | :--- | :--- | :--- |
-| **Intel NUC 11 Enthusiast** | 32 GB RAM \| NVIDIA RTX 2060 (6 GB VRAM) | Pre-roll: 5s / Post-roll: 10s | Stable |
-| **High-End Workstation** | Intel Core Ultra 9 285K \| 64 GB RAM \| NVIDIA RTX 5090 (32 GB VRAM) | Pre-roll: 10s / Post-roll: 30s | Stable |
+| **Intel NUC 11 Enthusiast** | 32 GB RAM \| NVIDIA RTX 2060 (6 GB VRAM) | 4 streams 30 FPS FUllHD / Pre-roll: 5s / Post-roll: 10s | Stable |
+| **High-End Workstation** | Intel Core Ultra 9 285K \| 64 GB RAM \| NVIDIA RTX 5090 (32 GB VRAM) | 8 streams 30 FPS FullHD / Pre-roll: 10s / Post-roll: 30s | Stable |
 
 ---
 
