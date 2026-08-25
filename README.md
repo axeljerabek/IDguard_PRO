@@ -1,6 +1,6 @@
 # IDguard PRO
 
-IDguard PRO is a high-performance, local AI surveillance system designed for real-time person detection and event-driven video recording. It leverages the advanced YOLOv10 architecture to provide intelligent monitoring with minimal latency and zero reliance on cloud services.
+IDguard PRO is a high-performance, local AI surveillance system designed for real-time person detection and event-driven video recording. It leverages the advanced YOLOv10 architecture to provide intelligent monitoring with minimal latency and zero reliance on cloud services. IDguard_PRO was partly written with AI (Google Gemini, Claude Code and local models) to fix bugs and make the software more stable.
 
 ## Overview
 
