@@ -1,10 +1,13 @@
-from flask import Flask, render_template, request, redirect, url_for, Response
+from flask import Flask, render_template, request, redirect, url_for, Response, abort
 import os
 import sys
 import glob
 import subprocess
 import shutil
 import json
+import secrets
+import threading
+import time
 import psutil
 from datetime import datetime
 
@@ -27,6 +30,21 @@ app = Flask(__name__)
 ARCHIVE_DIR = os.path.join(ALERTS_DIR, 'archive')
 os.makedirs(ARCHIVE_DIR, exist_ok=True)
 
+# Harte Obergrenze für geladene Event-Listen, damit glob()/sort() bei Monaten
+# an Aufnahmen nicht bei jedem Request/Poll unnötig groß wird.
+MAX_EVENTS = 200
+
+# CSRF-Token: pro Prozessstart neu generiert, in jede Seite eingebettet und bei
+# jeder zustandsändernden POST-Route geprüft. Schützt vor klassischem CSRF von
+# einer fremden Seite aus (die den Token nicht kennt), auch wenn der Browser
+# gecachte Basic-Auth-Header automatisch mitschickt.
+CSRF_TOKEN = secrets.token_hex(32)
+
+def _verify_csrf():
+    token = request.form.get('csrf_token', '')
+    if not secrets.compare_digest(token, CSRF_TOKEN):
+        abort(403)
+
 AVAILABLE_CLASSES = {
     0: "Person", 1: "Bicycle", 2: "Car", 3: "Motorcycle", 4: "Airplane", 5: "Bus",
     6: "Train", 7: "Truck", 8: "Boat", 9: "Traffic light", 10: "Fire hydrant", 11: "Stop sign",
@@ -48,26 +66,54 @@ AVAILABLE_CLASSES = {
 # Worker-Thread starten
 start_thumbnail_thread()
 
-def build_event_list(directory):
+# --- Pipeline-Neustart im Hintergrund (Punkt 1: blockiert das UI nicht mehr) ---
+pipeline_restart_status = {"restarting": False}
+_restart_lock = threading.Lock()
+
+def _restart_pipeline_background():
+    with _restart_lock:
+        pipeline_restart_status["restarting"] = True
+    try:
+        subprocess.run(
+            ['/bin/bash', os.path.join(PROJECT_ROOT, 'stop.sh')],
+            cwd=PROJECT_ROOT
+        )
+        subprocess.Popen(
+            ['/bin/bash', os.path.join(PROJECT_ROOT, 'start_detached.sh')],
+            cwd=PROJECT_ROOT,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        # Kurze Wartezeit, damit is_pipeline_running() den neuen Prozess
+        # sicher erkennt, bevor das Restarting-Flag zurückgesetzt wird.
+        time.sleep(2)
+    finally:
+        with _restart_lock:
+            pipeline_restart_status["restarting"] = False
+
+def build_event_list(directory, limit=MAX_EVENTS):
     """Baut die Event-Liste (Dateiname, Datum, Größe) für ein gegebenes Verzeichnis."""
-    files = sorted(glob.glob(os.path.join(directory, '*.mp4')), key=os.path.getmtime, reverse=True)
+    files = sorted(glob.glob(os.path.join(directory, '*.mp4')), key=os.path.getmtime, reverse=True)[:limit]
     events = []
     for f in files:
         try:
             mtime = os.path.getmtime(f)
             size = os.path.getsize(f)
+            # recorder_pipeline.py legt beim Trigger einen Screenshot mit
+            # gleichem Basisnamen ab (<name>.mp4 -> <name>.jpg)
+            thumb_path = os.path.splitext(f)[0] + '.jpg'
             events.append({
                 'filename': os.path.basename(f),
                 'datetime': datetime.fromtimestamp(mtime).strftime('%d.%m.%Y %H:%M'),
-                'size': format_size(size)
+                'size': format_size(size),
+                'has_thumbnail': os.path.exists(thumb_path)
             })
         except OSError:
             pass
     return events
 
 def get_detailed_system_status():
-    """Ermittelt Modell, VRAM, RAM, CPU und GPU passend für das Dashboard-JS"""
-    # Settings zentral über helpers.load_settings() laden (inkl. Fallbacks auf config.py)
+    """Ermittelt Modell, VRAM, RAM, CPU, GPU sowie Pipeline-/Event-Status für Dashboard + /api/status"""
     settings = load_settings()
     active_version = settings.get('YOLO_VERSION', YOLO_VERSION)
     active_size = settings.get('MODEL_SIZE', MODEL_SIZE)
@@ -159,6 +205,9 @@ def get_detailed_system_status():
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
 
+    with _restart_lock:
+        restarting = pipeline_restart_status["restarting"]
+
     # Exakte Datenstruktur, die das Frontend (Dashboard JS) erwartet
     return {
         'cpu': {
@@ -186,7 +235,11 @@ def get_detailed_system_status():
         'active_model': formatted_model_name,
         'gpu_name': gpu_name,
         'processes': processes_data,
-        'active_count': len(processes_data)
+        'active_count': len(processes_data),
+        'pipeline_active': is_pipeline_running(),
+        'restarting': restarting,
+        'recent_events': build_event_list(ALERTS_DIR),
+        'archived_events': build_event_list(ARCHIVE_DIR),
     }
 
 @app.route('/')
@@ -194,13 +247,14 @@ def get_detailed_system_status():
 def dashboard():
     overrides = load_overrides()
     settings = load_settings()
-    pipeline_active = is_pipeline_running()
     system_status = get_detailed_system_status()
 
-    recent_events = build_event_list(ALERTS_DIR)
-    archived_events = build_event_list(ARCHIVE_DIR)
-
     streams = [s["name"] for s in STREAMS]
+
+    # Konfigurierbare Vorschau-Rate (Grid-Thumbnails + Live-View-Lightbox),
+    # per Slider in den Settings zwischen 0.5 und 5 fps einstellbar.
+    thumbnail_fps = settings.get('THUMBNAIL_FPS', 1) or 1
+    thumbnail_interval_ms = int(round(1000 / thumbnail_fps))
 
     return render_template(
         'dashboard.html',
@@ -208,10 +262,13 @@ def dashboard():
         overrides=overrides,
         settings=settings,
         available_classes=AVAILABLE_CLASSES,
-        recent_events=recent_events,
-        archived_events=archived_events,
-        pipeline_active=pipeline_active,
-        system_status=system_status
+        recent_events=system_status['recent_events'],
+        archived_events=system_status['archived_events'],
+        pipeline_active=system_status['pipeline_active'],
+        pipeline_restarting=system_status['restarting'],
+        system_status=system_status,
+        csrf_token=CSRF_TOKEN,
+        thumbnail_interval_ms=thumbnail_interval_ms
     )
 
 @app.route('/api/status')
@@ -226,9 +283,24 @@ def get_thumbnail(stream_name):
         return Response(LATEST_FRAMES[stream_name], mimetype='image/jpeg')
     return Response("", status=204)
 
+@app.route('/stream/<stream_name>')
+@requires_auth
+def video_stream(stream_name):
+    """Echter MJPEG-Push-Stream für die Live-View-Lightbox, statt Client-seitigem
+    Bild-Polling alle 250ms."""
+    def generate():
+        boundary = b'--frame'
+        while True:
+            frame = LATEST_FRAMES.get(stream_name)
+            if frame:
+                yield (boundary + b'\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            time.sleep(0.1)  # ~10 fps Server-Push
+    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
 @app.route('/start', methods=['POST'])
 @requires_auth
 def start_pipeline():
+    _verify_csrf()
     subprocess.Popen(
         ['/bin/bash', os.path.join(PROJECT_ROOT, 'start_detached.sh')],
         cwd=PROJECT_ROOT,
@@ -240,6 +312,7 @@ def start_pipeline():
 @app.route('/stop', methods=['POST'])
 @requires_auth
 def stop_pipeline():
+    _verify_csrf()
     subprocess.run(
         ['/bin/bash', os.path.join(PROJECT_ROOT, 'stop.sh')],
         cwd=PROJECT_ROOT
@@ -249,58 +322,103 @@ def stop_pipeline():
 @app.route('/toggle/<name>', methods=['POST'])
 @requires_auth
 def toggle_stream(name):
+    _verify_csrf()
     overrides = load_overrides()
     overrides[name] = 'ON' if overrides.get(name, 'OFF') == 'OFF' else 'OFF'
     save_overrides(overrides)
     return redirect(url_for('dashboard'))
 
+def _clamp(value, lo, hi):
+    return max(lo, min(hi, value))
+
 @app.route('/save_settings', methods=['POST'])
 @requires_auth
 def save_pipeline_settings():
+    _verify_csrf()
+
+    # Server-seitige Validierung/Clamping: verhindert unsinnige/negative Werte,
+    # auch falls das Formular umgangen oder manipuliert wird.
+    try:
+        target_fps = int(request.form.get('TARGET_FPS', 30))
+    except (TypeError, ValueError):
+        target_fps = 30
+    try:
+        confidence = float(request.form.get('CONFIDENCE_THRESHOLD', 0.5))
+    except (TypeError, ValueError):
+        confidence = 0.5
+    try:
+        pre_roll = int(request.form.get('PRE_ROLL_SEC', 10))
+    except (TypeError, ValueError):
+        pre_roll = 10
+    try:
+        post_roll = int(request.form.get('POST_ROLL_SEC', 30))
+    except (TypeError, ValueError):
+        post_roll = 30
+    try:
+        thumbnail_fps = float(request.form.get('THUMBNAIL_FPS', 1))
+    except (TypeError, ValueError):
+        thumbnail_fps = 1.0
+
+    old_settings = load_settings()
+
     settings = {
         "YOLO_VERSION": request.form.get('YOLO_VERSION', 'v26'),
         "MODEL_SIZE": request.form.get('MODEL_SIZE', 'x'),
-        "TARGET_FPS": int(request.form.get('TARGET_FPS', 30)),
-        "CONFIDENCE_THRESHOLD": float(request.form.get('CONFIDENCE_THRESHOLD', 0.5)),
-        "PRE_ROLL_SEC": int(request.form.get('PRE_ROLL_SEC', 10)),
-        "POST_ROLL_SEC": int(request.form.get('POST_ROLL_SEC', 30)),
-        "DETECTION_CLASSES": [int(x) for x in request.form.getlist('DETECTION_CLASSES')] or [0]
+        "TARGET_FPS": _clamp(target_fps, 1, 60),
+        "CONFIDENCE_THRESHOLD": round(_clamp(confidence, 0.05, 1.0), 2),
+        "PRE_ROLL_SEC": _clamp(pre_roll, 0, 120),
+        "POST_ROLL_SEC": _clamp(post_roll, 0, 300),
+        "DETECTION_CLASSES": [int(x) for x in request.form.getlist('DETECTION_CLASSES')] or [0],
+        "THUMBNAIL_FPS": round(_clamp(thumbnail_fps, 0.5, 5.0), 1)
     }
 
     with open(SETTINGS_F, 'w') as f:
         json.dump(settings, f, indent=4)
 
-    # Läuft die Pipeline bereits, neu starten, damit z.B. ein geändertes
-    # YOLO-Modell oder neue Erkennungsklassen sofort greifen. Läuft sie
-    # nicht, wird nur gespeichert (kein ungewollter Autostart).
-    if is_pipeline_running():
-        subprocess.run(
-            ['/bin/bash', os.path.join(PROJECT_ROOT, 'stop.sh')],
-            cwd=PROJECT_ROOT
-        )
-        subprocess.Popen(
-            ['/bin/bash', os.path.join(PROJECT_ROOT, 'start_detached.sh')],
-            cwd=PROJECT_ROOT,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
+    # Nur neu starten, wenn sich tatsächlich pipeline-relevante Werte geändert
+    # haben — THUMBNAIL_FPS ist eine reine Anzeige-Einstellung fürs Dashboard
+    # und würde sonst unnötig einen Neustart auslösen.
+    PIPELINE_RELEVANT_KEYS = (
+        "YOLO_VERSION", "MODEL_SIZE", "TARGET_FPS", "CONFIDENCE_THRESHOLD",
+        "PRE_ROLL_SEC", "POST_ROLL_SEC", "DETECTION_CLASSES"
+    )
+    pipeline_relevant_changed = any(
+        old_settings.get(k) != settings.get(k) for k in PIPELINE_RELEVANT_KEYS
+    )
 
-    return redirect(url_for('dashboard'))
+    restarted = False
+    if pipeline_relevant_changed and is_pipeline_running():
+        threading.Thread(target=_restart_pipeline_background, daemon=True).start()
+        restarted = True
+
+    return redirect(url_for('dashboard', saved=1, restarted=int(restarted)))
+
+def _remove_matching_thumbnail(video_path):
+    """Löscht den zu einem Video gehörenden Trigger-Screenshot mit, falls vorhanden."""
+    thumb_path = os.path.splitext(video_path)[0] + '.jpg'
+    if os.path.exists(thumb_path):
+        try:
+            os.remove(thumb_path)
+        except Exception as e:
+            print(f"Fehler beim Löschen des Thumbnails: {e}")
 
 @app.route('/delete/<filename>', methods=['POST'])
 @requires_auth
 def delete_video(filename: str):
+    _verify_csrf()
     file_path = os.path.abspath(os.path.join(ALERTS_DIR, filename))
     if file_path.startswith(os.path.abspath(ALERTS_DIR)) and os.path.exists(file_path):
         try:
             os.remove(file_path)
         except Exception as e:
             print(f"Fehler beim Löschen: {e}")
+        _remove_matching_thumbnail(file_path)
     return redirect(url_for('dashboard'))
 
 @app.route('/archive/<filename>', methods=['POST'])
 @requires_auth
 def archive_video(filename: str):
+    _verify_csrf()
     src_path = os.path.abspath(os.path.join(ALERTS_DIR, filename))
     # Sicherheitscheck: Datei muss direkt (nicht rekursiv) im ALERTS_DIR liegen
     if src_path.startswith(os.path.abspath(ALERTS_DIR)) and os.path.isfile(src_path) \
@@ -309,18 +427,45 @@ def archive_video(filename: str):
             shutil.move(src_path, os.path.join(ARCHIVE_DIR, os.path.basename(src_path)))
         except Exception as e:
             print(f"Fehler beim Archivieren: {e}")
+        # Passenden Trigger-Screenshot mitnehmen, damit er im Archiv weiterhin angezeigt wird
+        thumb_src = os.path.splitext(src_path)[0] + '.jpg'
+        if os.path.exists(thumb_src):
+            try:
+                shutil.move(thumb_src, os.path.join(ARCHIVE_DIR, os.path.basename(thumb_src)))
+            except Exception as e:
+                print(f"Fehler beim Archivieren des Thumbnails: {e}")
     return redirect(url_for('dashboard'))
 
 @app.route('/delete_archived/<filename>', methods=['POST'])
 @requires_auth
 def delete_archived_video(filename: str):
+    _verify_csrf()
     file_path = os.path.abspath(os.path.join(ARCHIVE_DIR, filename))
     if file_path.startswith(os.path.abspath(ARCHIVE_DIR)) and os.path.exists(file_path):
         try:
             os.remove(file_path)
         except Exception as e:
             print(f"Fehler beim Löschen: {e}")
+        _remove_matching_thumbnail(file_path)
     return redirect(url_for('dashboard'))
+
+@app.route('/thumb/<filename>')
+@requires_auth
+def serve_thumbnail_image(filename):
+    file_path = os.path.abspath(os.path.join(ALERTS_DIR, filename))
+    if not file_path.startswith(os.path.abspath(ALERTS_DIR)) or not os.path.exists(file_path):
+        return "", 404
+    return Response(open(file_path, 'rb').read(), mimetype='image/jpeg')
+
+@app.route('/thumb/archive/<filename>')
+@requires_auth
+def serve_archived_thumbnail_image(filename):
+    file_path = os.path.abspath(os.path.join(ARCHIVE_DIR, filename))
+    if not file_path.startswith(os.path.abspath(ARCHIVE_DIR)) or not os.path.exists(file_path):
+        return "", 404
+    return Response(open(file_path, 'rb').read(), mimetype='image/jpeg')
+
+
 
 def _transcode_stream(input_file):
     """Transcodiert eine Datei on-the-fly per ffmpeg und streamt sie als MP4-Response."""
@@ -361,4 +506,11 @@ def serve_archived_video(filename):
     return _transcode_stream(input_file)
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=19473)
+    # threaded=True: sonst blockiert ein laufender Pipeline-Neustart (stop.sh +
+    # start_detached.sh) die komplette Web-UI inkl. /api/status-Polling, da der
+    # Flask-Dev-Server standardmäßig single-threaded ist.
+    #
+    # Hinweis für Dauerbetrieb: der eingebaute Dev-Server ist nicht für
+    # Produktivbetrieb gedacht. Für fenrir empfiehlt sich gunicorn/waitress
+    # dahinter plus ein Reverse Proxy (Caddy/nginx) mit TLS davor, siehe Chat.
+    app.run(host='0.0.0.0', port=19473, threaded=True)

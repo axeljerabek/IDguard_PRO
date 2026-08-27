@@ -4,9 +4,12 @@
 
 :root {
     /* Basis: warmes Anthrazit-Indigo statt reinem Blau-Schwarz */
-    --bg: #14131b;
+/*    --bg: #14131b; */
+/*    --bg: #1c1a24; */
+    --bg: #242230;
     --bg-wash: radial-gradient(ellipse 900px 500px at 50% -10%, rgba(232, 163, 61, 0.06), transparent 60%);
-    --card-bg: #1c1b26;
+/*    --card-bg: #1c1b26; */
+    --card-bg: #2a2836;
     --card-bg-inset: #15141d;
     --text: #f3efe6;
     --text-muted: #948d84;
@@ -53,6 +56,8 @@ body {
     line-height: 1.55;
     padding: clamp(14px, 3vw, 26px);
     -webkit-font-smoothing: antialiased;
+    max-width: 100vw;
+    overflow-x: hidden;
 }
 
 .container {
@@ -67,6 +72,7 @@ h1 {
     margin-bottom: var(--gap);
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 12px;
 }
 h1 i { color: var(--primary); }
@@ -143,6 +149,11 @@ h1 i { color: var(--primary); }
     color: var(--danger);
     border: 1px solid rgba(242, 84, 91, 0.4);
 }
+.status-restarting {
+    background-color: var(--primary-soft);
+    color: var(--primary);
+    border: 1px solid rgba(232, 163, 61, 0.4);
+}
 
 /* LED-Punkt: pulsiert nur wenn aktiv, evoziert eine Rec-/Betriebs-LED */
 .rec-dot {
@@ -181,20 +192,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
     outline-offset: 2px;
 }
 
-.btn-start {
-    background-color: var(--success);
-    color: #0e1a14;
-    width: 100%;
-}
-.btn-start:hover { background-color: #4fe0a2; }
-
-.btn-stop {
-    background-color: var(--danger);
-    color: #1c0e0f;
-    width: 100%;
-}
-.btn-stop:hover { background-color: #f76e74; }
-
 .btn-save {
     background-color: var(--primary);
     color: #241804;
@@ -203,12 +200,112 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 .btn-save:hover { background-color: var(--primary-hover); }
 
-.control-row {
+/* Schmale Pipeline-Control-Leiste: kompakt, dezent — keine "Helden"-Buttons */
+.pipeline-bar {
     display: flex;
-    gap: 15px;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    background-color: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 12px 18px;
+    margin-bottom: var(--gap);
 }
+.pipeline-bar-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.pipeline-bar-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+.pipeline-bar-label i { color: var(--primary); }
+.pipeline-bar-actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* Dezente Outline-Buttons statt knalliger Solid-Fills — sichtbar, aber nicht
+   die Hauptdarsteller der Seite */
+.btn-ghost {
+    background: transparent;
+    padding: 8px 16px;
+    min-height: 38px;
+    font-size: 0.88rem;
+    border: 1px solid var(--border);
+}
+.btn-ghost-success {
+    color: var(--success);
+    border-color: rgba(62, 207, 142, 0.4);
+}
+.btn-ghost-success:hover { background: var(--success-soft); border-color: var(--success); }
+.btn-ghost-danger {
+    color: var(--danger);
+    border-color: rgba(242, 84, 91, 0.4);
+}
+.btn-ghost-danger:hover { background: var(--danger-soft); border-color: var(--danger); }
+
 @media (max-width: 420px) {
-    .control-row { flex-direction: column; }
+    .pipeline-bar { flex-direction: column; align-items: stretch; }
+    .pipeline-bar-actions { justify-content: stretch; }
+    .pipeline-bar-actions form { flex: 1; }
+    .btn-ghost { width: 100%; }
+}
+
+/* Aufklappbare Sekundär-Bereiche (Settings / Status / Archiv) */
+.collapse-card {
+    background-color: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    margin-bottom: var(--gap);
+    overflow: hidden;
+}
+.collapse-card summary {
+    list-style: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    font-weight: 600;
+    font-size: 1.05rem;
+    color: var(--text);
+    user-select: none;
+}
+.collapse-card summary::-webkit-details-marker { display: none; }
+.collapse-card summary span:first-child {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.collapse-card summary i:first-child { color: var(--primary); }
+.collapse-card .chevron {
+    color: var(--text-muted);
+    transition: transform 0.2s ease;
+    font-size: 0.85em;
+}
+.collapse-card[open] .chevron { transform: rotate(180deg); }
+.collapse-card[open] summary {
+    border-bottom: 1px solid var(--border);
+}
+.collapse-body {
+    padding: 4px 20px 20px;
+}
+.count-badge {
+    background: var(--border);
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    margin-left: 6px;
+    font-weight: 500;
 }
 
 .stream-container {
@@ -558,6 +655,20 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
     transition: border-color 0.15s;
 }
 .event-item:hover { border-color: var(--primary); }
+.event-thumb {
+    width: 72px;
+    aspect-ratio: 16/9;
+    flex-shrink: 0;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+}
+.event-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.event-thumb i { color: var(--text-dim); font-size: 1.3rem; }
 .event-info { display: flex; flex-direction: column; gap: 4px; overflow: hidden; min-width: 0; }
 .event-name { font-weight: 600; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .event-meta { font-size: 0.8rem; color: var(--text-muted); display: flex; gap: 15px; flex-wrap: wrap; font-family: var(--font-mono); }
@@ -639,6 +750,22 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
     border-color: var(--primary);
     color: #241804;
 }
+.btn-download {
+    background: var(--card-bg-inset);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 7px 14px;
+    min-height: 38px;
+    font-size: 0.85rem;
+    font-family: var(--font-mono);
+    border-radius: var(--radius-sm);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    text-decoration: none;
+    transition: border-color 0.15s, color 0.15s;
+}
+.btn-download:hover { border-color: var(--primary); color: var(--primary); }
 .loader {
     display: none;
     width: 32px; height: 32px;
@@ -653,4 +780,48 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
 
 @media (prefers-reduced-motion: reduce) {
     * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* Eigens für schmale Handy-Screens (nicht nur Desktop-Werte herunterskaliert):
+   die 17.5px-Basis war fürs Lesen am Rechner gedacht, wirkt auf einem echten
+   Telefon-Display zu groß/gedrängt — "muss immer erst reinzoomen". Hier
+   gezielt kompakter statt einfach nur schmaler. */
+@media (max-width: 480px) {
+    html { font-size: 14px; }
+    .card, .collapse-card { padding: 14px; border-radius: var(--radius-md); }
+    .collapse-card { padding: 0; }
+    .collapse-card summary { padding: 13px 14px; font-size: 0.98rem; }
+    .collapse-body { padding: 4px 14px 14px; }
+    .status-metric-box { padding: 10px; }
+    .event-item { padding: 10px; gap: 8px; }
+    .event-thumb { width: 56px; }
+    .ai-model-box { padding: 12px; }
+    .status-table { min-width: 420px; }
+    .pipeline-bar { padding: 10px 14px; }
+}
+
+/* Toast-Notification (Punkt 5: statt stillem Redirect/Reload) */
+.toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(12px);
+    background: var(--card-bg);
+    border: 1px solid var(--primary);
+    color: var(--text);
+    padding: 12px 22px;
+    border-radius: var(--radius-md);
+    font-size: 0.9rem;
+    font-weight: 500;
+    box-shadow: 0 12px 30px -8px rgba(0, 0, 0, 0.6);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    z-index: 2000;
+    max-width: 90vw;
+    text-align: center;
+}
+.toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
 }

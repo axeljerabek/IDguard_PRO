@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#14131b">
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
     <title>IDguard PRO Dashboard</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -14,320 +16,357 @@
     <div class="container">
         <h1><i class="fa-solid fa-shield-halved"></i> IDguard PRO Dashboard</h1>
 
+        <!-- Schmale Pipeline-Control-Leiste: dezente Buttons, keine "Helden" -->
+        <div class="pipeline-bar">
+            <div class="pipeline-bar-info">
+                <span class="pipeline-bar-label"><i class="fa-solid fa-power-off"></i> Pipeline</span>
+                <span id="pipeline-status" class="status-badge {{ 'status-restarting' if pipeline_restarting else ('status-active' if pipeline_active else 'status-inactive') }}">
+                    {% if pipeline_restarting %}<span class="rec-dot"></span>Restarting…{% elif pipeline_active %}<span class="rec-dot"></span>Active{% else %}Inactive{% endif %}
+                </span>
+            </div>
+            <div class="pipeline-bar-actions">
+                <form action="/start" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button type="submit" class="btn-ghost btn-ghost-success"><i class="fa-solid fa-play"></i> Start</button>
+                </form>
+                <form action="/stop" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button type="submit" class="btn-ghost btn-ghost-danger"><i class="fa-solid fa-stop"></i> Stop</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- CCTV-Hauptbereich: Streams + letzte Aufnahmen, das eigentlich Wichtige -->
         <div class="grid">
-            <!-- Linke Spalte -->
-            <div>
-                <div class="card">
-                    <h2>
-                        <i class="fa-solid fa-power-off"></i> Pipeline Control
-                        <span id="pipeline-status" class="status-badge {{ 'status-active' if pipeline_active else 'status-inactive' }}">
-                            {% if pipeline_active %}<span class="rec-dot"></span>{% endif %}{{ 'Active' if pipeline_active else 'Inactive' }}
-                        </span>
-                    </h2>
-                    <div class="control-row">
-                        <form action="/start" method="POST" style="flex:1; margin:0;">
-                            <button type="submit" class="btn-start"><i class="fa-solid fa-play"></i> START</button>
-                        </form>
-                        <form action="/stop" method="POST" style="flex:1; margin:0;">
-                            <button type="submit" class="btn-stop"><i class="fa-solid fa-stop"></i> STOP</button>
-                        </form>
-                    </div>
-                </div>
-
-                <div class="card">
-                    <h2><i class="fa-solid fa-video"></i> Camera Activation</h2>
-                    <div>
-                        {% for stream in streams %}
-                        <div class="stream-container">
-                            <div class="stream-header">
-                                <span style="font-weight: 500;">{{ stream }}</span>
-                                <form action="/toggle/{{ stream }}" method="POST" style="margin: 0;">
-                                    <label class="switch">
-                                        <input type="checkbox" onchange="this.form.submit()" {% if overrides.get(stream, 'ON') == 'ON' %}checked{% endif %}>
-                                        <span class="slider"></span>
-                                    </label>
-                                </form>
-                            </div>
-                            <div class="thumb-wrap">
-                                <img id="thumb-{{ stream }}" class="stream-thumb" src="/thumbnail/{{ stream }}" alt="{{ stream }} Thumbnail" onclick="openLiveView('{{ stream }}')" onerror="this.onerror=null; this.src='data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 16 9\'%3E%3Crect width=\'16\' height=\'9\' fill=\'%23111\'/%3E%3Ctext x=\'50%25\' y=\'50%25\' dominant-baseline=\'middle\' text-anchor=\'middle\' font-family=\'sans-serif\' font-size=\'1\' fill=\'%23555\'%3ENo Signal%3C/text%3E%3C/svg%3E';">
-                                {% if overrides.get(stream, 'ON') == 'ON' %}<span class="thumb-live-dot" title="Aktiv"></span>{% endif %}
-                            </div>
+            <div class="card">
+                <h2><i class="fa-solid fa-video"></i> Kamera-Streams</h2>
+                <div>
+                    {% for stream in streams %}
+                    <div class="stream-container">
+                        <div class="stream-header">
+                            <span style="font-weight: 500;">{{ stream }}</span>
+                            <form action="/toggle/{{ stream }}" method="POST" style="margin: 0;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <label class="switch">
+                                    <input type="checkbox" onchange="this.form.submit()" {% if overrides.get(stream, 'ON') == 'ON' %}checked{% endif %}>
+                                    <span class="slider"></span>
+                                </label>
+                            </form>
                         </div>
-                        {% endfor %}
-                    </div>
-                </div>
-
-                <div class="card">
-                    <h2><i class="fa-solid fa-sliders"></i> System Settings</h2>
-                    <form action="/save_settings" method="POST" id="settingsForm">
-
-                        <div class="settings-section">
-                            <div class="settings-section-label"><i class="fa-solid fa-robot"></i> KI-Modell</div>
-                            <div class="settings-grid">
-                                <div class="settings-group">
-                                    <label>YOLO Version</label>
-                                    <select name="YOLO_VERSION">
-                                        <option value="v10" {% if settings.get('YOLO_VERSION', 'v10') == 'v10' %}selected{% endif %}>YOLOv10</option>
-                                        <option value="v12" {% if settings.get('YOLO_VERSION') == 'v12' %}selected{% endif %}>YOLOv12</option>
-                                        <option value="v26" {% if settings.get('YOLO_VERSION') == 'v26' %}selected{% endif %}>YOLO26</option>
-                                    </select>
-                                </div>
-                                <div class="settings-group">
-                                    <label>Model Size</label>
-                                    <select name="MODEL_SIZE">
-                                        <option value="n" {% if settings.get('MODEL_SIZE') == 'n' %}selected{% endif %}>Nano (n)</option>
-                                        <option value="s" {% if settings.get('MODEL_SIZE') == 's' %}selected{% endif %}>Small (s)</option>
-                                        <option value="m" {% if settings.get('MODEL_SIZE') == 'm' %}selected{% endif %}>Medium (m)</option>
-                                        <option value="b" {% if settings.get('MODEL_SIZE') == 'b' %}selected{% endif %}>Big (b - nur v10)</option>
-                                        <option value="l" {% if settings.get('MODEL_SIZE') == 'l' %}selected{% endif %}>Large (l)</option>
-                                        <option value="x" {% if settings.get('MODEL_SIZE', 'x') == 'x' %}selected{% endif %}>Extra Large (x - RTX 5090)</option>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="settings-section">
-                            <div class="settings-section-label"><i class="fa-solid fa-crosshairs"></i> Erkennung</div>
-                            <div class="settings-group" style="margin-bottom: 14px;">
-                                <label>Confidence Threshold</label>
-                                <div class="range-wrap">
-                                    <input type="range" min="0.1" max="1.0" step="0.05" name="CONFIDENCE_THRESHOLD" value="{{ settings.CONFIDENCE_THRESHOLD }}" oninput="document.getElementById('conf_val').innerText = this.value">
-                                    <span id="conf_val" class="range-val">{{ settings.CONFIDENCE_THRESHOLD }}</span>
-                                </div>
-                            </div>
-                            <div class="settings-group">
-                                <label>Object Categories</label>
-                                <div class="multiselect">
-                                    <div class="selectBox" onclick="toggleCheckboxes()">
-                                        <select>
-                                            <option id="category-summary">Loading categories...</option>
-                                        </select>
-                                        <div class="overSelect"></div>
-                                    </div>
-                                    <div id="checkboxes">
-                                        {% for class_id, class_name in available_classes.items() %}
-                                            <label for="cls_{{ class_id }}">
-                                                <input type="checkbox" id="cls_{{ class_id }}" name="DETECTION_CLASSES" value="{{ class_id }}"
-                                                {% if class_id in settings.DETECTION_CLASSES %}checked{% endif %}
-                                                onchange="updateCategorySummary()" />
-                                                {{ class_name }}
-                                            </label>
-                                        {% endfor %}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="settings-section">
-                            <div class="settings-section-label"><i class="fa-solid fa-film"></i> Aufnahme-Timing</div>
-                            <div class="settings-grid settings-grid-3">
-                                <div class="settings-group">
-                                    <label>Target FPS</label>
-                                    <input type="number" name="TARGET_FPS" value="{{ settings.TARGET_FPS }}" required>
-                                </div>
-                                <div class="settings-group">
-                                    <label>Pre-Roll (Sec)</label>
-                                    <input type="number" name="PRE_ROLL_SEC" value="{{ settings.PRE_ROLL_SEC }}" required>
-                                </div>
-                                <div class="settings-group">
-                                    <label>Post-Roll (Sec)</label>
-                                    <input type="number" name="POST_ROLL_SEC" value="{{ settings.POST_ROLL_SEC }}" required>
-                                </div>
-                            </div>
-                        </div>
-
-                        <button type="submit" class="btn-save" id="applyBtn">
-                            <i class="fa-solid fa-arrows-rotate"></i>
-                            <span id="applyBtnText">Einstellungen anwenden</span>
-                        </button>
-                        <p class="settings-hint">Läuft die Pipeline bereits, wird sie automatisch neu gestartet, damit die neuen Einstellungen sofort greifen.</p>
-                    </form>
-                </div>
-
-                <!-- System Status Card (Hardware & AI Model) -->
-                <div class="card">
-                    <h2><i class="fa-solid fa-server"></i> Hardware & System Status</h2>
-
-                    <!-- Aktives KI-Modell Info Box -->
-                    <div class="ai-model-box">
-                        <div class="ai-model-row">
-                            <span class="ai-model-label"><i class="fa-solid fa-robot"></i> Aktives KI-Modell</span>
-                            <span class="ai-model-val" id="stat-active-model">
-                                {% if system_status and system_status.active_model %}
-                                    {{ system_status.active_model }}
-                                {% else %}
-                                    --
-                                {% endif %}
-                            </span>
-                        </div>
-                        <div class="ai-model-row">
-                            <span class="ai-model-label"><i class="fa-solid fa-folder-open"></i> Modell-Datei</span>
-                            <span style="font-family: monospace; color: var(--text); word-break: break-all;" id="stat-model-file">
-                                {% if system_status and system_status.model_filename %}
-                                    {{ system_status.model_filename }}
-                                {% else %}
-                                    --
-                                {% endif %}
-                            </span>
+                        <div class="thumb-wrap">
+                            <img id="thumb-{{ stream }}" class="stream-thumb" src="/thumbnail/{{ stream }}" alt="{{ stream }} Thumbnail" onclick="openLiveView('{{ stream }}')" onerror="this.onerror=null; this.src='data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 16 9\'%3E%3Crect width=\'16\' height=\'9\' fill=\'%23111\'/%3E%3Ctext x=\'50%25\' y=\'50%25\' dominant-baseline=\'middle\' text-anchor=\'middle\' font-family=\'sans-serif\' font-size=\'1\' fill=\'%23555\'%3ENo Signal%3C/text%3E%3C/svg%3E';">
+                            {% if overrides.get(stream, 'ON') == 'ON' %}<span class="thumb-live-dot" title="Aktiv"></span>{% endif %}
                         </div>
                     </div>
-
-                    <div class="system-status-grid">
-                        <div class="status-metric-box">
-                            <div class="status-metric-header">
-                                <span class="metric-label"><i class="fa-solid fa-microchip"></i> CPU</span>
-                                <span id="stat-cpu-text">--%</span>
-                            </div>
-                            <div class="status-metric-value" id="stat-cpu-val">--°C</div>
-                            <div class="status-metric-sub">&nbsp;</div>
-                            <div class="status-progress-bar">
-                                <div id="stat-cpu-bar" class="status-progress-fill" style="width: 0%;"></div>
-                            </div>
-                        </div>
-                        <div class="status-metric-box">
-                            <div class="status-metric-header">
-                                <span class="metric-label"><i class="fa-solid fa-memory"></i> RAM</span>
-                                <span id="stat-ram-text">--%</span>
-                            </div>
-                            <div class="status-metric-value" id="stat-ram-val">-- GB</div>
-                            <div class="status-metric-sub" id="stat-ram-sub">of -- GB total</div>
-                            <div class="status-progress-bar">
-                                <div id="stat-ram-bar" class="status-progress-fill" style="width: 0%;"></div>
-                            </div>
-                        </div>
-                        <div class="status-metric-box">
-                            <div class="status-metric-header">
-                                <span class="metric-label"><i class="fa-solid fa-bolt"></i> VRAM</span>
-                                <span id="stat-vram-text">--%</span>
-                            </div>
-                            <div class="status-metric-value" id="stat-vram-val">-- GB</div>
-                            <div class="status-metric-sub" id="stat-vram-sub">of -- GB total</div>
-                            <div class="status-progress-bar">
-                                <div id="stat-vram-bar" class="status-progress-fill" style="width: 0%;"></div>
-                            </div>
-                        </div>
-                        <div class="status-metric-box">
-                            <div class="status-metric-header">
-                                <span class="metric-label"><i class="fa-solid fa-temperature-half"></i> GPU</span>
-                                <span id="stat-temp-status">Normal</span>
-                            </div>
-                            <div class="status-metric-value" id="stat-temp-val">--°C</div>
-                            <div class="status-metric-sub">&nbsp;</div>
-                            <div class="status-progress-bar">
-                                <div id="stat-temp-bar" class="status-progress-fill" style="width: 0%;"></div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Aktive Streams & Pipeline-Prozesse Tabelle -->
-                    <h3 style="font-size: 0.95rem; margin-top: 20px; margin-bottom: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Active Streams & Processes</h3>
-                    <div class="table-scroll">
-                        <table class="status-table">
-                            <thead>
-                                <tr>
-                                    <th>Stream-Name</th>
-                                    <th>PID</th>
-                                    <th>Status</th>
-                                    <th>CPU (%)</th>
-                                    <th>RAM (MB)</th>
-                                </tr>
-                            </thead>
-                            <tbody id="processes-tbody">
-                                {% if system_status and system_status.processes %}
-                                    {% for proc in system_status.processes %}
-                                    <tr>
-                                        <td>{{ proc.name }}</td>
-                                        <td>{{ proc.pid }}</td>
-                                        <td><span class="badge-running">{{ proc.status }}</span></td>
-                                        <td>{{ proc.cpu }}</td>
-                                        <td>{{ proc.ram }}</td>
-                                    </tr>
-                                    {% endfor %}
-                                {% else %}
-                                <tr>
-                                    <td colspan="5" style="text-align: center; color: var(--text-muted);">Keine aktiven Pipeline-Prozesse gefunden.</td>
-                                </tr>
-                                {% endif %}
-                            </tbody>
-                        </table>
-                    </div>
+                    {% endfor %}
                 </div>
             </div>
 
-            <!-- Rechte Spalte -->
-            <div>
-                <div class="card">
-                    <h2>
-                        <i class="fa-solid fa-clapperboard"></i> Recent Recordings
-                        <span id="event-count" style="background: var(--border); padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; margin-left: 10px;">{{ recent_events|length }}</span>
-                    </h2>
-                    <div class="event-list" id="recent-event-list">
-                        {% for event in recent_events %}
-                        <div class="event-item" onclick="openLightbox('{{ event.filename }}', false)">
-                            <div class="event-info">
-                                <span class="event-name"><i class="fa-regular fa-file-video" style="margin-right: 5px;"></i> {{ event.filename }}</span>
-                                <span class="event-meta">
-                                    <span><i class="fa-regular fa-calendar"></i> {{ event.datetime }}</span>
-                                    <span><i class="fa-solid fa-hard-drive"></i> {{ event.size }}</span>
-                                </span>
-                            </div>
-                            <div class="event-actions">
-                                <form action="/archive/{{ event.filename }}" method="POST" style="margin: 0;">
-                                    <button type="submit" class="btn-archive" title="Video archivieren" onclick="event.stopPropagation()">
-                                        <i class="fa-solid fa-box-archive"></i>
-                                    </button>
-                                </form>
-                                <form action="/delete/{{ event.filename }}" method="POST" style="margin: 0;" onsubmit="return confirm('Are you sure you want to delete this video?');">
-                                    <button type="submit" class="btn-delete" title="Video löschen" onclick="event.stopPropagation()">
-                                        <i class="fa-solid fa-trash-can"></i>
-                                    </button>
-                                </form>
-                            </div>
+            <div class="card">
+                <h2>
+                    <i class="fa-solid fa-clapperboard"></i> Recent Recordings
+                    <span id="event-count" class="count-badge">{{ recent_events|length }}</span>
+                </h2>
+                <div class="event-list" id="recent-event-list">
+                    {% for event in recent_events %}
+                    <div class="event-item" onclick="openLightbox('{{ event.filename }}', false)">
+                        <div class="event-thumb">
+                            {% if event.has_thumbnail %}
+                                <img src="/thumb/{{ event.filename[:-4] }}.jpg" alt="" loading="lazy">
+                            {% else %}
+                                <i class="fa-regular fa-file-video"></i>
+                            {% endif %}
                         </div>
-                        {% endfor %}
-                        {% if not recent_events %}
-                        <div style="text-align: center; padding: 3rem 0; color: var(--text-muted);">
-                            <i class="fa-solid fa-film" style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.5;"></i>
-                            <p>No events recorded yet.</p>
+                        <div class="event-info">
+                            <span class="event-name">{{ event.filename }}</span>
+                            <span class="event-meta">
+                                <span><i class="fa-regular fa-calendar"></i> {{ event.datetime }}</span>
+                                <span><i class="fa-solid fa-hard-drive"></i> {{ event.size }}</span>
+                            </span>
                         </div>
-                        {% endif %}
+                        <div class="event-actions">
+                            <form action="/archive/{{ event.filename }}" method="POST" style="margin: 0;">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <button type="submit" class="btn-archive" title="Video archivieren" onclick="event.stopPropagation()">
+                                    <i class="fa-solid fa-box-archive"></i>
+                                </button>
+                            </form>
+                            <form action="/delete/{{ event.filename }}" method="POST" style="margin: 0;" onsubmit="return confirm('Are you sure you want to delete this video?');">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <button type="submit" class="btn-delete" title="Video löschen" onclick="event.stopPropagation()">
+                                    <i class="fa-solid fa-trash-can"></i>
+                                </button>
+                            </form>
+                        </div>
                     </div>
-                </div>
-
-                <div class="card">
-                    <h2>
-                        <i class="fa-solid fa-box-archive"></i> Archived
-                        <span id="archive-count" style="background: var(--border); padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; margin-left: 10px;">{{ archived_events|length }}</span>
-                    </h2>
-                    <div class="event-list" id="archived-event-list">
-                        {% for event in archived_events %}
-                        <div class="event-item" onclick="openLightbox('{{ event.filename }}', true)">
-                            <div class="event-info">
-                                <span class="event-name"><i class="fa-regular fa-file-video" style="margin-right: 5px;"></i> {{ event.filename }}</span>
-                                <span class="event-meta">
-                                    <span><i class="fa-regular fa-calendar"></i> {{ event.datetime }}</span>
-                                    <span><i class="fa-solid fa-hard-drive"></i> {{ event.size }}</span>
-                                </span>
-                            </div>
-                            <div class="event-actions">
-                                <form action="/delete_archived/{{ event.filename }}" method="POST" style="margin: 0;" onsubmit="return confirm('Are you sure you want to permanently delete this video?');">
-                                    <button type="submit" class="btn-delete" title="Video endgültig löschen" onclick="event.stopPropagation()">
-                                        <i class="fa-solid fa-trash-can"></i>
-                                    </button>
-                                </form>
-                            </div>
-                        </div>
-                        {% endfor %}
-                        {% if not archived_events %}
-                        <div style="text-align: center; padding: 3rem 0; color: var(--text-muted);">
-                            <i class="fa-solid fa-box-open" style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.5;"></i>
-                            <p>No archived recordings yet.</p>
-                        </div>
-                        {% endif %}
+                    {% endfor %}
+                    {% if not recent_events %}
+                    <div style="text-align: center; padding: 3rem 0; color: var(--text-muted);">
+                        <i class="fa-solid fa-film" style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.5;"></i>
+                        <p>No events recorded yet.</p>
                     </div>
+                    {% endif %}
                 </div>
             </div>
         </div>
+
+        <!-- Sekundäre Bereiche: aufklappbar, standardmäßig zu -->
+        <details class="collapse-card">
+            <summary>
+                <span><i class="fa-solid fa-sliders"></i> System Settings</span>
+                <i class="fa-solid fa-chevron-down chevron"></i>
+            </summary>
+            <div class="collapse-body">
+                <form action="/save_settings" method="POST" id="settingsForm">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+                    <div class="settings-section">
+                        <div class="settings-section-label"><i class="fa-solid fa-robot"></i> KI-Modell</div>
+                        <div class="settings-grid">
+                            <div class="settings-group">
+                                <label>YOLO Version</label>
+                                <select name="YOLO_VERSION">
+                                    <option value="v10" {% if settings.get('YOLO_VERSION', 'v10') == 'v10' %}selected{% endif %}>YOLOv10</option>
+                                    <option value="v12" {% if settings.get('YOLO_VERSION') == 'v12' %}selected{% endif %}>YOLOv12</option>
+                                    <option value="v26" {% if settings.get('YOLO_VERSION') == 'v26' %}selected{% endif %}>YOLO26</option>
+                                </select>
+                            </div>
+                            <div class="settings-group">
+                                <label>Model Size</label>
+                                <select name="MODEL_SIZE">
+                                    <option value="n" {% if settings.get('MODEL_SIZE') == 'n' %}selected{% endif %}>Nano (n)</option>
+                                    <option value="s" {% if settings.get('MODEL_SIZE') == 's' %}selected{% endif %}>Small (s)</option>
+                                    <option value="m" {% if settings.get('MODEL_SIZE') == 'm' %}selected{% endif %}>Medium (m)</option>
+                                    <option value="b" {% if settings.get('MODEL_SIZE') == 'b' %}selected{% endif %}>Big (b - nur v10)</option>
+                                    <option value="l" {% if settings.get('MODEL_SIZE') == 'l' %}selected{% endif %}>Large (l)</option>
+                                    <option value="x" {% if settings.get('MODEL_SIZE', 'x') == 'x' %}selected{% endif %}>Extra Large (x - RTX 5090)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <div class="settings-section-label"><i class="fa-solid fa-crosshairs"></i> Erkennung</div>
+                        <div class="settings-group" style="margin-bottom: 14px;">
+                            <label>Confidence Threshold</label>
+                            <div class="range-wrap">
+                                <input type="range" min="0.1" max="1.0" step="0.05" name="CONFIDENCE_THRESHOLD" value="{{ settings.CONFIDENCE_THRESHOLD }}" oninput="document.getElementById('conf_val').innerText = this.value">
+                                <span id="conf_val" class="range-val">{{ settings.CONFIDENCE_THRESHOLD }}</span>
+                            </div>
+                        </div>
+                        <div class="settings-group">
+                            <label>Object Categories</label>
+                            <div class="multiselect">
+                                <div class="selectBox" onclick="toggleCheckboxes()">
+                                    <select>
+                                        <option id="category-summary">Loading categories...</option>
+                                    </select>
+                                    <div class="overSelect"></div>
+                                </div>
+                                <div id="checkboxes">
+                                    {% for class_id, class_name in available_classes.items() %}
+                                        <label for="cls_{{ class_id }}">
+                                            <input type="checkbox" id="cls_{{ class_id }}" name="DETECTION_CLASSES" value="{{ class_id }}"
+                                            {% if class_id in settings.DETECTION_CLASSES %}checked{% endif %}
+                                            onchange="updateCategorySummary()" />
+                                            {{ class_name }}
+                                        </label>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <div class="settings-section-label"><i class="fa-solid fa-film"></i> Aufnahme-Timing</div>
+                        <div class="settings-grid settings-grid-3">
+                            <div class="settings-group">
+                                <label>Target FPS</label>
+                                <input type="number" name="TARGET_FPS" value="{{ settings.TARGET_FPS }}" required>
+                            </div>
+                            <div class="settings-group">
+                                <label>Pre-Roll (Sec)</label>
+                                <input type="number" name="PRE_ROLL_SEC" value="{{ settings.PRE_ROLL_SEC }}" required>
+                            </div>
+                            <div class="settings-group">
+                                <label>Post-Roll (Sec)</label>
+                                <input type="number" name="POST_ROLL_SEC" value="{{ settings.POST_ROLL_SEC }}" required>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <div class="settings-section-label"><i class="fa-solid fa-tv"></i> Anzeige</div>
+                        <div class="settings-group">
+                            <label>Kamera-Vorschau-Rate (Grid + Live-View)</label>
+                            <div class="range-wrap">
+                                <input type="range" min="0.5" max="5" step="0.5" name="THUMBNAIL_FPS" value="{{ settings.get('THUMBNAIL_FPS', 1) }}" oninput="document.getElementById('thumbfps_val').innerText = this.value + ' fps'">
+                                <span id="thumbfps_val" class="range-val">{{ settings.get('THUMBNAIL_FPS', 1) }} fps</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn-save" id="applyBtn">
+                        <i class="fa-solid fa-arrows-rotate"></i>
+                        <span id="applyBtnText">Einstellungen anwenden</span>
+                    </button>
+                    <p class="settings-hint">Läuft die Pipeline bereits, wird sie bei pipeline-relevanten Änderungen automatisch neu gestartet, damit sie sofort greifen.</p>
+                </form>
+            </div>
+        </details>
+
+        <details class="collapse-card">
+            <summary>
+                <span><i class="fa-solid fa-server"></i> Hardware &amp; System Status</span>
+                <i class="fa-solid fa-chevron-down chevron"></i>
+            </summary>
+            <div class="collapse-body">
+                <div class="ai-model-box">
+                    <div class="ai-model-row">
+                        <span class="ai-model-label"><i class="fa-solid fa-robot"></i> Aktives KI-Modell</span>
+                        <span class="ai-model-val" id="stat-active-model">
+                            {% if system_status and system_status.active_model %}
+                                {{ system_status.active_model }}
+                            {% else %}
+                                --
+                            {% endif %}
+                        </span>
+                    </div>
+                    <div class="ai-model-row">
+                        <span class="ai-model-label"><i class="fa-solid fa-folder-open"></i> Modell-Datei</span>
+                        <span style="font-family: monospace; color: var(--text); word-break: break-all;" id="stat-model-file">
+                            {% if system_status and system_status.model_filename %}
+                                {{ system_status.model_filename }}
+                            {% else %}
+                                --
+                            {% endif %}
+                        </span>
+                    </div>
+                </div>
+
+                <div class="system-status-grid">
+                    <div class="status-metric-box">
+                        <div class="status-metric-header">
+                            <span class="metric-label"><i class="fa-solid fa-microchip"></i> CPU</span>
+                            <span id="stat-cpu-text">--%</span>
+                        </div>
+                        <div class="status-metric-value" id="stat-cpu-val">--°C</div>
+                        <div class="status-metric-sub">&nbsp;</div>
+                        <div class="status-progress-bar">
+                            <div id="stat-cpu-bar" class="status-progress-fill" style="width: 0%;"></div>
+                        </div>
+                    </div>
+                    <div class="status-metric-box">
+                        <div class="status-metric-header">
+                            <span class="metric-label"><i class="fa-solid fa-memory"></i> RAM</span>
+                            <span id="stat-ram-text">--%</span>
+                        </div>
+                        <div class="status-metric-value" id="stat-ram-val">-- GB</div>
+                        <div class="status-metric-sub" id="stat-ram-sub">of -- GB total</div>
+                        <div class="status-progress-bar">
+                            <div id="stat-ram-bar" class="status-progress-fill" style="width: 0%;"></div>
+                        </div>
+                    </div>
+                    <div class="status-metric-box">
+                        <div class="status-metric-header">
+                            <span class="metric-label"><i class="fa-solid fa-bolt"></i> VRAM</span>
+                            <span id="stat-vram-text">--%</span>
+                        </div>
+                        <div class="status-metric-value" id="stat-vram-val">-- GB</div>
+                        <div class="status-metric-sub" id="stat-vram-sub">of -- GB total</div>
+                        <div class="status-progress-bar">
+                            <div id="stat-vram-bar" class="status-progress-fill" style="width: 0%;"></div>
+                        </div>
+                    </div>
+                    <div class="status-metric-box">
+                        <div class="status-metric-header">
+                            <span class="metric-label"><i class="fa-solid fa-temperature-half"></i> GPU</span>
+                            <span id="stat-temp-status">Normal</span>
+                        </div>
+                        <div class="status-metric-value" id="stat-temp-val">--°C</div>
+                        <div class="status-metric-sub">&nbsp;</div>
+                        <div class="status-progress-bar">
+                            <div id="stat-temp-bar" class="status-progress-fill" style="width: 0%;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <h3 style="font-size: 0.95rem; margin-top: 20px; margin-bottom: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Active Streams &amp; Processes</h3>
+                <div class="table-scroll">
+                    <table class="status-table">
+                        <thead>
+                            <tr>
+                                <th>Stream-Name</th>
+                                <th>PID</th>
+                                <th>Status</th>
+                                <th>CPU (%)</th>
+                                <th>RAM (MB)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="processes-tbody">
+                            {% if system_status and system_status.processes %}
+                                {% for proc in system_status.processes %}
+                                <tr>
+                                    <td>{{ proc.name }}</td>
+                                    <td>{{ proc.pid }}</td>
+                                    <td><span class="badge-running">{{ proc.status }}</span></td>
+                                    <td>{{ proc.cpu }}</td>
+                                    <td>{{ proc.ram }}</td>
+                                </tr>
+                                {% endfor %}
+                            {% else %}
+                            <tr>
+                                <td colspan="5" style="text-align: center; color: var(--text-muted);">Keine aktiven Pipeline-Prozesse gefunden.</td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </details>
+
+        <details class="collapse-card">
+            <summary>
+                <span><i class="fa-solid fa-box-archive"></i> Archived <span id="archive-count" class="count-badge">{{ archived_events|length }}</span></span>
+                <i class="fa-solid fa-chevron-down chevron"></i>
+            </summary>
+            <div class="collapse-body">
+                <div class="event-list" id="archived-event-list">
+                    {% for event in archived_events %}
+                    <div class="event-item" onclick="openLightbox('{{ event.filename }}', true)">
+                        <div class="event-thumb">
+                            {% if event.has_thumbnail %}
+                                <img src="/thumb/archive/{{ event.filename[:-4] }}.jpg" alt="" loading="lazy">
+                            {% else %}
+                                <i class="fa-regular fa-file-video"></i>
+                            {% endif %}
+                        </div>
+                        <div class="event-info">
+                            <span class="event-name">{{ event.filename }}</span>
+                            <span class="event-meta">
+                                <span><i class="fa-regular fa-calendar"></i> {{ event.datetime }}</span>
+                                <span><i class="fa-solid fa-hard-drive"></i> {{ event.size }}</span>
+                            </span>
+                        </div>
+                        <div class="event-actions">
+                            <form action="/delete_archived/{{ event.filename }}" method="POST" style="margin: 0;" onsubmit="return confirm('Are you sure you want to permanently delete this video?');">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                                <button type="submit" class="btn-delete" title="Video endgültig löschen" onclick="event.stopPropagation()">
+                                    <i class="fa-solid fa-trash-can"></i>
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                    {% endfor %}
+                    {% if not archived_events %}
+                    <div style="text-align: center; padding: 3rem 0; color: var(--text-muted);">
+                        <i class="fa-solid fa-box-open" style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.5;"></i>
+                        <p>No archived recordings yet.</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </details>
     </div>
 
     <!-- Lightbox für aufgezeichnete Videos -->
@@ -337,11 +376,18 @@
             <video id="videoPlayer" playsinline controls muted><source id="videoSource" src="" type="video/mp4"></video>
             <div id="loader" class="loader"></div>
             <div id="status-text"></div>
-            <div class="player-controls">
+            <div class="player-controls speed-controls">
+                <button onclick="setSpeed(0.25, this)">0.25x</button>
                 <button onclick="setSpeed(0.5, this)">0.5x</button>
-                <button onclick="setSpeed(1.0, this)" class="active" id="defaultSpeedBtn">1.0x</button>
-                <button onclick="setSpeed(2.0, this)">2.0x</button>
-                <button onclick="setSpeed(4.0, this)">4.0x</button>
+                <button onclick="setSpeed(1.0, this)" class="active" id="defaultSpeedBtn">1x</button>
+                <button onclick="setSpeed(2.0, this)">2x</button>
+                <button onclick="setSpeed(4.0, this)">4x</button>
+                <button onclick="setSpeed(8.0, this)">8x</button>
+            </div>
+            <div class="player-controls">
+                <button onclick="skipTime(-10)" title="10s zurück"><i class="fa-solid fa-backward"></i> 10s</button>
+                <button onclick="skipTime(10)" title="10s vor">10s <i class="fa-solid fa-forward"></i></button>
+                <a id="downloadLink" href="#" class="btn-download" title="Video herunterladen"><i class="fa-solid fa-download"></i> Download</a>
             </div>
         </div>
     </div>
@@ -355,6 +401,33 @@
     </div>
 
     <script>
+        const CSRF_TOKEN = "{{ csrf_token }}";
+        const THUMBNAIL_INTERVAL_MS = {{ thumbnail_interval_ms }};
+
+        // --- Model-Size-Filter je YOLO-Version ('b' ist nur für v10 gültig) ---
+        const SIZE_RULES = {
+            v10: ['n', 's', 'm', 'b', 'l', 'x'],
+            v12: ['n', 's', 'm', 'l', 'x'],
+            v26: ['n', 's', 'm', 'l', 'x']
+        };
+        function filterModelSizes() {
+            const yoloSelect = document.querySelector('select[name="YOLO_VERSION"]');
+            const sizeSelect = document.querySelector('select[name="MODEL_SIZE"]');
+            if (!yoloSelect || !sizeSelect) return;
+            const allowed = SIZE_RULES[yoloSelect.value] || [];
+            const currentValue = sizeSelect.value;
+            Array.from(sizeSelect.options).forEach(opt => {
+                const ok = allowed.includes(opt.value);
+                opt.hidden = !ok;
+                opt.disabled = !ok;
+            });
+            if (!allowed.includes(currentValue)) {
+                sizeSelect.value = allowed.includes('x') ? 'x' : allowed[0];
+            }
+        }
+        document.querySelector('select[name="YOLO_VERSION"]').addEventListener('change', filterModelSizes);
+        filterModelSizes();
+
         let expanded = false;
         function toggleCheckboxes() {
             const checkboxes = document.getElementById("checkboxes");
@@ -378,9 +451,35 @@
             btn.querySelector('i').className = 'fa-solid fa-spinner fa-spin';
         });
 
+        // Toast-Notification statt stillem Reload
+        function showToast(msg, duration = 4000) {
+            let toast = document.getElementById('toast');
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = 'toast';
+                toast.className = 'toast';
+                document.body.appendChild(toast);
+            }
+            toast.textContent = msg;
+            void toast.offsetWidth;
+            toast.classList.add('show');
+            clearTimeout(toast._hideTimer);
+            toast._hideTimer = setTimeout(() => toast.classList.remove('show'), duration);
+        }
+
+        (function checkSavedToast() {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('saved')) {
+                showToast(params.get('restarted') === '1'
+                    ? 'Einstellungen gespeichert — Pipeline wird neu gestartet…'
+                    : 'Einstellungen gespeichert.');
+                window.history.replaceState({}, '', window.location.pathname);
+            }
+        })();
+
         document.addEventListener('click', function(event) {
             const multiselect = document.querySelector('.multiselect');
-            if (expanded && !multiselect.contains(event.target)) {
+            if (expanded && multiselect && !multiselect.contains(event.target)) {
                 document.getElementById("checkboxes").style.display = "none";
                 expanded = false;
             }
@@ -394,7 +493,7 @@
                     img.src = '/thumbnail/' + stream + '?t=' + new Date().getTime();
                 }
             });
-        }, 1000);
+        }, THUMBNAIL_INTERVAL_MS);
 
         let liveInterval = null;
         const liveLightbox = document.getElementById('live-lightbox');
@@ -403,16 +502,59 @@
         function openLiveView(streamName) {
             liveLightbox.classList.add('active');
             liveImageView.src = '/thumbnail/' + streamName + '?t=' + new Date().getTime();
-
             liveInterval = setInterval(() => {
                 liveImageView.src = '/thumbnail/' + streamName + '?t=' + new Date().getTime();
-            }, 250);
+            }, THUMBNAIL_INTERVAL_MS);
         }
 
         function closeLiveView(e) {
-            if(liveInterval) clearInterval(liveInterval);
+            if (liveInterval) clearInterval(liveInterval);
             liveImageView.src = '';
             liveLightbox.classList.remove('active');
+        }
+
+        // Baut das HTML für eine Event-Liste (Recent oder Archived) aus JSON-Daten —
+        // wird beim Live-Polling verwendet, inkl. Trigger-Screenshot falls vorhanden.
+        function renderEvents(events, archived) {
+            if (!events || events.length === 0) {
+                const icon = archived ? 'fa-box-open' : 'fa-film';
+                const msg = archived ? 'No archived recordings yet.' : 'No events recorded yet.';
+                return `<div style="text-align: center; padding: 3rem 0; color: var(--text-muted);">
+                    <i class="fa-solid ${icon}" style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.5;"></i>
+                    <p>${msg}</p>
+                </div>`;
+            }
+            return events.map(ev => {
+                const fn = ev.filename;
+                const thumbBase = (archived ? '/thumb/archive/' : '/thumb/') + fn.replace(/\.mp4$/i, '.jpg');
+                const thumbHtml = ev.has_thumbnail
+                    ? `<img src="${thumbBase}" alt="" loading="lazy">`
+                    : `<i class="fa-regular fa-file-video"></i>`;
+                const actions = archived
+                    ? `<form action="/delete_archived/${fn}" method="POST" style="margin:0" onsubmit="return confirm('Are you sure you want to permanently delete this video?');">
+                         <input type="hidden" name="csrf_token" value="${CSRF_TOKEN}">
+                         <button type="submit" class="btn-delete" title="Video endgültig löschen" onclick="event.stopPropagation()"><i class="fa-solid fa-trash-can"></i></button>
+                       </form>`
+                    : `<form action="/archive/${fn}" method="POST" style="margin:0">
+                         <input type="hidden" name="csrf_token" value="${CSRF_TOKEN}">
+                         <button type="submit" class="btn-archive" title="Video archivieren" onclick="event.stopPropagation()"><i class="fa-solid fa-box-archive"></i></button>
+                       </form>
+                       <form action="/delete/${fn}" method="POST" style="margin:0" onsubmit="return confirm('Are you sure you want to delete this video?');">
+                         <input type="hidden" name="csrf_token" value="${CSRF_TOKEN}">
+                         <button type="submit" class="btn-delete" title="Video löschen" onclick="event.stopPropagation()"><i class="fa-solid fa-trash-can"></i></button>
+                       </form>`;
+                return `<div class="event-item" onclick="openLightbox('${fn}', ${archived})">
+                    <div class="event-thumb">${thumbHtml}</div>
+                    <div class="event-info">
+                        <span class="event-name">${fn}</span>
+                        <span class="event-meta">
+                            <span><i class="fa-regular fa-calendar"></i> ${ev.datetime}</span>
+                            <span><i class="fa-solid fa-hard-drive"></i> ${ev.size}</span>
+                        </span>
+                    </div>
+                    <div class="event-actions">${actions}</div>
+                </div>`;
+            }).join('');
         }
 
         // Fetch Hardware & Model Status from status API endpoint (/api/status)
@@ -421,14 +563,25 @@
                 .then(res => res.json())
                 .then(data => {
                     if (!data) return;
-                    // AI Model Info
                     if (data.active_model) {
                         document.getElementById('stat-active-model').innerText = data.active_model;
                     }
                     if (data.model_filename) {
                         document.getElementById('stat-model-file').innerText = data.model_filename;
                     }
-                    // CPU
+                    const badge = document.getElementById('pipeline-status');
+                    if (badge && typeof data.pipeline_active !== 'undefined') {
+                        if (data.restarting) {
+                            badge.className = 'status-badge status-restarting';
+                            badge.innerHTML = '<span class="rec-dot"></span>Restarting…';
+                        } else if (data.pipeline_active) {
+                            badge.className = 'status-badge status-active';
+                            badge.innerHTML = '<span class="rec-dot"></span>Active';
+                        } else {
+                            badge.className = 'status-badge status-inactive';
+                            badge.innerHTML = 'Inactive';
+                        }
+                    }
                     if (data.cpu) {
                         document.getElementById('stat-cpu-text').innerText = data.cpu.percent + '%';
                         document.getElementById('stat-cpu-val').innerText = (data.cpu.temp || '--') + '°C';
@@ -436,7 +589,6 @@
                         cpuBar.style.width = data.cpu.percent + '%';
                         cpuBar.className = 'status-progress-fill ' + (data.cpu.percent > 85 ? 'danger' : data.cpu.percent > 65 ? 'warning' : '');
                     }
-                    // RAM
                     if (data.ram) {
                         document.getElementById('stat-ram-text').innerText = data.ram.percent + '%';
                         document.getElementById('stat-ram-val').innerText = data.ram.used + ' GB';
@@ -445,7 +597,6 @@
                         ramBar.style.width = data.ram.percent + '%';
                         ramBar.className = 'status-progress-fill ' + (data.ram.percent > 85 ? 'danger' : data.ram.percent > 65 ? 'warning' : '');
                     }
-                    // VRAM (RTX 5090)
                     if (data.vram) {
                         document.getElementById('stat-vram-text').innerText = data.vram.percent + '%';
                         document.getElementById('stat-vram-val').innerText = data.vram.used + ' GB';
@@ -454,7 +605,6 @@
                         vramBar.style.width = data.vram.percent + '%';
                         vramBar.className = 'status-progress-fill ' + (data.vram.percent > 85 ? 'danger' : data.vram.percent > 65 ? 'warning' : '');
                     }
-                    // GPU Temp
                     if (data.gpu) {
                         document.getElementById('stat-temp-val').innerText = data.gpu.temp + '°C';
                         document.getElementById('stat-temp-status').innerText = data.gpu.status || 'Normal';
@@ -463,7 +613,6 @@
                         tempBar.style.width = tempPercent + '%';
                         tempBar.className = 'status-progress-fill ' + (data.gpu.temp > 80 ? 'danger' : data.gpu.temp > 70 ? 'warning' : '');
                     }
-                    // Processes Table Update
                     if (data.processes) {
                         const tbody = document.getElementById('processes-tbody');
                         if (tbody) {
@@ -484,54 +633,36 @@
                             }
                         }
                     }
+                    if (data.recent_events) {
+                        document.getElementById('recent-event-list').innerHTML = renderEvents(data.recent_events, false);
+                        document.getElementById('event-count').innerText = data.recent_events.length;
+                    }
+                    if (data.archived_events) {
+                        document.getElementById('archived-event-list').innerHTML = renderEvents(data.archived_events, true);
+                        document.getElementById('archive-count').innerText = data.archived_events.length;
+                    }
                 })
                 .catch(err => console.error('Status fetch failed:', err));
         }
         setInterval(updateSystemStatus, 3000);
         updateSystemStatus();
 
-        function autoRefreshDOM() {
-            fetch(window.location.href)
-                .then(response => response.text())
-                .then(html => {
-                    const parser = new DOMParser();
-                    const doc = parser.parseFromString(html, 'text/html');
-
-                    const newStatus = doc.querySelector('#pipeline-status');
-                    const statusBadge = document.querySelector('#pipeline-status');
-                    if (newStatus && statusBadge) {
-                        statusBadge.className = newStatus.className;
-                        statusBadge.innerHTML = newStatus.innerHTML;
-                    }
-
-                    ['recent-event-list', 'archived-event-list'].forEach(id => {
-                        const newList = doc.getElementById(id);
-                        const curList = document.getElementById(id);
-                        if (newList && curList) curList.innerHTML = newList.innerHTML;
-                    });
-
-                    ['event-count', 'archive-count'].forEach(id => {
-                        const newBadge = doc.getElementById(id);
-                        const curBadge = document.getElementById(id);
-                        if (newBadge && curBadge) curBadge.innerHTML = newBadge.innerHTML;
-                    });
-                })
-                .catch(err => console.error('Refresh fehlgeschlagen:', err));
-        }
-        setInterval(autoRefreshDOM, 10000);
-
         const lightbox = document.getElementById('lightbox'),
               videoPlayer = document.getElementById('videoPlayer'),
               videoSource = document.getElementById('videoSource'),
-              speedBtns = document.querySelectorAll('.player-controls button'),
+              speedBtns = document.querySelectorAll('.speed-controls button'),
               statusText = document.getElementById('status-text'),
-              loader = document.getElementById('loader');
+              loader = document.getElementById('loader'),
+              downloadLink = document.getElementById('downloadLink');
 
         function openLightbox(filename, archived) {
             loader.style.display = 'block';
             statusText.innerText = 'Loading & transcoding video...';
-            videoSource.src = (archived ? '/video/archive/' : '/video/') + filename;
+            const src = (archived ? '/video/archive/' : '/video/') + filename;
+            videoSource.src = src;
             videoPlayer.load();
+            downloadLink.href = src;
+            downloadLink.setAttribute('download', filename);
 
             videoPlayer.onloadeddata = () => {
                 loader.style.display = 'none';
@@ -560,10 +691,19 @@
             if (btn) btn.classList.add('active');
         }
 
+        function skipTime(delta) {
+            videoPlayer.currentTime = Math.max(0, videoPlayer.currentTime + delta);
+        }
+
         document.addEventListener('keydown', function(e) {
             if (e.key === "Escape") {
                 if (lightbox.classList.contains('active')) closeLightbox();
                 if (liveLightbox.classList.contains('active')) closeLiveView();
+            }
+            if (lightbox.classList.contains('active')) {
+                if (e.key === "ArrowLeft") skipTime(-10);
+                if (e.key === "ArrowRight") skipTime(10);
+                if (e.key === " ") { e.preventDefault(); videoPlayer.paused ? videoPlayer.play() : videoPlayer.pause(); }
             }
         });
     </script>

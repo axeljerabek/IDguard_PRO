@@ -87,6 +87,7 @@ class CameraAgent(multiprocessing.Process):
             import av
             import torch
             import numpy as np
+            import cv2  # bereits Ultralytics-Abhängigkeit, für Trigger-Screenshots genutzt
 
             torch.set_num_threads(2)
 
@@ -167,6 +168,11 @@ class CameraAgent(multiprocessing.Process):
                         f"⚠️ Selbsttest fehlgeschlagen mit cuDNN={'an' if use_cudnn else 'aus'}/"
                         f"FP16={'an' if use_half else 'aus'} ({e}) — versuche schwächere Kombination..."
                     )
+                    if device_target == "cuda:0":
+                        try:
+                            torch.cuda.empty_cache()
+                        except Exception:
+                            pass
 
             self.logger.error(f"❌ Failed to load model ({YOLO_VERSION}) in jeder getesteten Kombination: {last_error}")
             return None, False
@@ -198,6 +204,17 @@ class CameraAgent(multiprocessing.Process):
         # bis zum manuellen Neustart nur im "VISION-ONLY"-Blindflug weiter.
         MODEL_RETRY_INTERVAL = 60  # Sekunden zwischen Nachlade-Versuchen
         last_model_retry = time.time()
+
+        # Frame-Rate-Drosselung: bisher wurde JEDER vom Quell-Stream gelieferte
+        # Frame durch YOLO gejagt und encodiert, unabhängig von TARGET_FPS.
+        # Liefert die Kamera nativ z.B. 25-30fps, aber TARGET_FPS steht auf 15,
+        # lief die Inferenz also fast doppelt so oft wie nötig — UND die
+        # Ausgabedatei bekam PTS als wäre sie exakt mit TARGET_FPS aufgenommen,
+        # obwohl tatsächlich mit Quell-FPS geschrieben wurde (falsche
+        # Wiedergabegeschwindigkeit/-dauer). Jetzt werden überzählige
+        # Quell-Frames VOR der (teuren) BGR-Konvertierung übersprungen.
+        frame_interval = 1.0 / TARGET_FPS if TARGET_FPS and TARGET_FPS > 0 else 0.0
+        last_processed_time = 0.0
 
         state = "IDLE"
         post_roll_end_time = 0
@@ -282,11 +299,15 @@ class CameraAgent(multiprocessing.Process):
                 encode_audio_frame(data)
 
         # NVDEC-Hardware-Decode vorbereiten (Punkt "GPU voll nutzen" — bisher
-        # lag utilization.decoder konstant bei 0%). Einmalig pro Prozess
-        # versucht, defensiv gegen abweichende PyAV-Versionen: schlägt der
-        # Import oder der erste Verbindungsaufbau damit fehl, wird dauerhaft
-        # auf Software-Decode zurückgeschaltet — nie ein Grund, die
-        # Verbindung komplett scheitern zu lassen.
+        # lag utilization.decoder konstant bei 0%). Das HWAccel-Objekt selbst
+        # wird nur EINMAL pro Prozess konstruiert (defensiv gegen abweichende
+        # PyAV-Versionen: schlägt Import/Konstruktion fehl, ist NVDEC auf
+        # dieser Maschine grundsätzlich nicht verfügbar — dauerhaft aus).
+        # Schlägt aber nur EIN Verbindungsversuch fehl (z.B. weil die Cam
+        # gerade kurz weg ist), bleibt hw_device erhalten: bei jedem neuen
+        # Reconnect wird NVDEC erneut probiert, sobald der Stream wieder da
+        # ist — nur der jeweils fehlgeschlagene Versuch selbst fällt auf
+        # Software-Decode zurück.
         hw_device = None
         try:
             from av.codec.hwaccel import HWAccel
@@ -296,28 +317,58 @@ class CameraAgent(multiprocessing.Process):
             self.logger.info(f"ℹ️ [{self.name}] NVDEC nicht verfügbar ({e}) — nutze Software-Decoding (PyAV-Version prüfen für Hardware-Decode).")
             hw_device = None
 
+        # Zählt NVDEC-Fehlversuche IN FOLGE (ohne zwischenzeitlichen Erfolg).
+        # Kamera kurz weg -> ein paar Fehlversuche, dann klappt's wieder ->
+        # Zähler wird zurückgesetzt, NVDEC bleibt aktiv. Erst wenn NVDEC
+        # mehrfach hintereinander NIE erfolgreich verbindet, deutet das auf
+        # ein grundsätzliches Problem hin (nicht auf eine flackernde Cam) —
+        # dann erst dauerhaft abschalten, um nicht endlos sinnlos zu retryen.
+        nvdec_fail_streak = 0
+        NVDEC_FAIL_THRESHOLD = 5
+        using_nvdec = False
+
         try:
             while not self._stop_event.is_set():
                 if container is None:
                     self.logger.info(f"🔗 Attempting connection to RTMP: {self.url}")
                     open_options = {"rtmp_live": "live", "rw_timeout": "5000000"}
+                    using_nvdec = False
                     try:
                         if hw_device is not None:
                             container = av.open(self.url, options=open_options, hwaccel=hw_device)
+                            using_nvdec = True
+                            nvdec_fail_streak = 0
                             self.logger.info(f"✅ [CONNECTED] '{self.name}' via NVDEC established stream at {self.url}")
                         else:
                             container = av.open(self.url, options=open_options)
                             self.logger.info(f"✅ [CONNECTED] '{self.name}' established stream at {self.url} (Software-Decode)")
                     except Exception as e:
                         if hw_device is not None:
-                            self.logger.warning(f"⚠️ [{self.name}] NVDEC-Verbindung fehlgeschlagen ({e}) — deaktiviere Hardware-Decode dauerhaft für diesen Stream und versuche sofort erneut mit Software-Decode.")
-                            hw_device = None
+                            nvdec_fail_streak += 1
+                            if nvdec_fail_streak >= NVDEC_FAIL_THRESHOLD:
+                                self.logger.warning(
+                                    f"⚠️ [{self.name}] NVDEC ist {nvdec_fail_streak}x in Folge ohne jeden Erfolg "
+                                    f"fehlgeschlagen ({e}) — deaktiviere Hardware-Decode dauerhaft für diesen Prozess."
+                                )
+                                hw_device = None
+                            else:
+                                self.logger.warning(
+                                    f"⚠️ [{self.name}] NVDEC-Verbindung fehlgeschlagen ({e}, {nvdec_fail_streak}/{NVDEC_FAIL_THRESHOLD}) — "
+                                    f"versuche diesen Versuch mit Software-Decode, NVDEC wird beim nächsten Reconnect erneut probiert."
+                                )
+                            try:
+                                container = av.open(self.url, options=open_options)
+                                self.logger.info(f"✅ [CONNECTED] '{self.name}' established stream at {self.url} (Software-Decode, NVDEC-Fallback)")
+                            except Exception as e2:
+                                self.logger.error(f"❌ [CONNECTION FAILED] '{self.name}': {e2}. Retrying in 5s...")
+                                container = None
+                                time.sleep(5)
+                                continue
+                        else:
+                            self.logger.error(f"❌ [CONNECTION FAILED] '{self.name}': {e}. Retrying in 5s...")
                             container = None
+                            time.sleep(5)
                             continue
-                        self.logger.error(f"❌ [CONNECTION FAILED] '{self.name}': {e}. Retrying in 5s...")
-                        container = None
-                        time.sleep(5)
-                        continue
 
                 try:
                     for packet in container.demux():
@@ -327,8 +378,16 @@ class CameraAgent(multiprocessing.Process):
                         # VIDEO FRAME PROCESSING
                         if packet.stream.type == 'video':
                             for frame in packet.decode():
-                                img_bgr = frame.to_ndarray(format='bgr24')
                                 now = time.time()
+
+                                # Drosselung zuerst (vor der BGR-Konvertierung!), damit
+                                # übersprungene Quell-Frames auch den Konvertierungs-
+                                # Overhead sparen, nicht nur die Inferenz.
+                                if frame_interval > 0 and (now - last_processed_time) < frame_interval:
+                                    continue
+                                last_processed_time = now
+
+                                img_bgr = frame.to_ndarray(format='bgr24')
 
                                 av_buffer.append(("video", img_bgr.copy(), now))
                                 trim_buffer()
@@ -342,7 +401,7 @@ class CameraAgent(multiprocessing.Process):
                                     if MODEL_PATH and os.path.exists(MODEL_PATH):
                                         detector, half_enabled = _try_load_model()
                                         if detector is not None:
-                                            self.logger.warning(f"✅ [{self.name}] KI-Modell nachträglich geladen — Erkennung ist jetzt wieder aktiv.")
+                                            self.logger.info(f"✅ [{self.name}] KI-Modell nachträglich geladen — Erkennung ist jetzt wieder aktiv.")
 
                                 # Fix 6: "person_detected"/"Person" umbenannt, da
                                 # DETECTION_CLASSES inzwischen beliebige Objektarten
@@ -369,7 +428,23 @@ class CameraAgent(multiprocessing.Process):
                                         video_file_path = os.path.join(ALERTS_DIR, f"{self.name}_EVENT_{ts_str}.mp4")
                                         self.logger.warning(f"🚨 [DETECTED] Target object found! Starting recording (YOLO {YOLO_VERSION}, NVENC + Audio).")
 
+                                        # Trigger-Screenshot mit eingezeichneter Erkennungs-Box
+                                        # speichern (gleicher Basisname, .jpg) — wird von
+                                        # web_ui.py automatisch als Vorschaubild im Dashboard
+                                        # (Recent Recordings + Archiv) angezeigt.
+                                        try:
+                                            thumb_path = os.path.splitext(video_file_path)[0] + '.jpg'
+                                            annotated = results[0].plot() if results else img_bgr
+                                            cv2.imwrite(thumb_path, annotated)
+                                        except Exception as e:
+                                            self.logger.warning(f"⚠️ [{self.name}] Trigger-Screenshot konnte nicht gespeichert werden: {e}")
+
                                         h, w = img_bgr.shape[:2]
+                                        # ~2s Keyframe-Abstand: macht die Event-Clips beim
+                                        # Scrubben im Lightbox-Player deutlich reaktionsfreudiger
+                                        # (ohne das brauchen Player oft den letzten Keyframe,
+                                        # der bei sehr langen GOP-Defaults weit zurückliegen kann).
+                                        gop_size = str(max(1, TARGET_FPS * 2))
                                         try:
                                             out_container = av.open(video_file_path, mode='w')
 
@@ -381,7 +456,7 @@ class CameraAgent(multiprocessing.Process):
                                                 # Namen wie 'hq'/'ll' unterscheiden sich je nach
                                                 # ffmpeg/Treiber-Version), daher separat abgesichert.
                                                 try:
-                                                    out_video.options = {'rc': 'vbr', 'cq': '23', 'gpu': '0'}
+                                                    out_video.options = {'rc': 'vbr', 'cq': '23', 'gpu': '0', 'g': gop_size}
                                                 except Exception as opt_err:
                                                     self.logger.warning(f"⚠️ NVENC-Optionen konnten nicht gesetzt werden ({opt_err}), nutze Encoder-Defaults.")
                                                 self.logger.info(f"🎮 [{self.name}] Aufnahme läuft über NVENC (GPU-Encoding).")
@@ -389,7 +464,7 @@ class CameraAgent(multiprocessing.Process):
                                                 self.logger.warning(f"⚠️ NVENC unavailable ({e}), falling back to libx264 (CPU-Encoding).")
                                                 out_video = out_container.add_stream('libx264', rate=TARGET_FPS)
                                                 try:
-                                                    out_video.options = {'preset': 'veryfast', 'crf': '23'}
+                                                    out_video.options = {'preset': 'veryfast', 'crf': '23', 'g': gop_size}
                                                 except Exception:
                                                     pass
 
@@ -446,14 +521,14 @@ class CameraAgent(multiprocessing.Process):
                     raise
                 except Exception as e:
                     self.logger.error(f"⚠️ [STREAM LOST] '{self.name}': {e}. Retrying in 5s...")
-                    if hw_device is not None:
-                        # Sicherheitsprinzip: Aufzeichnung hat Vorrang vor GPU-Decode.
-                        # Da NVDEC-Frame-Handling je nach PyAV-Version variiert, gehen
-                        # wir bei JEDEM Stream-Fehler während aktivem Hardware-Decode
-                        # auf Nummer sicher und schalten dauerhaft auf Software-Decode
-                        # um, statt riskant erneut denselben Pfad zu versuchen.
-                        self.logger.warning(f"⚠️ [{self.name}] Deaktiviere NVDEC dauerhaft nach Stream-Fehler, um zuverlässiges Decoding sicherzustellen.")
-                        hw_device = None
+                    if using_nvdec:
+                        # Zählt als Fehlversuch für den NVDEC-Streak — die Cam war
+                        # evtl. nur kurz weg, dann wird beim nächsten Reconnect (oben)
+                        # NVDEC ganz normal wieder probiert. Erst nach mehreren
+                        # Fehlversuchen IN FOLGE ohne jeden Erfolg schaltet der
+                        # Verbindungs-Block hw_device dauerhaft ab.
+                        nvdec_fail_streak += 1
+                        using_nvdec = False
                     close_writer()
                     state = "IDLE"
                     if container:
