@@ -91,6 +91,18 @@ def _restart_pipeline_background():
         with _restart_lock:
             pipeline_restart_status["restarting"] = False
 
+def _read_recording_states():
+    """Liest die von recorder_pipeline.py geschriebenen State-Dateien (.status/<name>.json)."""
+    states = {}
+    status_dir = os.path.join(ALERTS_DIR, '.status')
+    for f in glob.glob(os.path.join(status_dir, '*.json')):
+        try:
+            with open(f) as fh:
+                states[os.path.splitext(os.path.basename(f))[0]] = json.load(fh).get('state', 'IDLE')
+        except Exception:
+            pass
+    return states
+
 def build_event_list(directory, limit=MAX_EVENTS):
     """Baut die Event-Liste (Dateiname, Datum, Größe) für ein gegebenes Verzeichnis."""
     files = sorted(glob.glob(os.path.join(directory, '*.mp4')), key=os.path.getmtime, reverse=True)[:limit]
@@ -240,6 +252,7 @@ def get_detailed_system_status():
         'restarting': restarting,
         'recent_events': build_event_list(ALERTS_DIR),
         'archived_events': build_event_list(ARCHIVE_DIR),
+        'recording_states': _read_recording_states(),
     }
 
 @app.route('/')
@@ -369,7 +382,8 @@ def save_pipeline_settings():
         "PRE_ROLL_SEC": _clamp(pre_roll, 0, 120),
         "POST_ROLL_SEC": _clamp(post_roll, 0, 300),
         "DETECTION_CLASSES": [int(x) for x in request.form.getlist('DETECTION_CLASSES')] or [0],
-        "THUMBNAIL_FPS": round(_clamp(thumbnail_fps, 0.5, 5.0), 1)
+        "THUMBNAIL_FPS": round(_clamp(thumbnail_fps, 0.5, 5.0), 1),
+        "THEME": request.form.get('THEME', 'dark') if request.form.get('THEME') in ('dark', 'light') else 'dark'
     }
 
     with open(SETTINGS_F, 'w') as f:

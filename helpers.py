@@ -16,16 +16,16 @@ def _stream_worker(name, url):
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         last_encode_time = 0
         last_setting_check = 0
-        encode_interval = 1.0  # Fallback
+        encode_interval = 1.0  # Fallback (1 FPS)
 
         while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
+            # grab() holt das Frame-Paket vom Netzwerk, DEKODIERT es aber noch nicht (spart CPU)
+            if not cap.grab():
                 break
-            
+
             current_time = time.time()
-            
-            # Settings nur alle 2 Sekunden auslesen, um Disk-I/O zu minimieren
+
+            # Settings alle 2 Sekunden neu auslesen
             if current_time - last_setting_check > 2.0:
                 settings = load_settings()
                 try:
@@ -34,21 +34,27 @@ def _stream_worker(name, url):
                         thumbnail_fps = 1.0
                 except (ValueError, TypeError):
                     thumbnail_fps = 1.0
-                
+
                 encode_interval = 1.0 / thumbnail_fps
                 last_setting_check = current_time
 
-            # Encode-Intervall anhand deiner UI-Einstellung prüfen
+            # Prüfen, ob das Intervall für den nächsten Thumbnail-Frame erreicht ist
             if current_time - last_encode_time >= encode_interval:
-                frame_resized = cv2.resize(frame, (640, 360))
-                ret_enc, buffer = cv2.imencode('.jpg', frame_resized, [cv2.IMWRITE_JPEG_QUALITY, 75])
-                if ret_enc:
-                    LATEST_FRAMES[name] = buffer.tobytes()
+                # Erst hier wird exakt dieses EINE Bild auf der CPU dekodiert
+                ret, frame = cap.retrieve()
+                if ret and frame is not None:
+                    frame_resized = cv2.resize(frame, (640, 360))
+                    ret_enc, buffer = cv2.imencode('.jpg', frame_resized, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                    if ret_enc:
+                        LATEST_FRAMES[name] = buffer.tobytes()
                 last_encode_time = current_time
+            else:
+                # Kurze Drosselung, um die while-Schleife nicht mit maximaler Frequenz laufen zu lassen
+                time.sleep(0.01)
 
         if cap is not None:
             cap.release()
-        time.sleep(2)  # Kurze Pause vor dem Reconnect
+        time.sleep(2)  # Kurze Pause vor dem Reconnect (falls Kamera offline)
 
 def start_thumbnail_thread():
     """Startet für JEDEN Stream einen eigenen Hintergrund-Thread."""

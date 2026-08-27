@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style-light.css' if settings.get('THEME') == 'light' else 'style.css') }}">
 </head>
 <body>
     <div class="container">
@@ -56,6 +56,7 @@
                         <div class="thumb-wrap">
                             <img id="thumb-{{ stream }}" class="stream-thumb" src="/thumbnail/{{ stream }}" alt="{{ stream }} Thumbnail" onclick="openLiveView('{{ stream }}')" onerror="this.onerror=null; this.src='data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 16 9\'%3E%3Crect width=\'16\' height=\'9\' fill=\'%23111\'/%3E%3Ctext x=\'50%25\' y=\'50%25\' dominant-baseline=\'middle\' text-anchor=\'middle\' font-family=\'sans-serif\' font-size=\'1\' fill=\'%23555\'%3ENo Signal%3C/text%3E%3C/svg%3E';">
                             {% if overrides.get(stream, 'ON') == 'ON' %}<span class="thumb-live-dot" title="Aktiv"></span>{% endif %}
+                            <span class="thumb-rec-badge" id="rec-{{ stream }}" style="display:none;"><span class="rec-dot"></span>REC</span>
                         </div>
                     </div>
                     {% endfor %}
@@ -197,6 +198,13 @@
 
                     <div class="settings-section">
                         <div class="settings-section-label"><i class="fa-solid fa-tv"></i> Anzeige</div>
+                        <div class="settings-group" style="margin-bottom: 14px;">
+                            <label>Theme</label>
+                            <select name="THEME">
+                                <option value="dark" {% if settings.get('THEME', 'dark') == 'dark' %}selected{% endif %}>Dark</option>
+                                <option value="light" {% if settings.get('THEME') == 'light' %}selected{% endif %}>Day</option>
+                            </select>
+                        </div>
                         <div class="settings-group">
                             <label>Kamera-Vorschau-Rate (Grid + Live-View)</label>
                             <div class="range-wrap">
@@ -640,6 +648,12 @@
                     if (data.archived_events) {
                         document.getElementById('archived-event-list').innerHTML = renderEvents(data.archived_events, true);
                         document.getElementById('archive-count').innerText = data.archived_events.length;
+                    }
+                    if (data.recording_states) {
+                        Object.keys(data.recording_states).forEach(name => {
+                            const el = document.getElementById('rec-' + name);
+                            if (el) el.style.display = (data.recording_states[name] !== 'IDLE') ? 'flex' : 'none';
+                        });
                     }
                 })
                 .catch(err => console.error('Status fetch failed:', err));
