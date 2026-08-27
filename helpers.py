@@ -15,16 +15,31 @@ def _stream_worker(name, url):
         cap = cv2.VideoCapture(url)
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         last_encode_time = 0
+        last_setting_check = 0
+        encode_interval = 1.0  # Fallback
 
         while cap.isOpened():
-            # Frames durchgehend auslesen, damit der Puffer nicht vollläuft
             ret, frame = cap.read()
             if not ret:
-                break  # Bricht ab, wenn der Stream abreißt -> Reconnect
+                break
             
             current_time = time.time()
-            # Nur alle ~0.2 Sekunden (5 fps) encoden, um CPU zu sparen
-            if current_time - last_encode_time >= 0.2:
+            
+            # Settings nur alle 2 Sekunden auslesen, um Disk-I/O zu minimieren
+            if current_time - last_setting_check > 2.0:
+                settings = load_settings()
+                try:
+                    thumbnail_fps = float(settings.get('THUMBNAIL_FPS', 1.0))
+                    if thumbnail_fps <= 0:
+                        thumbnail_fps = 1.0
+                except (ValueError, TypeError):
+                    thumbnail_fps = 1.0
+                
+                encode_interval = 1.0 / thumbnail_fps
+                last_setting_check = current_time
+
+            # Encode-Intervall anhand deiner UI-Einstellung prüfen
+            if current_time - last_encode_time >= encode_interval:
                 frame_resized = cv2.resize(frame, (640, 360))
                 ret_enc, buffer = cv2.imencode('.jpg', frame_resized, [cv2.IMWRITE_JPEG_QUALITY, 75])
                 if ret_enc:
@@ -33,7 +48,7 @@ def _stream_worker(name, url):
 
         if cap is not None:
             cap.release()
-        time.sleep(2)  # Kurze Pause vor dem Reconnect (falls Kamera offline)
+        time.sleep(2)  # Kurze Pause vor dem Reconnect
 
 def start_thumbnail_thread():
     """Startet für JEDEN Stream einen eigenen Hintergrund-Thread."""
