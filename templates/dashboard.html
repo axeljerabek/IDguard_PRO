@@ -184,6 +184,11 @@
                             aus — braucht eine laufende Ollama-Instanz mit passendem Modell, z.B.:
                             <code>docker exec -it ollama ollama pull llama3.2-vision:11b</code>
                             (~8 GB VRAM zusätzlich zur Pipeline). Ohne Ollama einfach ausgeschaltet lassen.
+                            <strong>Wichtig:</strong> Ollama unterstützt kein natives Video — jedes Modell
+                            bekommt immer eine Bild-Sequenz (die Filmstrip-Frames), nie die Video-Datei
+                            selbst. Bei unbekannten/ungetesteten Modellen vorher kurz prüfen, ob sie
+                            überhaupt Bilder verarbeiten (manche "Uncensored"-Finetunes sind reine
+                            Text-Modelle ohne Vision-Unterstützung).
                         </p>
                         <div class="settings-group" style="margin-bottom: 14px;">
                             <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
@@ -198,11 +203,19 @@
                             </div>
                             <div class="settings-group">
                                 <label>Vision-Modell</label>
-                                <input type="text" name="OLLAMA_VISION_MODEL" value="{{ settings.get('OLLAMA_VISION_MODEL', 'llama3.2-vision:11b') }}">
+                                {% set known_models = ['llama3.2-vision:11b', 'huihui_ai/qwen3-vl-abliterated:8b', 'orcarouter/Qwen3.8-27B-Uncensored'] %}
+                                {% set current_model = settings.get('OLLAMA_VISION_MODEL', 'llama3.2-vision:11b') %}
+                                <select id="ollamaModelPreset" {% if current_model in known_models %}name="OLLAMA_VISION_MODEL"{% endif %} onchange="onModelPresetChange()">
+                                    <option value="llama3.2-vision:11b" {% if current_model == 'llama3.2-vision:11b' %}selected{% endif %}>llama3.2-vision:11b — Allround, geprüft</option>
+                                    <option value="huihui_ai/qwen3-vl-abliterated:8b" {% if current_model == 'huihui_ai/qwen3-vl-abliterated:8b' %}selected{% endif %}>huihui_ai/qwen3-vl-abliterated:8b — unzensiert, Vision</option>
+                                    <option value="orcarouter/Qwen3.8-27B-Uncensored" {% if current_model == 'orcarouter/Qwen3.8-27B-Uncensored' %}selected{% endif %}>orcarouter/Qwen3.8-27B-Uncensored — ⚠️ ungeprüft ob Vision</option>
+                                    <option value="__custom__" {% if current_model not in known_models %}selected{% endif %}>Eigenes Modell…</option>
+                                </select>
+                                <input type="text" id="ollamaModelCustom" {% if current_model not in known_models %}name="OLLAMA_VISION_MODEL"{% endif %} value="{{ current_model }}" placeholder="z.B. llava:13b" style="margin-top:6px; {% if current_model in known_models %}display:none;{% endif %}">
                             </div>
                             <div class="settings-group">
                                 <label>Max. Frames pro Analyse</label>
-                                <input type="number" name="AI_ANALYZE_MAX_FRAMES" min="1" max="30" value="{{ settings.get('AI_ANALYZE_MAX_FRAMES', 12) }}">
+                                <input type="number" name="AI_ANALYZE_MAX_FRAMES" min="1" max="64" value="{{ settings.get('AI_ANALYZE_MAX_FRAMES', 12) }}">
                             </div>
                         </div>
                     </div>
@@ -216,12 +229,18 @@
                                 <option value="light" {% if settings.get('THEME') == 'light' %}selected{% endif %}>Day</option>
                             </select>
                         </div>
-                        <div class="settings-group">
+                        <div class="settings-group" style="margin-bottom: 14px;">
                             <label>Kamera-Vorschau-Rate (Grid + Live-View)</label>
                             <div class="range-wrap">
                                 <input type="range" min="0.5" max="5" step="0.5" name="THUMBNAIL_FPS" value="{{ settings.get('THUMBNAIL_FPS', 1) }}" oninput="document.getElementById('thumbfps_val').innerText = this.value + ' fps'">
                                 <span id="thumbfps_val" class="range-val">{{ settings.get('THUMBNAIL_FPS', 1) }} fps</span>
                             </div>
+                        </div>
+                        <div class="settings-group">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" name="SHOW_DETECTION_BOXES" {% if settings.get('SHOW_DETECTION_BOXES', True) %}checked{% endif %} style="width:auto;">
+                                Erkennungs-Boxen live in Vorschau/Lightbox einzeichnen
+                            </label>
                         </div>
                     </div>
 
@@ -429,6 +448,23 @@
             v12: ['n', 's', 'm', 'l', 'x'],
             v26: ['n', 's', 'm', 'l', 'x']
         };
+        function onModelPresetChange() {
+            const sel = document.getElementById('ollamaModelPreset');
+            const custom = document.getElementById('ollamaModelCustom');
+            if (sel.value === '__custom__') {
+                custom.style.display = 'block';
+                custom.name = 'OLLAMA_VISION_MODEL';
+                sel.removeAttribute('name');
+                custom.value = '';
+                custom.focus();
+            } else {
+                custom.style.display = 'none';
+                custom.removeAttribute('name');
+                sel.name = 'OLLAMA_VISION_MODEL';
+                custom.value = sel.value;
+            }
+        }
+
         function filterModelSizes() {
             const yoloSelect = document.querySelector('select[name="YOLO_VERSION"]');
             const sizeSelect = document.querySelector('select[name="MODEL_SIZE"]');

@@ -525,7 +525,8 @@ def save_pipeline_settings():
         "AI_ANALYSIS_ENABLED": request.form.get('AI_ANALYSIS_ENABLED') == 'on',
         "OLLAMA_URL": request.form.get('OLLAMA_URL', 'http://localhost:11434').strip() or 'http://localhost:11434',
         "OLLAMA_VISION_MODEL": request.form.get('OLLAMA_VISION_MODEL', 'llama3.2-vision:11b').strip() or 'llama3.2-vision:11b',
-        "AI_ANALYZE_MAX_FRAMES": _clamp(ai_max_frames, 1, 30)
+        "AI_ANALYZE_MAX_FRAMES": _clamp(ai_max_frames, 1, 64),
+        "SHOW_DETECTION_BOXES": request.form.get('SHOW_DETECTION_BOXES') == 'on'
     }
 
     with open(SETTINGS_F, 'w') as f:

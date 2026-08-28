@@ -258,22 +258,33 @@ class CameraAgent(multiprocessing.Process):
         shared_frame_next_time = 0
         shared_frame_interval = 1.0
         shared_frame_last_check = 0
+        show_boxes_live = True
 
-        def write_shared_frame(img_bgr):
-            nonlocal shared_frame_next_time, shared_frame_interval, shared_frame_last_check
+        def write_shared_frame(img_bgr, results=None):
+            nonlocal shared_frame_next_time, shared_frame_interval, shared_frame_last_check, show_boxes_live
             now2 = time.time()
             if now2 - shared_frame_last_check > 5.0:
                 try:
                     with open(SETTINGS_F) as f:
-                        fps = float(json.load(f).get('THUMBNAIL_FPS', 1.0))
+                        d = json.load(f)
+                    fps = float(d.get('THUMBNAIL_FPS', 1.0))
                     shared_frame_interval = 1.0 / fps if fps > 0 else 1.0
+                    show_boxes_live = bool(d.get('SHOW_DETECTION_BOXES', True))
                 except Exception:
                     shared_frame_interval = 1.0
                 shared_frame_last_check = now2
             if now2 < shared_frame_next_time:
                 return
             try:
-                small = cv2.resize(img_bgr, (640, max(1, int(img_bgr.shape[0] * 640 / img_bgr.shape[1]))))
+                source = img_bgr
+                if show_boxes_live and results:
+                    # Fällt bei JEDEM Problem sofort aufs Rohbild zurück — die
+                    # Live-Vorschau ist rein kosmetisch, darf nie etwas anderes stören.
+                    try:
+                        source = results[0].plot()
+                    except Exception:
+                        source = img_bgr
+                small = cv2.resize(source, (640, max(1, int(source.shape[0] * 640 / source.shape[1]))))
                 ok, buf = cv2.imencode('.jpg', small, [cv2.IMWRITE_JPEG_QUALITY, 75])
                 if ok:
                     tmp = os.path.join(FRAMES_DIR, f'.{self.name}.tmp')
@@ -364,8 +375,9 @@ class CameraAgent(multiprocessing.Process):
             except Exception as e:
                 self.logger.error(f"❌ Video encoding error: {e}")
 
-        def capture_filmstrip(img_bgr):
-            """Small (Hover-Scrub) + Large (spätere KI-Analyse) Frames im Intervall."""
+        def capture_filmstrip(img_bgr, results=None):
+            """Small (Hover-Scrub, MIT Boxen) + Large (KI-Analyse, bewusst ROH ohne
+            Boxen — sauberere Eingabe für Ollama) Frames im Intervall."""
             nonlocal filmstrip_taken, filmstrip_next_time
             if not fs_small_dir or filmstrip_taken >= filmstrip_count_target:
                 return
@@ -375,7 +387,15 @@ class CameraAgent(multiprocessing.Process):
             try:
                 idx = filmstrip_taken
                 h, w = img_bgr.shape[:2]
-                small = cv2.resize(img_bgr, (320, max(1, int(h * 320 / w))))
+
+                annotated = img_bgr
+                if results:
+                    try:
+                        annotated = results[0].plot()
+                    except Exception:
+                        annotated = img_bgr
+
+                small = cv2.resize(annotated, (320, max(1, int(h * 320 / w))))
                 cv2.imwrite(os.path.join(fs_small_dir, f'{idx:04d}.jpg'), small)
                 large = img_bgr if w <= 1280 else cv2.resize(img_bgr, (1280, max(1, int(h * 1280 / w))))
                 cv2.imwrite(os.path.join(fs_large_dir, f'{idx:04d}.jpg'), large)
@@ -500,7 +520,6 @@ class CameraAgent(multiprocessing.Process):
                                 last_processed_time = now
 
                                 img_bgr = frame.to_ndarray(format='bgr24')
-                                write_shared_frame(img_bgr)
 
                                 av_buffer.append(("video", img_bgr.copy(), now))
                                 trim_buffer()
@@ -522,6 +541,7 @@ class CameraAgent(multiprocessing.Process):
                                 # sagten irreführend "Person found", auch wenn z.B.
                                 # eine Katze erkannt wurde.
                                 target_detected = False
+                                results = None
                                 if detector:
                                     # HIER wird die CONFIDENCE_THRESHOLD direkt genutzt.
                                     # quantize=16 statt half=True (deprecated, siehe
@@ -532,6 +552,12 @@ class CameraAgent(multiprocessing.Process):
                                     else:
                                         results = detector(img_bgr, verbose=False, classes=DETECTION_CLASSES, conf=CONFIDENCE_THRESHOLD, device=device_target)
                                     target_detected = len(results[0].boxes) > 0
+
+                                # Erst NACH der Detection: write_shared_frame bekommt die
+                                # Ergebnisse mit, damit die Live-Vorschau (Grid + Lightbox)
+                                # optional Erkennungs-Boxen zeigen kann — kostet keine
+                                # zusätzliche Inferenz, nutzt nur das bereits berechnete Ergebnis.
+                                write_shared_frame(img_bgr, results)
 
                                 if state == "IDLE":
                                     if target_detected:
@@ -622,14 +648,14 @@ class CameraAgent(multiprocessing.Process):
                                 elif state == "RECORDING":
                                     if target_detected:
                                         encode_video_frame(img_bgr, now)
-                                        capture_filmstrip(img_bgr)
+                                        capture_filmstrip(img_bgr, results)
                                     else:
                                         state = "POST_ROLL"
                                         _write_state(self.name, "POST_ROLL")
                                         post_roll_end_time = time.time() + POST_ROLL_SEC
                                         self.logger.info(f"🏠 [GONE] Target object left frame. Monitoring for {POST_ROLL_SEC}s extra.")
                                         encode_video_frame(img_bgr, now)
-                                        capture_filmstrip(img_bgr)
+                                        capture_filmstrip(img_bgr, results)
 
                                 elif state == "POST_ROLL":
                                     if target_detected:
@@ -637,10 +663,10 @@ class CameraAgent(multiprocessing.Process):
                                         _write_state(self.name, "RECORDING")
                                         self.logger.info("🚨 [DETECTED] Target object returned! Resuming recording.")
                                         encode_video_frame(img_bgr, now)
-                                        capture_filmstrip(img_bgr)
+                                        capture_filmstrip(img_bgr, results)
                                     else:
                                         encode_video_frame(img_bgr, now)
-                                        capture_filmstrip(img_bgr)
+                                        capture_filmstrip(img_bgr, results)
                                         if time.time() > post_roll_end_time:
                                             self.logger.info(f"✅ Session ended for {self.name}. Closing file.")
                                             close_writer()

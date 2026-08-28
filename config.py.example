@@ -69,20 +69,64 @@ if os.path.exists(SETTINGS_F):
     except Exception as e:
         print(f"Pipeline Settings Vorab-Lese-Fehler: {e}")
 
-# AUTO-DOWNLOAD: Falls das gewählte Modell im Projektordner fehlt
+# AUTO-DOWNLOAD: Falls das gewählte Modell im Projektordner fehlt.
+#
+# WICHTIG: config.py wird von mehreren Prozessen gleichzeitig importiert
+# (Master + jeder Kamera-Worker + web_ui.py) — ohne die folgenden Absicherungen
+# könnten mehrere Prozesse beim allerersten Start gleichzeitig in dieselbe
+# .pt-Datei schreiben und sie gegenseitig korrumpieren. Ultralytics selbst hat
+# genau dieses Problem für YOLO26-Checkpoints in einer späteren Paket-Version
+# als bekannten Bug gefixt (konkurrierendes *Laden*); hier geht es zusätzlich
+# um konkurrierendes *Herunterladen*, was dieselbe Absicherung braucht:
+#   1. Download in eine prozess-eigene Temp-Datei (kein gemeinsamer Schreib-Pfad)
+#   2. Timeout, damit ein hängender Download nicht den ganzen Prozessstart blockiert
+#   3. Größen-Sanity-Check (eine echte .pt-Datei ist mehrere MB groß — ein paar
+#      KB deuten auf eine HTML-Fehlerseite statt eines echten Modells hin)
+#   4. Direkt vor dem finalen Umbenennen nochmal prüfen, ob ein anderer Prozess
+#      inzwischen bereits fertig heruntergeladen hat (dann einfach verwerfen)
+#   5. os.replace() ist auf demselben Dateisystem atomar — kein Prozess sieht
+#      je eine halb geschriebene Datei
+MODEL_MIN_BYTES = 1_000_000  # 1 MB — großzügige Untergrenze, jedes echte YOLO-.pt ist deutlich größer
+
 if not os.path.exists(MODEL_PATH):
     print(f"📥 Modell '{MODEL_FILENAME}' (YOLO {YOLO_VERSION} - {MODEL_SIZE}) nicht gefunden. Lade herunter...")
+    tmp_path = f"{MODEL_PATH}.part-{os.getpid()}"
     try:
-        urllib.request.urlretrieve(YOLO_URL, MODEL_PATH)
-        print("✅ YOLO-Modell erfolgreich heruntergeladen.")
+        with urllib.request.urlopen(YOLO_URL, timeout=30) as resp, open(tmp_path, 'wb') as out:
+            while True:
+                chunk = resp.read(1024 * 256)
+                if not chunk:
+                    break
+                out.write(chunk)
+
+        downloaded_size = os.path.getsize(tmp_path)
+        if downloaded_size < MODEL_MIN_BYTES:
+            raise ValueError(
+                f"Heruntergeladene Datei verdächtig klein ({downloaded_size} Bytes) — "
+                f"vermutlich keine gültige Modelldatei (falsche URL / Fehlerseite?)."
+            )
+
+        if not os.path.exists(MODEL_PATH):
+            os.replace(tmp_path, MODEL_PATH)  # atomar, kein Prozess sieht eine halbe Datei
+            print("✅ YOLO-Modell erfolgreich heruntergeladen.")
+        else:
+            # Ein paralleler Prozess war schneller fertig — unsere Kopie verwerfen.
+            os.remove(tmp_path)
+            print("ℹ️ Modell wurde inzwischen von einem anderen Prozess fertig heruntergeladen.")
     except Exception as e:
         print(f"❌ Fehler beim automatischen Download des YOLO-Modells: {e}")
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
 # Stream Configuration Base
 STREAMS = [
     {"name": "Entrance", "url":  "rtmp://172.168.178.25/pi/test", "enabled": True, "type": "VIDEO"},
-    {"name": "Garden",  "url":  "rtmp://172.168.178.25/zero/test", "enabled": True, "type": "VIDEO"},
-    {"name": "Backyard",   "url":  "rtmp://172.168.178.25/mevo/test", "enabled": False, "type": "VIDEO"},
+    {"name": "Backdoor",  "url":  "rtmp://172.168.178.25/zero/test", "enabled": True, "type": "VIDEO"},
+    {"name": "Garden",   "url":  "rtmp://172.168.178.25/mevo/test", "enabled": False, "type": "VIDEO"},
     {"name": "Carport",   "url":  "rtmp://172.168.178.25/zero2/test", "enabled": False, "type": "VIDEO"}
 ]
 
@@ -117,6 +161,22 @@ if os.path.exists(SETTINGS_F):
                 DETECTION_CLASSES = [int(c) for c in sett['DETECTION_CLASSES']]
     except Exception as e:
         print(f"Pipeline Settings Fehler: {e}")
+
+# Sanity-Clamping: schützt vor Bugs weiter unten (z.B. Division durch 0 bei
+# frame_interval = 1.0/TARGET_FPS in recorder_pipeline.py), falls die
+# Settings-Datei mal von Hand editiert oder anderweitig korrumpiert wurde.
+# web_ui.py clamped beim Speichern bereits selbst — das hier ist nur das
+# zweite Sicherheitsnetz für den Fall eines manuellen/externen Edits.
+if TARGET_FPS <= 0:
+    TARGET_FPS = 30
+if PRE_ROLL_SEC < 0:
+    PRE_ROLL_SEC = 0
+if POST_ROLL_SEC < 0:
+    POST_ROLL_SEC = 0
+if not (0.0 < CONFIDENCE_THRESHOLD <= 1.0):
+    CONFIDENCE_THRESHOLD = 0.5
+if not DETECTION_CLASSES:
+    DETECTION_CLASSES = [0]
 
 # Recording Mode
 RECORDING_MODE = "EVENT_DRIVEN"
