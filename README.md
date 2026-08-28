@@ -2,7 +2,7 @@
 
 IDguard PRO watches your cameras, decides what's actually worth recording, saves the event, and — if you want — tells you afterwards in plain words what happened in it. It does that by chaining three things together instead of expecting one AI to handle it all: a YOLO model (v10, v12, or v26 — your choice) watches every frame live and spots the moment something worth recording is happening; the recording itself then saves the event with a short buffer before and after; and, optionally, a vision-language model (via Ollama) looks at the finished clip and writes a short description of what it saw. Each model only does the one job it's good at, and the handoff between them is automatic. Everything runs on your own hardware, with GPU acceleration end to end — decoding, detection, and encoding — no cloud involved.
 
-Most of this code was written with AI (Google Gemini, Claude, Claude Code, and local models). But the architecture — deciding how the pieces should fit together, and the work of actually making it all run reliably — was still a person's job.
+Some of this code was written with AI (Google Gemini, Claude, Claude Code, and local models). But the architecture — deciding how the pieces should fit together, and the work of actually making it all run reliably — was still a person's job.
 
 ## Overview
 
