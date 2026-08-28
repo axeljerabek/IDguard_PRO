@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import time
@@ -30,13 +31,43 @@ sys.path.append(DIR)
 
 try:
     from config import (
-        STREAMS, ALERTS_DIR, MODEL_PATH, PRE_ROLL_SEC,
+        STREAMS, ALERTS_DIR, MODEL_PATH, PRE_ROLL_SEC, SETTINGS_F,
         POST_ROLL_SEC, TARGET_FPS, DETECTION_CLASSES, CONFIDENCE_THRESHOLD,
         get_stream_logger, system_logger, YOLO_VERSION
     )
 except ImportError as e:
     print(f"❌ CRITICAL ERROR: Could not load config.py: {e}")
     sys.exit(1)
+
+# Für den REC-Indikator im Dashboard: aktueller Zustand pro Stream, von
+# web_ui.py gelesen (kein *.mp4-Glob-Konflikt durch führenden Punkt).
+STATUS_DIR = os.path.join(ALERTS_DIR, '.status')
+os.makedirs(STATUS_DIR, exist_ok=True)
+
+def _load_filmstrip_settings():
+    """FILMSTRIP_COUNT=0 -> Feature aus. Live aus der Settings-Datei gelesen,
+    kein Pipeline-Neustart bei Änderung nötig."""
+    try:
+        with open(SETTINGS_F) as f:
+            d = json.load(f)
+        return int(d.get('FILMSTRIP_COUNT', 0)), float(d.get('FILMSTRIP_INTERVAL_SEC', 2.0))
+    except Exception:
+        return 0, 2.0
+
+def _ai_analysis_enabled():
+    """Standardmäßig AUS — nicht jeder hat Ollama laufen. Nur per Settings aktiv."""
+    try:
+        with open(SETTINGS_F) as f:
+            return bool(json.load(f).get('AI_ANALYSIS_ENABLED', False))
+    except Exception:
+        return False
+
+def _write_state(name, state):
+    try:
+        with open(os.path.join(STATUS_DIR, f'{name}.json'), 'w') as f:
+            json.dump({'state': state}, f)
+    except Exception:
+        pass
 
 
 class GracefulShutdown(BaseException):
@@ -90,6 +121,9 @@ class CameraAgent(multiprocessing.Process):
             import cv2  # bereits Ultralytics-Abhängigkeit, für Trigger-Screenshots genutzt
 
             torch.set_num_threads(2)
+            cv2.setNumThreads(2)  # sonst nutzt cv2 (Resize/JPEG-Encode für Thumbnails,
+            # Filmstrip, Shared-Frames) unkontrolliert alle Kerne — pro Kamera-Prozess
+            # echte CPU-Konkurrenz mit den bereits gedeckelten Torch/OMP-Threads.
 
             from ultralytics import YOLO
         except ImportError as e:
@@ -216,6 +250,40 @@ class CameraAgent(multiprocessing.Process):
         frame_interval = 1.0 / TARGET_FPS if TARGET_FPS and TARGET_FPS > 0 else 0.0
         last_processed_time = 0.0
 
+        # Geteilter Live-Frame für web_ui.py/helpers.py: schreibt periodisch (Rate
+        # aus THUMBNAIL_FPS) ein JPEG, damit die Web-UI NICHT mehr selbst eine
+        # zweite RTMP-Verbindung pro Kamera aufmachen und decodieren muss.
+        FRAMES_DIR = os.path.join(ALERTS_DIR, '.frames')
+        os.makedirs(FRAMES_DIR, exist_ok=True)
+        shared_frame_next_time = 0
+        shared_frame_interval = 1.0
+        shared_frame_last_check = 0
+
+        def write_shared_frame(img_bgr):
+            nonlocal shared_frame_next_time, shared_frame_interval, shared_frame_last_check
+            now2 = time.time()
+            if now2 - shared_frame_last_check > 5.0:
+                try:
+                    with open(SETTINGS_F) as f:
+                        fps = float(json.load(f).get('THUMBNAIL_FPS', 1.0))
+                    shared_frame_interval = 1.0 / fps if fps > 0 else 1.0
+                except Exception:
+                    shared_frame_interval = 1.0
+                shared_frame_last_check = now2
+            if now2 < shared_frame_next_time:
+                return
+            try:
+                small = cv2.resize(img_bgr, (640, max(1, int(img_bgr.shape[0] * 640 / img_bgr.shape[1]))))
+                ok, buf = cv2.imencode('.jpg', small, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                if ok:
+                    tmp = os.path.join(FRAMES_DIR, f'.{self.name}.tmp')
+                    with open(tmp, 'wb') as f:
+                        f.write(buf.tobytes())
+                    os.replace(tmp, os.path.join(FRAMES_DIR, f'{self.name}.jpg'))
+                shared_frame_next_time = now2 + shared_frame_interval
+            except Exception:
+                pass
+
         state = "IDLE"
         post_roll_end_time = 0
         container = None
@@ -224,9 +292,20 @@ class CameraAgent(multiprocessing.Process):
         out_audio = None
         resampler = None
         video_frame_count = 0
+        recording_start_time = 0
+        last_pts = -1
+
+        # Filmstrip (Hover-Scrub-Vorschau + AI-taugliche Großbilder): pro
+        # Recording neu gesetzt, siehe RECORDING-Start weiter unten.
+        fs_small_dir = None
+        fs_large_dir = None
+        filmstrip_count_target = 0
+        filmstrip_interval = 2.0
+        filmstrip_taken = 0
+        filmstrip_next_time = 0
 
         def close_writer():
-            nonlocal out_container, out_video, out_audio, resampler, video_frame_count
+            nonlocal out_container, out_video, out_audio, resampler, video_frame_count, last_pts
             if out_container:
                 try:
                     # Flush Resampler zuerst
@@ -256,21 +335,54 @@ class CameraAgent(multiprocessing.Process):
                     out_audio = None
                     resampler = None
                     video_frame_count = 0
+                    last_pts = -1
                     av_buffer.clear()
 
-        def encode_video_frame(img_bgr):
-            nonlocal video_frame_count
+        def encode_video_frame(img_bgr, ts=None):
+            nonlocal video_frame_count, last_pts
             if not out_container or not out_video:
                 return
             try:
+                t = ts if ts is not None else time.time()
+                # Bug-Fix: PTS aus echter Wall-Clock-Zeit relativ zum Recording-Start
+                # statt reinem Zähler. Ein Zähler nimmt konstante TARGET_FPS an —
+                # stockt die Quelle mal kurz (Netz-Hänger), fehlt diese Zeitlücke im
+                # Video komplett, und alles danach wird gestaucht/zu schnell
+                # abgespielt. Echte Zeitstempel bilden reale Aussetzer korrekt ab.
+                elapsed = max(0.0, t - recording_start_time)
+                pts = int(elapsed * TARGET_FPS)
+                if pts <= last_pts:
+                    pts = last_pts + 1
+                last_pts = pts
+
                 av_frame = av.VideoFrame.from_ndarray(img_bgr, format="bgr24")
-                av_frame.pts = video_frame_count
+                av_frame.pts = pts
                 video_frame_count += 1
 
                 for packet in out_video.encode(av_frame):
                     out_container.mux(packet)
             except Exception as e:
                 self.logger.error(f"❌ Video encoding error: {e}")
+
+        def capture_filmstrip(img_bgr):
+            """Small (Hover-Scrub) + Large (spätere KI-Analyse) Frames im Intervall."""
+            nonlocal filmstrip_taken, filmstrip_next_time
+            if not fs_small_dir or filmstrip_taken >= filmstrip_count_target:
+                return
+            now = time.time()
+            if now < filmstrip_next_time:
+                return
+            try:
+                idx = filmstrip_taken
+                h, w = img_bgr.shape[:2]
+                small = cv2.resize(img_bgr, (320, max(1, int(h * 320 / w))))
+                cv2.imwrite(os.path.join(fs_small_dir, f'{idx:04d}.jpg'), small)
+                large = img_bgr if w <= 1280 else cv2.resize(img_bgr, (1280, max(1, int(h * 1280 / w))))
+                cv2.imwrite(os.path.join(fs_large_dir, f'{idx:04d}.jpg'), large)
+                filmstrip_taken += 1
+                filmstrip_next_time = now + filmstrip_interval
+            except Exception:
+                pass
 
         def encode_audio_frame(a_frame):
             nonlocal resampler
@@ -292,9 +404,9 @@ class CameraAgent(multiprocessing.Process):
             except Exception as e:
                 self.logger.error(f"❌ Audio encoding error: {e}")
 
-        def write_buffered_item(item_type, data):
+        def write_buffered_item(item_type, data, ts=None):
             if item_type == "video":
-                encode_video_frame(data)
+                encode_video_frame(data, ts)
             elif item_type == "audio":
                 encode_audio_frame(data)
 
@@ -388,6 +500,7 @@ class CameraAgent(multiprocessing.Process):
                                 last_processed_time = now
 
                                 img_bgr = frame.to_ndarray(format='bgr24')
+                                write_shared_frame(img_bgr)
 
                                 av_buffer.append(("video", img_bgr.copy(), now))
                                 trim_buffer()
@@ -423,10 +536,16 @@ class CameraAgent(multiprocessing.Process):
                                 if state == "IDLE":
                                     if target_detected:
                                         state = "RECORDING"
+                                        _write_state(self.name, "RECORDING")
                                         ts_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                                         os.makedirs(ALERTS_DIR, exist_ok=True)
                                         video_file_path = os.path.join(ALERTS_DIR, f"{self.name}_EVENT_{ts_str}.mp4")
                                         self.logger.warning(f"🚨 [DETECTED] Target object found! Starting recording (YOLO {YOLO_VERSION}, NVENC + Audio).")
+
+                                        # Zeit-Nullpunkt fürs PTS: ältester Pre-Roll-Frame,
+                                        # damit dessen echte Zeitstempel korrekt einsortiert werden.
+                                        recording_start_time = av_buffer[0][2] if av_buffer else time.time()
+                                        last_pts = -1
 
                                         # Trigger-Screenshot mit eingezeichneter Erkennungs-Box
                                         # speichern (gleicher Basisname, .jpg) — wird von
@@ -438,6 +557,18 @@ class CameraAgent(multiprocessing.Process):
                                             cv2.imwrite(thumb_path, annotated)
                                         except Exception as e:
                                             self.logger.warning(f"⚠️ [{self.name}] Trigger-Screenshot konnte nicht gespeichert werden: {e}")
+
+                                        filmstrip_count_target, filmstrip_interval = _load_filmstrip_settings()
+                                        if filmstrip_count_target > 0:
+                                            fs_name = os.path.splitext(os.path.basename(video_file_path))[0]
+                                            fs_small_dir = os.path.join(ALERTS_DIR, '.thumbs', fs_name, 'small')
+                                            fs_large_dir = os.path.join(ALERTS_DIR, '.thumbs', fs_name, 'large')
+                                            os.makedirs(fs_small_dir, exist_ok=True)
+                                            os.makedirs(fs_large_dir, exist_ok=True)
+                                        else:
+                                            fs_small_dir = fs_large_dir = None
+                                        filmstrip_taken = 0
+                                        filmstrip_next_time = time.time()
 
                                         h, w = img_bgr.shape[:2]
                                         # ~2s Keyframe-Abstand: macht die Event-Clips beim
@@ -479,34 +610,53 @@ class CameraAgent(multiprocessing.Process):
                                                 out_audio.rate = audio_in_stream.rate if audio_in_stream.rate else 44100
                                                 out_audio.layout = audio_in_stream.layout.name if audio_in_stream.layout else 'stereo'
 
-                                            for item_type, data, _ts in av_buffer:
-                                                write_buffered_item(item_type, data)
+                                            for item_type, data, item_ts in av_buffer:
+                                                write_buffered_item(item_type, data, item_ts)
 
                                         except Exception as e:
                                             self.logger.error(f"❌ Failed to initialize video writer: {e}")
                                             close_writer()
                                             state = "IDLE"
+                                            _write_state(self.name, "IDLE")
 
                                 elif state == "RECORDING":
                                     if target_detected:
-                                        encode_video_frame(img_bgr)
+                                        encode_video_frame(img_bgr, now)
+                                        capture_filmstrip(img_bgr)
                                     else:
                                         state = "POST_ROLL"
+                                        _write_state(self.name, "POST_ROLL")
                                         post_roll_end_time = time.time() + POST_ROLL_SEC
                                         self.logger.info(f"🏠 [GONE] Target object left frame. Monitoring for {POST_ROLL_SEC}s extra.")
-                                        encode_video_frame(img_bgr)
+                                        encode_video_frame(img_bgr, now)
+                                        capture_filmstrip(img_bgr)
 
                                 elif state == "POST_ROLL":
                                     if target_detected:
                                         state = "RECORDING"
+                                        _write_state(self.name, "RECORDING")
                                         self.logger.info("🚨 [DETECTED] Target object returned! Resuming recording.")
-                                        encode_video_frame(img_bgr)
+                                        encode_video_frame(img_bgr, now)
+                                        capture_filmstrip(img_bgr)
                                     else:
-                                        encode_video_frame(img_bgr)
+                                        encode_video_frame(img_bgr, now)
+                                        capture_filmstrip(img_bgr)
                                         if time.time() > post_roll_end_time:
                                             self.logger.info(f"✅ Session ended for {self.name}. Closing file.")
                                             close_writer()
                                             state = "IDLE"
+                                            _write_state(self.name, "IDLE")
+                                            if _ai_analysis_enabled():
+                                                try:
+                                                    vb = os.path.splitext(os.path.basename(video_file_path))[0]
+                                                    subprocess.Popen(
+                                                        [sys.executable, os.path.join(DIR, 'ai_analyze.py'), vb, ALERTS_DIR]
+                                                        # stdout/stderr NICHT auf DEVNULL: Fehler (z.B. Ollama nicht
+                                                        # erreichbar) landen so im selben Log wie die restliche Pipeline
+                                                        # statt spurlos zu verschwinden.
+                                                    )
+                                                except Exception as e:
+                                                    self.logger.warning(f"⚠️ [{self.name}] Konnte AI-Analyse nicht starten: {e}")
 
                         # AUDIO FRAME PROCESSING
                         elif packet.stream.type == 'audio':
@@ -531,6 +681,7 @@ class CameraAgent(multiprocessing.Process):
                         using_nvdec = False
                     close_writer()
                     state = "IDLE"
+                    _write_state(self.name, "IDLE")
                     if container:
                         try:
                             container.close()

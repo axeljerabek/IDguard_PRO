@@ -30,6 +30,27 @@ app = Flask(__name__)
 ARCHIVE_DIR = os.path.join(ALERTS_DIR, 'archive')
 os.makedirs(ARCHIVE_DIR, exist_ok=True)
 
+def _cleanup_old_recordings():
+    """Löscht unarchivierte Aufnahmen älter als RETENTION_DAYS (0 = aus).
+    Nur ALERTS_DIR, nie ARCHIVE_DIR — Archivieren bedeutet bewusst 'behalten'."""
+    while True:
+        try:
+            days = load_settings().get('RETENTION_DAYS', 0)
+            if days and days > 0:
+                cutoff = time.time() - days * 86400
+                for f in glob.glob(os.path.join(ALERTS_DIR, '*.mp4')):
+                    try:
+                        if os.path.getmtime(f) < cutoff:
+                            os.remove(f)
+                            _remove_matching_thumbnail(f)
+                    except OSError:
+                        pass
+        except Exception:
+            pass
+        time.sleep(3600)
+
+threading.Thread(target=_cleanup_old_recordings, daemon=True).start()
+
 # Harte Obergrenze für geladene Event-Listen, damit glob()/sort() bei Monaten
 # an Aufnahmen nicht bei jedem Request/Poll unnötig groß wird.
 MAX_EVENTS = 200
@@ -103,26 +124,64 @@ def _read_recording_states():
             pass
     return states
 
+_event_cache = {}  # directory -> (expires_at, events)
+EVENT_CACHE_TTL = 4  # Sekunden — knapp über dem 3s-Poll-Intervall, spart die teure
+
 def build_event_list(directory, limit=MAX_EVENTS):
+    now = time.time()
+    cached = _event_cache.get(directory)
+    if cached and cached[0] > now:
+        return cached[1]
+    events = _build_event_list(directory, limit)
+    _event_cache[directory] = (now + EVENT_CACHE_TTL, events)
+    return events
+
+def _event_from_file(f):
+    try:
+        mtime = os.path.getmtime(f)
+        size = os.path.getsize(f)
+        # recorder_pipeline.py legt beim Trigger einen Screenshot mit
+        # gleichem Basisnamen ab (<name>.mp4 -> <name>.jpg)
+        thumb_path = os.path.splitext(f)[0] + '.jpg'
+        fs_dir = os.path.join(os.path.dirname(f), '.thumbs', os.path.splitext(os.path.basename(f))[0], 'small')
+        fs_count = len(glob.glob(os.path.join(fs_dir, '*.jpg'))) if os.path.isdir(fs_dir) else 0
+        ai_desc = None
+        ai_path = os.path.splitext(f)[0] + '.ai.json'
+        if os.path.exists(ai_path):
+            try:
+                with open(ai_path) as af:
+                    ai_desc = json.load(af).get('description')
+            except Exception:
+                pass
+        ai_pending = os.path.exists(os.path.splitext(f)[0] + '.ai.pending')
+        return {
+            'filename': os.path.basename(f),
+            'datetime': datetime.fromtimestamp(mtime).strftime('%d.%m.%Y %H:%M'),
+            'size': format_size(size),
+            'has_thumbnail': os.path.exists(thumb_path),
+            'filmstrip_count': fs_count,
+            'ai_description': ai_desc,
+            'ai_pending': ai_pending
+        }
+    except OSError:
+        return None
+
+def _build_event_list(directory, limit=MAX_EVENTS):
     """Baut die Event-Liste (Dateiname, Datum, Größe) für ein gegebenes Verzeichnis."""
     files = sorted(glob.glob(os.path.join(directory, '*.mp4')), key=os.path.getmtime, reverse=True)[:limit]
-    events = []
-    for f in files:
-        try:
-            mtime = os.path.getmtime(f)
-            size = os.path.getsize(f)
-            # recorder_pipeline.py legt beim Trigger einen Screenshot mit
-            # gleichem Basisnamen ab (<name>.mp4 -> <name>.jpg)
-            thumb_path = os.path.splitext(f)[0] + '.jpg'
-            events.append({
-                'filename': os.path.basename(f),
-                'datetime': datetime.fromtimestamp(mtime).strftime('%d.%m.%Y %H:%M'),
-                'size': format_size(size),
-                'has_thumbnail': os.path.exists(thumb_path)
-            })
-        except OSError:
-            pass
-    return events
+    return [e for e in (_event_from_file(f) for f in files) if e]
+
+def _get_disk_status():
+    try:
+        total, used, free = shutil.disk_usage(ALERTS_DIR)
+        return {
+            'total': round(total / (1024 ** 3), 1),
+            'used': round(used / (1024 ** 3), 1),
+            'free': round(free / (1024 ** 3), 1),
+            'percent': round(used / total * 100, 1) if total else 0
+        }
+    except Exception:
+        return {'total': 0, 'used': 0, 'free': 0, 'percent': 0}
 
 def get_detailed_system_status():
     """Ermittelt Modell, VRAM, RAM, CPU, GPU sowie Pipeline-/Event-Status für Dashboard + /api/status"""
@@ -152,17 +211,21 @@ def get_detailed_system_status():
     vram_total = 32.6  # Standardwert in GB
     vram_percent = 0.0
     gpu_temp = 35.0
+    encoder_util = 0.0
+    decoder_util = 0.0
 
     try:
-        cmd = ["nvidia-smi", "--query-gpu=name,memory.used,memory.total,temperature.gpu", "--format=csv,noheader,nounits"]
+        cmd = ["nvidia-smi", "--query-gpu=name,memory.used,memory.total,temperature.gpu,utilization.encoder,utilization.decoder", "--format=csv,noheader,nounits"]
         output = subprocess.check_output(cmd, encoding='utf-8').strip().split('\n')[0]
         parts = [p.strip() for p in output.split(',')]
-        if len(parts) >= 4:
+        if len(parts) >= 6:
             gpu_name = parts[0]
             vram_used = round(float(parts[1]) / 1024.0, 1)   # Umrechnung MB -> GB
             vram_total = round(float(parts[2]) / 1024.0, 1)  # Umrechnung MB -> GB
             vram_percent = round((vram_used / vram_total) * 100, 1) if vram_total > 0 else 0.0
             gpu_temp = float(parts[3])
+            encoder_util = float(parts[4])
+            decoder_util = float(parts[5])
     except Exception:
         pass
 
@@ -238,7 +301,9 @@ def get_detailed_system_status():
         },
         'gpu': {
             'temp': gpu_temp,
-            'status': 'Normal' if gpu_temp < 80 else 'Warning'
+            'status': 'Normal' if gpu_temp < 80 else 'Warning',
+            'encoder_util': encoder_util,
+            'decoder_util': decoder_util
         },
         'model_version': active_version,
         'model_size': active_size,
@@ -253,6 +318,7 @@ def get_detailed_system_status():
         'recent_events': build_event_list(ALERTS_DIR),
         'archived_events': build_event_list(ARCHIVE_DIR),
         'recording_states': _read_recording_states(),
+        'disk': _get_disk_status(),
     }
 
 @app.route('/')
@@ -283,6 +349,59 @@ def dashboard():
         csrf_token=CSRF_TOKEN,
         thumbnail_interval_ms=thumbnail_interval_ms
     )
+
+def _trigger_analysis(base_dir, filename):
+    settings = load_settings()
+    if not settings.get('AI_ANALYSIS_ENABLED'):
+        return False, "KI-Videoanalyse ist nicht aktiviert (Settings)."
+    basename = os.path.splitext(filename)[0]
+    fs_dir = os.path.join(base_dir, '.thumbs', basename, 'large')
+    if not os.path.isdir(fs_dir) or not glob.glob(os.path.join(fs_dir, '*.jpg')):
+        return False, "Keine Filmstrip-Frames für dieses Video vorhanden."
+    try:
+        subprocess.Popen([sys.executable, os.path.join(SCRIPT_DIR, 'ai_analyze.py'), basename, base_dir])
+        _event_cache.clear()
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+@app.route('/analyze/<filename>', methods=['POST'])
+@requires_auth
+def analyze_video(filename: str):
+    _verify_csrf()
+    _trigger_analysis(ALERTS_DIR, filename)
+    return redirect(url_for('dashboard'))
+
+@app.route('/analyze/archive/<filename>', methods=['POST'])
+@requires_auth
+def analyze_archived_video(filename: str):
+    _verify_csrf()
+    _trigger_analysis(ARCHIVE_DIR, filename)
+    return redirect(url_for('dashboard'))
+
+@app.route('/api/events/<kind>')
+@requires_auth
+def api_events_page(kind):
+    """Für 'Ältere laden' im Dashboard — umgeht den MAX_EVENTS-Deckel gezielt,
+    ohne den normalen 3s-Poll teurer zu machen."""
+    directory = ALERTS_DIR if kind == 'recent' else ARCHIVE_DIR if kind == 'archived' else None
+    if directory is None:
+        return "", 404
+    try:
+        offset = max(0, int(request.args.get('offset', 0)))
+    except (TypeError, ValueError):
+        offset = 0
+    page_size = 50
+    files = sorted(glob.glob(os.path.join(directory, '*.mp4')), key=os.path.getmtime, reverse=True)
+    page_files = files[offset:offset + page_size]
+    events = [e for e in (_event_from_file(f) for f in page_files) if e]
+    return json.dumps({'events': events, 'has_more': offset + page_size < len(files)})
+
+@app.route('/health')
+def health():
+    """Bewusst OHNE @requires_auth: für externe Watchdogs/Monitoring gedacht.
+    Liefert nur 'läuft', keine sensiblen Daten."""
+    return {"status": "ok"}, 200
 
 @app.route('/api/status')
 @requires_auth
@@ -371,6 +490,22 @@ def save_pipeline_settings():
         thumbnail_fps = float(request.form.get('THUMBNAIL_FPS', 1))
     except (TypeError, ValueError):
         thumbnail_fps = 1.0
+    try:
+        retention_days = int(request.form.get('RETENTION_DAYS', 0))
+    except (TypeError, ValueError):
+        retention_days = 0
+    try:
+        filmstrip_count = int(request.form.get('FILMSTRIP_COUNT', 0))
+    except (TypeError, ValueError):
+        filmstrip_count = 0
+    try:
+        filmstrip_interval = float(request.form.get('FILMSTRIP_INTERVAL_SEC', 2.0))
+    except (TypeError, ValueError):
+        filmstrip_interval = 2.0
+    try:
+        ai_max_frames = int(request.form.get('AI_ANALYZE_MAX_FRAMES', 12))
+    except (TypeError, ValueError):
+        ai_max_frames = 12
 
     old_settings = load_settings()
 
@@ -383,7 +518,14 @@ def save_pipeline_settings():
         "POST_ROLL_SEC": _clamp(post_roll, 0, 300),
         "DETECTION_CLASSES": [int(x) for x in request.form.getlist('DETECTION_CLASSES')] or [0],
         "THUMBNAIL_FPS": round(_clamp(thumbnail_fps, 0.5, 5.0), 1),
-        "THEME": request.form.get('THEME', 'dark') if request.form.get('THEME') in ('dark', 'light') else 'dark'
+        "THEME": request.form.get('THEME', 'dark') if request.form.get('THEME') in ('dark', 'light') else 'dark',
+        "RETENTION_DAYS": _clamp(retention_days, 0, 365),
+        "FILMSTRIP_COUNT": _clamp(filmstrip_count, 0, 2000),
+        "FILMSTRIP_INTERVAL_SEC": round(_clamp(filmstrip_interval, 0.5, 30.0), 1),
+        "AI_ANALYSIS_ENABLED": request.form.get('AI_ANALYSIS_ENABLED') == 'on',
+        "OLLAMA_URL": request.form.get('OLLAMA_URL', 'http://localhost:11434').strip() or 'http://localhost:11434',
+        "OLLAMA_VISION_MODEL": request.form.get('OLLAMA_VISION_MODEL', 'llama3.2-vision:11b').strip() or 'llama3.2-vision:11b',
+        "AI_ANALYZE_MAX_FRAMES": _clamp(ai_max_frames, 1, 30)
     }
 
     with open(SETTINGS_F, 'w') as f:
@@ -408,13 +550,20 @@ def save_pipeline_settings():
     return redirect(url_for('dashboard', saved=1, restarted=int(restarted)))
 
 def _remove_matching_thumbnail(video_path):
-    """Löscht den zu einem Video gehörenden Trigger-Screenshot mit, falls vorhanden."""
-    thumb_path = os.path.splitext(video_path)[0] + '.jpg'
-    if os.path.exists(thumb_path):
+    """Löscht Trigger-Screenshot, Filmstrip-Ordner und AI-Metadaten/-Sidecar zu einem Video."""
+    base = os.path.splitext(video_path)[0]
+    for extra in (base + '.jpg', base + '.ai.json', video_path + '.xmp'):
+        if os.path.exists(extra):
+            try:
+                os.remove(extra)
+            except Exception as e:
+                print(f"Fehler beim Löschen von {extra}: {e}")
+    fs_dir = os.path.join(os.path.dirname(video_path), '.thumbs', os.path.basename(base))
+    if os.path.isdir(fs_dir):
         try:
-            os.remove(thumb_path)
+            shutil.rmtree(fs_dir)
         except Exception as e:
-            print(f"Fehler beim Löschen des Thumbnails: {e}")
+            print(f"Fehler beim Löschen des Filmstrips: {e}")
 
 @app.route('/delete/<filename>', methods=['POST'])
 @requires_auth
@@ -427,6 +576,7 @@ def delete_video(filename: str):
         except Exception as e:
             print(f"Fehler beim Löschen: {e}")
         _remove_matching_thumbnail(file_path)
+    _event_cache.clear()
     return redirect(url_for('dashboard'))
 
 @app.route('/archive/<filename>', methods=['POST'])
@@ -448,6 +598,21 @@ def archive_video(filename: str):
                 shutil.move(thumb_src, os.path.join(ARCHIVE_DIR, os.path.basename(thumb_src)))
             except Exception as e:
                 print(f"Fehler beim Archivieren des Thumbnails: {e}")
+        # AI-Metadaten (JSON fürs Dashboard + XMP-Sidecar für Immich) mitnehmen
+        for extra in (os.path.splitext(src_path)[0] + '.ai.json', src_path + '.xmp'):
+            if os.path.exists(extra):
+                try:
+                    shutil.move(extra, os.path.join(ARCHIVE_DIR, os.path.basename(extra)))
+                except Exception as e:
+                    print(f"Fehler beim Archivieren von {extra}: {e}")
+        # Filmstrip-Ordner mitnehmen
+        fs_src = os.path.join(ALERTS_DIR, '.thumbs', os.path.splitext(os.path.basename(src_path))[0])
+        if os.path.isdir(fs_src):
+            try:
+                shutil.move(fs_src, os.path.join(ARCHIVE_DIR, '.thumbs', os.path.basename(fs_src)))
+            except Exception as e:
+                print(f"Fehler beim Archivieren des Filmstrips: {e}")
+    _event_cache.clear()
     return redirect(url_for('dashboard'))
 
 @app.route('/delete_archived/<filename>', methods=['POST'])
@@ -461,6 +626,7 @@ def delete_archived_video(filename: str):
         except Exception as e:
             print(f"Fehler beim Löschen: {e}")
         _remove_matching_thumbnail(file_path)
+    _event_cache.clear()
     return redirect(url_for('dashboard'))
 
 @app.route('/thumb/<filename>')
@@ -478,6 +644,22 @@ def serve_archived_thumbnail_image(filename):
     if not file_path.startswith(os.path.abspath(ARCHIVE_DIR)) or not os.path.exists(file_path):
         return "", 404
     return Response(open(file_path, 'rb').read(), mimetype='image/jpeg')
+
+def _serve_filmstrip(base_dir, basename, index):
+    file_path = os.path.abspath(os.path.join(base_dir, '.thumbs', basename, 'small', f'{index:04d}.jpg'))
+    if not file_path.startswith(os.path.abspath(os.path.join(base_dir, '.thumbs'))) or not os.path.exists(file_path):
+        return "", 404
+    return Response(open(file_path, 'rb').read(), mimetype='image/jpeg')
+
+@app.route('/filmstrip/<basename>/<int:index>')
+@requires_auth
+def serve_filmstrip(basename, index):
+    return _serve_filmstrip(ALERTS_DIR, basename, index)
+
+@app.route('/filmstrip/archive/<basename>/<int:index>')
+@requires_auth
+def serve_archived_filmstrip(basename, index):
+    return _serve_filmstrip(ARCHIVE_DIR, basename, index)
 
 
 
