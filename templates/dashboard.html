@@ -182,8 +182,8 @@
                             jeder Aufnahme an ein selbst gehostetes <strong>Ollama</strong> mit einem
                             Vision-Modell und lässt sich beschreiben, was im Video passiert. Standardmäßig
                             aus — braucht eine laufende Ollama-Instanz mit passendem Modell, z.B.:
-                            <code>docker exec -it ollama ollama pull llama3.2-vision:11b</code>
-                            (~8 GB VRAM zusätzlich zur Pipeline). Ohne Ollama einfach ausgeschaltet lassen.
+                            <code>docker exec -it ollama ollama pull llava:latest</code>
+                            (~5-8 GB VRAM zusätzlich zur Pipeline). Ohne Ollama einfach ausgeschaltet lassen.
                             <strong>Wichtig:</strong> Ollama unterstützt kein natives Video — jedes Modell
                             bekommt immer eine Bild-Sequenz (die Filmstrip-Frames), nie die Video-Datei
                             selbst. Bei unbekannten/ungetesteten Modellen vorher kurz prüfen, ob sie
@@ -203,12 +203,12 @@
                             </div>
                             <div class="settings-group">
                                 <label>Vision-Modell</label>
-                                {% set known_models = ['llama3.2-vision:11b', 'huihui_ai/qwen3-vl-abliterated:8b', 'orcarouter/Qwen3.8-27B-Uncensored'] %}
-                                {% set current_model = settings.get('OLLAMA_VISION_MODEL', 'llama3.2-vision:11b') %}
+                                {% set known_models = ['llava:latest', 'huihui_ai/qwen3-vl-abliterated:8b', 'orcarouter/Qwen3.8-27B-Uncensored'] %}
+                                {% set current_model = settings.get('OLLAMA_VISION_MODEL', 'huihui_ai/qwen3-vl-abliterated:8b') %}
                                 <select id="ollamaModelPreset" {% if current_model in known_models %}name="OLLAMA_VISION_MODEL"{% endif %} onchange="onModelPresetChange()">
-                                    <option value="llama3.2-vision:11b" {% if current_model == 'llama3.2-vision:11b' %}selected{% endif %}>llama3.2-vision:11b — Allround, geprüft</option>
-                                    <option value="huihui_ai/qwen3-vl-abliterated:8b" {% if current_model == 'huihui_ai/qwen3-vl-abliterated:8b' %}selected{% endif %}>huihui_ai/qwen3-vl-abliterated:8b — unzensiert, Vision</option>
-                                    <option value="orcarouter/Qwen3.8-27B-Uncensored" {% if current_model == 'orcarouter/Qwen3.8-27B-Uncensored' %}selected{% endif %}>orcarouter/Qwen3.8-27B-Uncensored — ⚠️ ungeprüft ob Vision</option>
+                                    <option value="huihui_ai/qwen3-vl-abliterated:8b" {% if current_model == 'huihui_ai/qwen3-vl-abliterated:8b' %}selected{% endif %}>huihui_ai/qwen3-vl-abliterated:8b — unzensiert, Vision bestätigt ✅</option>
+                                    <option value="llava:latest" {% if current_model == 'llava:latest' %}selected{% endif %}>llava:latest — sehr zuverlässig, getestet ✅</option>
+                                    <option value="orcarouter/Qwen3.8-27B-Uncensored" {% if current_model == 'orcarouter/Qwen3.8-27B-Uncensored' %}selected{% endif %}>orcarouter/Qwen3.8-27B-Uncensored — unzensiert, Vision bestätigt</option>
                                     <option value="__custom__" {% if current_model not in known_models %}selected{% endif %}>Eigenes Modell…</option>
                                 </select>
                                 <input type="text" id="ollamaModelCustom" {% if current_model not in known_models %}name="OLLAMA_VISION_MODEL"{% endif %} value="{{ current_model }}" placeholder="z.B. llava:13b" style="margin-top:6px; {% if current_model in known_models %}display:none;{% endif %}">
@@ -528,6 +528,10 @@
                 showToast(params.get('restarted') === '1'
                     ? 'Einstellungen gespeichert — Pipeline wird neu gestartet…'
                     : 'Einstellungen gespeichert.');
+                window.history.replaceState({}, '', window.location.pathname);
+            }
+            if (params.get('analyze_error')) {
+                showToast('⚠️ AI-Analyse nicht gestartet: ' + params.get('analyze_error'), 6000);
                 window.history.replaceState({}, '', window.location.pathname);
             }
         })();

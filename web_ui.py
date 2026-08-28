@@ -369,15 +369,15 @@ def _trigger_analysis(base_dir, filename):
 @requires_auth
 def analyze_video(filename: str):
     _verify_csrf()
-    _trigger_analysis(ALERTS_DIR, filename)
-    return redirect(url_for('dashboard'))
+    ok, err = _trigger_analysis(ALERTS_DIR, filename)
+    return redirect(url_for('dashboard') if ok else url_for('dashboard', analyze_error=err))
 
 @app.route('/analyze/archive/<filename>', methods=['POST'])
 @requires_auth
 def analyze_archived_video(filename: str):
     _verify_csrf()
-    _trigger_analysis(ARCHIVE_DIR, filename)
-    return redirect(url_for('dashboard'))
+    ok, err = _trigger_analysis(ARCHIVE_DIR, filename)
+    return redirect(url_for('dashboard') if ok else url_for('dashboard', analyze_error=err))
 
 @app.route('/api/events/<kind>')
 @requires_auth
