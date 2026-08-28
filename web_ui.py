@@ -9,6 +9,8 @@ import secrets
 import threading
 import time
 import psutil
+import urllib.request
+from collections import deque
 from datetime import datetime
 
 # Stellt sicher, dass das Arbeitsverzeichnis und der Import-Pfad passen
@@ -154,6 +156,16 @@ def _event_from_file(f):
             except Exception:
                 pass
         ai_pending = os.path.exists(os.path.splitext(f)[0] + '.ai.pending')
+        trigger_conf, trigger_cls = None, None
+        trigger_path = os.path.splitext(f)[0] + '.trigger.json'
+        if os.path.exists(trigger_path):
+            try:
+                with open(trigger_path) as tf:
+                    tmeta = json.load(tf)
+                trigger_conf = tmeta.get('confidence')
+                trigger_cls = tmeta.get('class')
+            except Exception:
+                pass
         return {
             'filename': os.path.basename(f),
             'datetime': datetime.fromtimestamp(mtime).strftime('%d.%m.%Y %H:%M'),
@@ -161,7 +173,9 @@ def _event_from_file(f):
             'has_thumbnail': os.path.exists(thumb_path),
             'filmstrip_count': fs_count,
             'ai_description': ai_desc,
-            'ai_pending': ai_pending
+            'ai_pending': ai_pending,
+            'trigger_confidence': trigger_conf,
+            'trigger_class': trigger_cls
         }
     except OSError:
         return None
@@ -182,6 +196,27 @@ def _get_disk_status():
         }
     except Exception:
         return {'total': 0, 'used': 0, 'free': 0, 'percent': 0}
+
+_ollama_check_cache = {'ts': 0, 'status': 'disabled'}
+OLLAMA_CHECK_TTL = 20  # Sekunden — kein API-Ping bei jedem 3s-Dashboard-Poll
+
+def _check_ollama_status():
+    now = time.time()
+    if now - _ollama_check_cache['ts'] < OLLAMA_CHECK_TTL:
+        return _ollama_check_cache['status']
+    settings = load_settings()
+    if not settings.get('AI_ANALYSIS_ENABLED'):
+        status = 'disabled'
+    else:
+        url = settings.get('OLLAMA_URL', 'http://localhost:11434').rstrip('/') + '/api/tags'
+        try:
+            with urllib.request.urlopen(url, timeout=2) as resp:
+                status = 'ok' if resp.status == 200 else 'error'
+        except Exception:
+            status = 'error'
+    _ollama_check_cache['ts'] = now
+    _ollama_check_cache['status'] = status
+    return status
 
 def get_detailed_system_status():
     """Ermittelt Modell, VRAM, RAM, CPU, GPU sowie Pipeline-/Event-Status für Dashboard + /api/status"""
@@ -319,6 +354,7 @@ def get_detailed_system_status():
         'archived_events': build_event_list(ARCHIVE_DIR),
         'recording_states': _read_recording_states(),
         'disk': _get_disk_status(),
+        'ollama_status': _check_ollama_status(),
     }
 
 @app.route('/')
@@ -396,6 +432,23 @@ def api_events_page(kind):
     page_files = files[offset:offset + page_size]
     events = [e for e in (_event_from_file(f) for f in page_files) if e]
     return json.dumps({'events': events, 'has_more': offset + page_size < len(files)})
+
+@app.route('/api/log')
+@requires_auth
+def api_log():
+    log_path = os.path.join(PROJECT_ROOT, 'logs', 'pipeline_runtime.log')
+    try:
+        n = min(max(int(request.args.get('lines', 50)), 1), 500)
+    except (TypeError, ValueError):
+        n = 50
+    if not os.path.exists(log_path):
+        return json.dumps({'lines': [], 'error': 'Log-Datei nicht gefunden: ' + log_path})
+    try:
+        with open(log_path, 'r', errors='replace') as f:
+            lines = list(deque(f, maxlen=n))
+        return json.dumps({'lines': lines})
+    except Exception as e:
+        return json.dumps({'lines': [], 'error': str(e)})
 
 @app.route('/health')
 def health():
@@ -524,7 +577,7 @@ def save_pipeline_settings():
         "FILMSTRIP_INTERVAL_SEC": round(_clamp(filmstrip_interval, 0.5, 30.0), 1),
         "AI_ANALYSIS_ENABLED": request.form.get('AI_ANALYSIS_ENABLED') == 'on',
         "OLLAMA_URL": request.form.get('OLLAMA_URL', 'http://localhost:11434').strip() or 'http://localhost:11434',
-        "OLLAMA_VISION_MODEL": request.form.get('OLLAMA_VISION_MODEL', 'llama3.2-vision:11b').strip() or 'llama3.2-vision:11b',
+        "OLLAMA_VISION_MODEL": request.form.get('OLLAMA_VISION_MODEL', 'llava:latest').strip() or 'llava:latest',
         "AI_ANALYZE_MAX_FRAMES": _clamp(ai_max_frames, 1, 64),
         "SHOW_DETECTION_BOXES": request.form.get('SHOW_DETECTION_BOXES') == 'on'
     }
@@ -553,7 +606,7 @@ def save_pipeline_settings():
 def _remove_matching_thumbnail(video_path):
     """Löscht Trigger-Screenshot, Filmstrip-Ordner und AI-Metadaten/-Sidecar zu einem Video."""
     base = os.path.splitext(video_path)[0]
-    for extra in (base + '.jpg', base + '.ai.json', video_path + '.xmp'):
+    for extra in (base + '.jpg', base + '.ai.json', base + '.trigger.json', video_path + '.xmp'):
         if os.path.exists(extra):
             try:
                 os.remove(extra)
@@ -600,7 +653,7 @@ def archive_video(filename: str):
             except Exception as e:
                 print(f"Fehler beim Archivieren des Thumbnails: {e}")
         # AI-Metadaten (JSON fürs Dashboard + XMP-Sidecar für Immich) mitnehmen
-        for extra in (os.path.splitext(src_path)[0] + '.ai.json', src_path + '.xmp'):
+        for extra in (os.path.splitext(src_path)[0] + '.ai.json', os.path.splitext(src_path)[0] + '.trigger.json', src_path + '.xmp'):
             if os.path.exists(extra):
                 try:
                     shutil.move(extra, os.path.join(ARCHIVE_DIR, os.path.basename(extra)))

@@ -582,6 +582,20 @@ class CameraAgent(multiprocessing.Process):
                                             thumb_path = os.path.splitext(video_file_path)[0] + '.jpg'
                                             annotated = results[0].plot() if results else img_bgr
                                             cv2.imwrite(thumb_path, annotated)
+
+                                            # Konfidenz + Klasse der stärksten Erkennung als kleines
+                                            # Sidecar — fürs Badge auf dem Thumbnail im Dashboard.
+                                            if results and len(results[0].boxes) > 0:
+                                                confs = results[0].boxes.conf.tolist()
+                                                clss = results[0].boxes.cls.tolist()
+                                                top_idx = confs.index(max(confs))
+                                                trigger_meta = {
+                                                    'confidence': round(float(confs[top_idx]), 3),
+                                                    'class': str(results[0].names[int(clss[top_idx])])
+                                                }
+                                                meta_path = os.path.splitext(video_file_path)[0] + '.trigger.json'
+                                                with open(meta_path, 'w') as mf:
+                                                    json.dump(trigger_meta, mf)
                                         except Exception as e:
                                             self.logger.warning(f"⚠️ [{self.name}] Trigger-Screenshot konnte nicht gespeichert werden: {e}")
 

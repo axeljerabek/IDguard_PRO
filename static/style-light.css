@@ -3,7 +3,7 @@
    für Diagnose-/Kontrollpanels gemacht statt wie eine generische UI-Font. */
 
 :root {
-    /* Day-Theme: helles, warmes Grau statt Anthrazit — gleiche Amber-Akzentfarbe */
+    /* Basis: warmes Anthrazit-Indigo statt reinem Blau-Schwarz */
     --bg: #eceae5;
     --bg-wash: radial-gradient(ellipse 900px 500px at 50% -10%, rgba(193, 125, 31, 0.06), transparent 60%);
     --card-bg: #ffffff;
@@ -12,7 +12,7 @@
     --text-muted: #766f61;
     --text-dim: #a39c8c;
 
-    /* Amber etwas dunkler für Kontrast auf hellem Grund */
+    /* Amber als Hauptakzent (Rack-LED / Kontrolllampe), Grün/Rot rein semantisch */
     --primary: #c17d1f;
     --primary-hover: #a86a15;
     --primary-soft: rgba(193, 125, 31, 0.12);
@@ -333,6 +333,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
     background: #000;
     display: block;
     border: 1px solid var(--border);
+    transition: opacity 0.2s ease;
 }
 
 .thumb-wrap { position: relative; }
@@ -448,7 +449,7 @@ input:checked + .slider:before { transform: translateX(21px); background: #fffff
     min-height: 42px;
 }
 .settings-group select { cursor: pointer; }
-.settings-group input:hover, .settings-group select:hover { border-color: #454051; }
+.settings-group input:hover, .settings-group select:hover { border-color: #c9c2b4; }
 
 .range-wrap { display: flex; align-items: center; gap: 12px; }
 .range-wrap input[type="range"] {
@@ -669,7 +670,7 @@ input:checked + .slider:before { transform: translateX(21px); background: #fffff
 }
 .event-item:hover { border-color: var(--primary); }
 .event-thumb {
-    width: 72px;
+    width: 120px;
     aspect-ratio: 16/9;
     flex-shrink: 0;
     border-radius: var(--radius-sm);
@@ -679,12 +680,37 @@ input:checked + .slider:before { transform: translateX(21px); background: #fffff
     align-items: center;
     justify-content: center;
     border: 1px solid var(--border);
+    cursor: ew-resize;
 }
 .event-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .event-thumb i { color: var(--text-dim); font-size: 1.3rem; }
+.day-sep {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    padding: 6px 2px 2px;
+    margin-top: 4px;
+    border-top: 1px dashed var(--border);
+}
+.day-sep:first-child { border-top: none; margin-top: 0; padding-top: 0; }
+.event-item-alt { background: var(--primary-soft); }
 .event-info { display: flex; flex-direction: column; gap: 4px; overflow: hidden; min-width: 0; }
 .event-name { font-weight: 600; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .event-meta { font-size: 0.8rem; color: var(--text-muted); display: flex; gap: 15px; flex-wrap: wrap; font-family: var(--font-mono); }
+.event-ai-desc {
+    font-size: 0.82rem;
+    color: var(--text);
+    display: block;
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+}
+.event-ai-desc i { color: var(--primary); margin-right: 4px; }
 .event-actions { display: flex; gap: 4px; flex-shrink: 0; }
 .btn-archive {
     background: transparent;
@@ -695,6 +721,30 @@ input:checked + .slider:before { transform: translateX(21px); background: #fffff
     flex-shrink: 0;
 }
 .btn-archive:hover { background: var(--primary-soft); }
+.btn-analyze {
+    background: transparent;
+    color: var(--success);
+    padding: 8px;
+    min-height: 40px;
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+}
+.btn-analyze:hover { background: var(--success-soft); }
+.event-ai-pending { color: var(--text-muted); font-style: italic; -webkit-line-clamp: 1; }
+.event-ai-pending i { color: var(--text-muted); }
+.btn-load-more {
+    width: 100%;
+    background: var(--card-bg-inset);
+    border: 1px dashed var(--border);
+    color: var(--text-muted);
+    padding: 10px;
+    min-height: 40px;
+    border-radius: var(--radius-md);
+    font-size: 0.85rem;
+    margin-top: 4px;
+}
+.btn-load-more:hover { border-color: var(--primary); color: var(--primary); }
+.btn-load-more:disabled { opacity: 0.6; cursor: progress; }
 .btn-delete {
     background: transparent;
     color: var(--danger);

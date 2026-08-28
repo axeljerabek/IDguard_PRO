@@ -44,7 +44,10 @@
                     {% for stream in streams %}
                     <div class="stream-container">
                         <div class="stream-header">
-                            <span style="font-weight: 500;">{{ stream }}</span>
+                            <span class="stream-name-wrap">
+                                <span style="font-weight: 500;">{{ stream }}</span>
+                                <span class="stream-last-seen" id="lastseen-{{ stream }}"></span>
+                            </span>
                             <form action="/toggle/{{ stream }}" method="POST" style="margin: 0;">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                                 <label class="switch">
@@ -195,6 +198,7 @@
                                 <input type="checkbox" name="AI_ANALYSIS_ENABLED" {% if settings.get('AI_ANALYSIS_ENABLED') %}checked{% endif %} style="width:auto;">
                                 Aktivieren
                             </label>
+                            <span id="ollamaStatus" class="ollama-status-badge" style="margin-top:8px; display:inline-flex;"><span class="rec-dot"></span>Prüfe...</span>
                         </div>
                         <div class="settings-grid">
                             <div class="settings-group">
@@ -394,6 +398,17 @@
             </div>
         </details>
 
+        <details class="collapse-card" id="logCard" ontoggle="onLogToggle()">
+            <summary>
+                <span><i class="fa-solid fa-terminal"></i> Log</span>
+                <i class="fa-solid fa-chevron-down chevron"></i>
+            </summary>
+            <div class="collapse-body">
+                <p class="settings-hint" style="margin-top: -4px;">Letzte 100 Zeilen aus <code>logs/pipeline_runtime.log</code>, aktualisiert alle 5s solange geöffnet.</p>
+                <pre id="logView" class="log-view">Lädt…</pre>
+            </div>
+        </details>
+
         <details class="collapse-card">
             <summary>
                 <span><i class="fa-solid fa-box-archive"></i> Archived <span id="archive-count" class="count-badge">{{ archived_events|length }}</span></span>
@@ -441,6 +456,7 @@
         const INITIAL_RECENT = {{ recent_events | tojson }};
         const INITIAL_ARCHIVED = {{ archived_events | tojson }};
         const THUMBNAIL_INTERVAL_MS = {{ thumbnail_interval_ms }};
+        const DEFAULT_TITLE = document.title;
 
         // --- Model-Size-Filter je YOLO-Version ('b' ist nur für v10 gültig) ---
         const SIZE_RULES = {
@@ -617,6 +633,56 @@
             return d;
         }
 
+        // "Zuletzt aktiv" pro Kamera: aus den ohnehin gepollten Recent-Events
+        // abgeleitet, kein eigener Backend-Call nötig.
+        function parseEventDate(s) {
+            const [datePart, timePart] = s.split(' ');
+            const [d, m, y] = datePart.split('.').map(Number);
+            const [hh, mm] = timePart.split(':').map(Number);
+            return new Date(y, m - 1, d, hh, mm);
+        }
+        function relTime(date) {
+            const mins = Math.floor((Date.now() - date.getTime()) / 60000);
+            if (mins < 1) return 'gerade eben';
+            if (mins < 60) return `vor ${mins} Min`;
+            const hrs = Math.floor(mins / 60);
+            if (hrs < 24) return `vor ${hrs} Std`;
+            return `vor ${Math.floor(hrs / 24)} Tg`;
+        }
+        function updateLastSeen(recentEvents) {
+            const streams = {{ streams | tojson }};
+            streams.forEach(stream => {
+                const el = document.getElementById('lastseen-' + stream);
+                if (!el) return;
+                const match = recentEvents.find(ev => ev.filename.startsWith(stream + '_EVENT_'));
+                el.textContent = match ? relTime(parseEventDate(match.datetime)) : '';
+            });
+        }
+
+        // Log-Panel: pollt nur, solange die Sektion aufgeklappt ist.
+        let logInterval = null;
+        function fetchLog() {
+            fetch('/api/log?lines=100')
+                .then(r => r.json())
+                .then(data => {
+                    const el = document.getElementById('logView');
+                    if (!el) return;
+                    el.textContent = data.error ? data.error : (data.lines || []).join('');
+                    el.scrollTop = el.scrollHeight;
+                })
+                .catch(() => {});
+        }
+        function onLogToggle() {
+            const card = document.getElementById('logCard');
+            if (card.open) {
+                fetchLog();
+                logInterval = setInterval(fetchLog, 5000);
+            } else if (logInterval) {
+                clearInterval(logInterval);
+                logInterval = null;
+            }
+        }
+
         function renderEvents(events, archived) {
             if (!events || events.length === 0) {
                 const icon = archived ? 'fa-box-open' : 'fa-film';
@@ -641,6 +707,9 @@
                 const thumbHtml = ev.has_thumbnail
                     ? `<img src="${defaultSrc}" alt="" loading="lazy">`
                     : `<i class="fa-regular fa-file-video"></i>`;
+                const confBadge = (ev.trigger_confidence != null)
+                    ? `<span class="thumb-conf-badge">${escapeHtml(ev.trigger_class || '')} ${Math.round(ev.trigger_confidence * 100)}%</span>`
+                    : '';
                 const analyzeUrl = (archived ? '/analyze/archive/' : '/analyze/') + fn;
                 const showAnalyzeBtn = (ev.filmstrip_count || 0) > 0 && !ev.ai_pending;
                 const analyzeBtn = showAnalyzeBtn
@@ -669,16 +738,18 @@
                     aiLine = `<span class="event-ai-desc"><i class="fa-solid fa-wand-magic-sparkles"></i> ${escapeHtml(ev.ai_description)}</span>`;
                 }
                 html += `<div class="event-item${alt ? ' event-item-alt' : ''}" onclick="openLightbox('${fn}', ${archived})">
-                    <div class="event-thumb" data-default-src="${defaultSrc}" data-fs-base="${fsBase}" data-fs-count="${ev.filmstrip_count || 0}">${thumbHtml}</div>
-                    <div class="event-info">
-                        <span class="event-name">${fn}</span>
-                        <span class="event-meta">
-                            <span><i class="fa-regular fa-calendar"></i> ${ev.datetime}</span>
-                            <span><i class="fa-solid fa-hard-drive"></i> ${ev.size}</span>
-                        </span>
-                        ${aiLine}
+                    <div class="event-thumb" data-default-src="${defaultSrc}" data-fs-base="${fsBase}" data-fs-count="${ev.filmstrip_count || 0}">${thumbHtml}${confBadge}</div>
+                    <div class="event-body">
+                        <div class="event-info">
+                            <span class="event-name">${fn}</span>
+                            <span class="event-meta">
+                                <span><i class="fa-regular fa-calendar"></i> ${ev.datetime}</span>
+                                <span><i class="fa-solid fa-hard-drive"></i> ${ev.size}</span>
+                            </span>
+                            ${aiLine}
+                        </div>
+                        <div class="event-actions">${actions}</div>
                     </div>
-                    <div class="event-actions">${actions}</div>
                 </div>`;
             });
             return html;
@@ -810,10 +881,25 @@
                         document.getElementById('archive-count').innerText = merged.length;
                     }
                     if (data.recording_states) {
+                        let anyRecording = false;
                         Object.keys(data.recording_states).forEach(name => {
                             const el = document.getElementById('rec-' + name);
-                            if (el) el.style.display = (data.recording_states[name] !== 'IDLE') ? 'flex' : 'none';
+                            const isRec = data.recording_states[name] !== 'IDLE';
+                            if (el) el.style.display = isRec ? 'flex' : 'none';
+                            if (isRec) anyRecording = true;
                         });
+                        document.title = anyRecording ? '🔴 REC · IDguard PRO' : DEFAULT_TITLE;
+                    }
+                    if (data.ollama_status) {
+                        const badge = document.getElementById('ollamaStatus');
+                        if (badge) {
+                            const labels = {ok: 'Ollama erreichbar', error: 'Ollama nicht erreichbar', disabled: 'Ollama-Check inaktiv'};
+                            badge.className = 'ollama-status-badge ' + (data.ollama_status === 'ok' ? 'ok' : data.ollama_status === 'error' ? 'error' : '');
+                            badge.innerHTML = '<span class="rec-dot"></span>' + (labels[data.ollama_status] || data.ollama_status);
+                        }
+                    }
+                    if (data.recent_events) {
+                        updateLastSeen(data.recent_events);
                     }
                 })
                 .catch(err => console.error('Status fetch failed:', err));

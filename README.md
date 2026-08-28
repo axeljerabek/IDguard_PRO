@@ -11,23 +11,31 @@ The core mission of IDguard PRO is to act as an intelligent edge-computing senti
 ### Detection & Recording
 * **Switchable AI Backends:** YOLOv10, YOLOv12, and YOLO26, selectable per deployment (see model comparison below), with model size from Nano to Extra Large.
 * **Event-Driven Recording:** Automatic MP4 recording triggered by detection, with configurable pre-roll and post-roll buffers to capture the arrival and departure of subjects.
-* **Trigger Screenshots:** Every recording gets an automatic screenshot with the detection box drawn in, taken at the trigger frame — so you can see what fired at a glance.
-* **Configurable Filmstrip Thumbnails:** A configurable number of small + large preview frames captured after pre-roll for each event. The small frames power a hover-to-scrub filmstrip preview right in the dashboard; the large frames are sized for feeding into a vision AI.
+* **Live Detection-Box Overlays:** Optionally see exactly what the model sees, in real time — bounding boxes (color-coded per class) drawn directly into the camera grid previews and the live-view lightbox, reusing the inference the pipeline already runs (no extra GPU cost). Toggle in Settings → Anzeige.
+* **Trigger Screenshots:** Every recording gets an automatic screenshot with the detection box drawn in, taken at the trigger frame, plus a small confidence/class badge (e.g. "person 87%") shown right on the thumbnail in the dashboard.
+* **Configurable Filmstrip Thumbnails:** A configurable number of small + large preview frames captured after pre-roll for each event. The small frames (with detection boxes, for humans) power a hover-to-scrub filmstrip preview right in the dashboard; the large frames (kept raw/unannotated, for cleaner AI input) are sized for feeding into a vision AI.
 * **Resilient by Design:** Cameras that crash or disconnect auto-restart with the same config. If the AI model fails to load (e.g. a transient GPU/driver hiccup), the pipeline keeps retrying in the background instead of silently going blind.
 * **GPU-Aware Startup:** Detects the installed GPU (Turing through Blackwell) and automatically determines whether FP16 and cuDNN are safe to use, with a staged self-test and fallback — same codebase runs unmodified from an RTX 2060 up to an RTX 5090.
 * **Full Hardware Pipeline:** NVDEC-accelerated decoding and NVENC-accelerated encoding where available, with automatic, self-healing fallback to software decode/encode per-stream if hardware acceleration isn't supported or a camera drops out.
 * **Accurate Timing:** Frame timestamps are wall-clock based rather than a fixed frame counter, so a brief network stall shows up as a natural pause in the recording instead of the rest of the clip playing back too fast.
+* **Race-Safe Model Download:** The YOLO checkpoint auto-downloads on first run via an atomic, per-process temp-file + rename, with a timeout and a minimum-size sanity check — safe even though multiple processes (master, every camera worker, the dashboard) import the same config module concurrently.
 
 ### Optional AI Scene Description (Ollama)
 * After a recording finishes, IDguard PRO can optionally hand the large filmstrip frames to a locally hosted **Ollama** vision model and have it describe what happened in the clip in plain language.
+* **Model picker with tested presets** in Settings, plus a free-text "Eigenes Modell…" option for anything else pulled into Ollama. Note: Ollama has no native video-file input — every model, regardless of which one you pick, receives the same image-sequence (the filmstrip frames), never the raw video.
+* A **live Ollama-connectivity badge** in Settings shows at a glance whether the configured endpoint is reachable, so a misconfigured URL or a down container is visible without needing to open a terminal.
 * The result is written both as a small JSON file (shown directly in the dashboard, next to Recent Recordings and Archive) and as an XMP sidecar file for compatibility with photo/video managers like **Immich**.
-* Fully optional and off by default — no Ollama instance required unless you turn it on. Model, Ollama URL, and frame count are all configurable in Settings, along with a manual "re-analyze" button per recording.
+* A manual **re-analyze button** per recording (and a visible "Analysiere…" state while it's running) — useful for re-running with a different model, or for older recordings from before AI analysis was enabled.
+* Fully optional and off by default — no Ollama instance required unless you turn it on.
 
 ### Web Dashboard
-* **CCTV-style layout:** a slim pipeline control bar up top, live camera previews and Recent Recordings front and center, with Settings, Hardware/System Status, and Archive tucked into collapsible sections out of the way.
+* **CCTV-style layout:** a slim pipeline control bar up top, live camera previews and Recent Recordings front and center, with Settings, Hardware/System Status, Log, and Archive tucked into collapsible sections out of the way.
 * **Live previews:** per-camera thumbnails and a full live view, with a configurable refresh rate (0.5–5 fps slider) — disabled or unreachable cameras simply show nothing instead of flickering broken-image icons.
-* **REC indicators:** a live badge on any camera thumbnail currently recording due to a detection.
-* **Archive workflow:** archive recordings you want to keep permanently, separate from the auto-cleanup pool; deleting or archiving carries thumbnails, filmstrips, and AI metadata along automatically.
+* **REC indicators everywhere:** a live badge on any camera thumbnail currently recording, plus the browser tab title itself switches to "🔴 REC · IDguard PRO" while any camera is active — visible even from a background tab.
+* **"Zuletzt aktiv" per camera:** each camera in the live-preview grid shows a relative timestamp of its most recent recorded event.
+* **Card-style recording thumbnails:** large, full-width preview images in Recent Recordings and Archive — enough to actually recognize what happened at a glance, not a tiny icon.
+* **In-dashboard log viewer:** the last 100 lines of the pipeline log, collapsible, auto-refreshing only while open.
+* **Archive workflow:** archive recordings you want to keep permanently, separate from the auto-cleanup pool; deleting or archiving carries thumbnails, filmstrips, confidence metadata, and AI metadata along automatically.
 * **Auto-retention:** optionally delete un-archived recordings older than N days; archived recordings are never touched by auto-cleanup.
 * **Day-grouped recording lists** with clear separators, and a "load older" control once a list passes 200 entries.
 * **Hardware status at a glance:** CPU, RAM, VRAM, GPU temp, disk space, and NVENC/NVDEC utilization, all live-polled.
@@ -35,6 +43,9 @@ The core mission of IDguard PRO is to act as an intelligent edge-computing senti
 * **CSRF-protected, non-blocking:** settings changes and pipeline restarts run in the background — the UI stays responsive during a restart instead of freezing.
 * **Resource-conscious:** the dashboard's live previews share frames with the recording pipeline's own decode instead of opening a second, redundant connection per camera whenever the pipeline is running.
 * **`/health` endpoint + watchdog script** for external monitoring — pair with a cron job to auto-restart the dashboard if it ever goes unresponsive.
+
+### Utilities
+* **`backfill_thumbnails.py`:** a standalone script that grabs a frame (via ffmpeg) for older recordings from before the thumbnail feature existed — no detection boxes possible for these (the original inference data is long gone), but at least a visual reference instead of a blank entry. Doesn't touch the live pipeline.
 
 ## YOLO Model Comparison
 
@@ -54,7 +65,7 @@ IDguard PRO lets you switch the detection backend per deployment. Here's how the
 * **OS:** Linux-based distribution (Ubuntu recommended).
 * **Memory:** Minimum 8GB RAM (higher recommended for multiple simultaneous streams).
 * **Storage:** Sufficient space for MP4 event recordings, filmstrip thumbnails, and (if archiving) long-term keepers. Auto-retention can cap unarchived storage growth automatically.
-* **Optional:** A locally hosted [Ollama](https://ollama.com) instance with a vision-capable model, if you want AI scene descriptions. See Settings → KI-Videoanalyse for the recommended pull command and VRAM budget.
+* **Optional:** A locally hosted [Ollama](https://ollama.com) instance with a vision-capable model, if you want AI scene descriptions. `llava` is the most broadly reliable choice (classic CLIP-based architecture); newer vision models vary in Ollama compatibility by build — the Settings page shows a live reachability check to help catch a broken model/endpoint quickly. See Settings → KI-Videoanalyse for the pull command and VRAM budget.
 
 ## Tech Stack
 
@@ -63,7 +74,7 @@ IDguard PRO lets you switch the detection backend per deployment. Here's how the
 * **Computer Vision:** Ultralytics (YOLOv10 / YOLOv12 / YOLO26), OpenCV, PyAV
 * **Video I/O:** PyAV/ffmpeg with NVENC/NVDEC hardware acceleration and automatic software fallback
 * **Web Framework:** Flask
-* **Optional AI Analysis:** [Ollama](https://ollama.com) (any vision-capable model, e.g. `llama3.2-vision`)
+* **Optional AI Analysis:** [Ollama](https://ollama.com) (any vision-capable model — `llava` recommended as a reliable default, with a model picker for others)
 * **Process Management:** Threading, multiprocessing, and subprocess modules
 
 ## Installation
@@ -72,16 +83,17 @@ Detailed installation steps, including virtual environment setup and dependency 
 
 ## Project Structure
 
-* `web_ui.py`: Flask web dashboard — routes, settings, event/thumbnail/filmstrip serving, health check.
-* `recorder_pipeline.py`: Core detection and recording logic — one process per camera, GPU-aware startup, filmstrip capture, shared live-preview frames.
+* `web_ui.py`: Flask web dashboard — routes, settings, event/thumbnail/filmstrip serving, log/health endpoints, Ollama connectivity check.
+* `recorder_pipeline.py`: Core detection and recording logic — one process per camera, GPU-aware startup, filmstrip capture, shared live-preview frames, optional detection-box overlays.
 * `ai_analyze.py`: Optional post-recording AI scene analysis via Ollama; writes dashboard metadata + Immich XMP sidecar.
+* `backfill_thumbnails.py`: Standalone utility to generate thumbnails for older recordings that predate the thumbnail feature.
 * `helpers.py`: Shared utilities for the dashboard — settings/override I/O, live-preview frame handling (reuses the pipeline's own decode when it's running).
-* `config.py`: System-wide configuration and parameter settings.
+* `config.py`: System-wide configuration, race-safe model auto-download, and defensive settings validation.
 * `templates/dashboard.html`, `static/style.css`, `static/style-light.css`, `static/favicon.svg`: The dashboard UI, in dark and day themes.
 * `start_detached.sh`, `stop.sh`: Pipeline lifecycle scripts with duplicate-instance and graceful-shutdown handling.
 * `watchdog.sh`: Optional cron-friendly health check + auto-restart for the web dashboard.
-* `alerts/`: Recorded event MP4s, trigger screenshots, and filmstrip/AI metadata (auto-generated). Includes an `archive/` subfolder for permanently kept recordings.
-* `logs/`: Application and system logs for debugging and auditing.
+* `alerts/`: Recorded event MP4s, trigger screenshots + confidence metadata, and filmstrip/AI metadata (auto-generated). Includes an `archive/` subfolder for permanently kept recordings.
+* `logs/`: Application and system logs for debugging and auditing — also viewable directly in the dashboard.
 
 ## Tested Hardware & Configurations
 
