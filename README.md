@@ -1,5 +1,9 @@
 # IDguard PRO
 
+IDguard PRO chains several purpose-built AI models into one seamless, on-the-fly pipeline instead of relying on a single model to do everything: a **YOLO detector** watches every frame in real time and decides *when* something worth recording is happening; the **recording stage** captures the event itself, pre-roll and post-roll included; and — optionally — a **vision-language model** (via Ollama) looks at what was just recorded afterwards and describes, in plain language, *what* actually happened. Each model does the one job it's actually good at, handed off automatically, with zero manual steps in between — detection, recording, and understanding, chained end-to-end. That kind of deliberate multi-model handoff is still fairly uncommon to see fully wired up in a self-hosted project; most either do simple pixel-change motion detection, or bolt one single model onto the whole problem and call it a day.
+
+*(Yes, a large part of this codebase was written with AI — see below. But someone still has to have the architecture ideas, know what to actually ask for, and stitch it all together into one coherent, working piece of software instead of a pile of disconnected scripts that almost work. That part doesn't come for free.)*
+
 IDguard PRO is a high-performance, local AI surveillance system designed for real-time object detection and event-driven video recording. It leverages the YOLOv10, YOLOv12, and YOLO26 architectures to provide intelligent monitoring with minimal latency and zero reliance on cloud services — GPU-accelerated end-to-end, from NVDEC decoding through inference to NVENC encoding. IDguard PRO was partly written with AI (Google Gemini, Claude, Claude Code, and local models) to fix bugs, harden the pipeline, and build out the dashboard.
 
 ## Overview
