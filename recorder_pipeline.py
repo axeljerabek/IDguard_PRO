@@ -10,6 +10,11 @@ import multiprocessing
 from collections import deque
 from fractions import Fraction
 
+try:
+    from audio_trigger import AudioTrigger
+except ImportError:
+    AudioTrigger = None  # Optionales Feature — Pipeline läuft unverändert ohne es
+
 # CPU-Thread-Wildwuchs von PyTorch/OpenBLAS global drosseln
 os.environ["OMP_NUM_THREADS"] = "2"
 os.environ["OPENBLAS_NUM_THREADS"] = "2"
@@ -62,6 +67,15 @@ def _ai_analysis_enabled():
             return bool(json.load(f).get('AI_ANALYSIS_ENABLED', False))
     except Exception:
         return False
+
+def _load_settings_dict():
+    """Komplettes Settings-Dict, roh — für Features wie AudioTrigger, die
+    mehrere Werte auf einmal live abfragen wollen."""
+    try:
+        with open(SETTINGS_F) as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
 def _write_state(name, state):
     try:
@@ -216,6 +230,20 @@ class CameraAgent(multiprocessing.Process):
             detector, half_enabled = _try_load_model()
         else:
             self.logger.warning("⚠️ No valid YOLO path found; running in VISION-ONLY mode.")
+
+        # Optionaler Audio-Trigger (CLAP, mehrere frei wählbare Kategorien
+        # gleichzeitig). Läuft immer als Hintergrund-Thread, prüft aber selbst
+        # laufend AUDIO_TRIGGER_ENABLED aus den Settings — so greift Ein/Aus
+        # und Kategorien-Änderung live, ohne Pipeline-Neustart. Lädt das
+        # eigentliche Modell erst lazy beim ersten Aktivieren.
+        audio_trigger = None
+        if AudioTrigger is not None:
+            try:
+                audio_trigger = AudioTrigger(self.logger, self.name)
+                audio_trigger.start(lambda: _load_settings_dict())
+            except Exception as e:
+                self.logger.warning(f"⚠️ [{self.name}] Audio-Trigger konnte nicht gestartet werden: {e}")
+                audio_trigger = None
 
         # Fix 5: Gemeinsamer Pre-Roll Puffer für Video und Audio, jetzt primär
         # nach Timestamp statt nach geschätzter Item-Anzahl getrimmt. Die alte
@@ -396,7 +424,7 @@ class CameraAgent(multiprocessing.Process):
                     except Exception:
                         annotated = img_bgr
 
-                small = cv2.resize(annotated, (320, max(1, int(h * 320 / w))))
+                small = cv2.resize(annotated, (560, max(1, int(h * 560 / w))))
                 cv2.imwrite(os.path.join(fs_small_dir, f'{idx:04d}.jpg'), small)
                 large = img_bgr if w <= 1280 else cv2.resize(img_bgr, (1280, max(1, int(h * 1280 / w))))
                 cv2.imwrite(os.path.join(fs_large_dir, f'{idx:04d}.jpg'), large)
@@ -560,6 +588,17 @@ class CameraAgent(multiprocessing.Process):
                                 # zusätzliche Inferenz, nutzt nur das bereits berechnete Ergebnis.
                                 write_shared_frame(img_bgr, results)
 
+                                # Audio-Trigger klinkt sich hier NUR an das Ergebnis an —
+                                # keine eigene State-Machine, keine eigene Aufnahme-Logik.
+                                # is_triggered() liest nur ein Flag, das der Hintergrund-
+                                # Thread setzt — kein blockierender Aufruf.
+                                audio_triggered_now, audio_label = (False, None)
+                                if audio_trigger is not None:
+                                    audio_triggered_now, audio_label = audio_trigger.is_triggered()
+                                    if audio_triggered_now and not target_detected:
+                                        self.logger.warning(f"🔊 [{self.name}] Aufnahme durch Audio-Trigger ausgelöst: '{audio_label}'")
+                                target_detected = target_detected or audio_triggered_now
+
                                 if state == "IDLE":
                                     if target_detected:
                                         state = "RECORDING"
@@ -585,14 +624,16 @@ class CameraAgent(multiprocessing.Process):
 
                                             # Konfidenz + Klasse der stärksten Erkennung als kleines
                                             # Sidecar — fürs Badge auf dem Thumbnail im Dashboard.
+                                            trigger_meta = {}
                                             if results and len(results[0].boxes) > 0:
                                                 confs = results[0].boxes.conf.tolist()
                                                 clss = results[0].boxes.cls.tolist()
                                                 top_idx = confs.index(max(confs))
-                                                trigger_meta = {
-                                                    'confidence': round(float(confs[top_idx]), 3),
-                                                    'class': str(results[0].names[int(clss[top_idx])])
-                                                }
+                                                trigger_meta['confidence'] = round(float(confs[top_idx]), 3)
+                                                trigger_meta['class'] = str(results[0].names[int(clss[top_idx])])
+                                            if audio_triggered_now and audio_label:
+                                                trigger_meta['audio_trigger'] = audio_label
+                                            if trigger_meta:
                                                 meta_path = os.path.splitext(video_file_path)[0] + '.trigger.json'
                                                 with open(meta_path, 'w') as mf:
                                                     json.dump(trigger_meta, mf)
@@ -708,6 +749,25 @@ class CameraAgent(multiprocessing.Process):
                                 if state in ["RECORDING", "POST_ROLL"]:
                                     encode_audio_frame(a_frame)
 
+                                # Audio-Trigger füttern: NUR ein billiger Buffer-Append,
+                                # die eigentliche (langsame) Klassifikation läuft komplett
+                                # in AudioTrigger's eigenem Hintergrund-Thread — blockiert
+                                # hier nichts.
+                                if audio_trigger is not None:
+                                    try:
+                                        samples = a_frame.to_ndarray()
+                                        if samples.ndim > 1:
+                                            samples = samples.mean(axis=0)
+                                        samples = samples.astype(np.float32)
+                                        if np.issubdtype(samples.dtype, np.integer):
+                                            samples = samples / 32768.0
+                                        max_abs = np.abs(samples).max() if samples.size else 0
+                                        if max_abs > 4.0:  # vermutlich noch Integer-PCM (z.B. int16-Range)
+                                            samples = samples / 32768.0
+                                        audio_trigger.feed(samples, a_frame.sample_rate)
+                                    except Exception:
+                                        pass
+
                 except GracefulShutdown:
                     raise
                 except Exception as e:
@@ -737,6 +797,8 @@ class CameraAgent(multiprocessing.Process):
             self.logger.error(f"💥 Process Crash [{self.name}]: {e}")
         finally:
             close_writer()
+            if audio_trigger is not None:
+                audio_trigger.stop()
             if container:
                 try:
                     container.close()

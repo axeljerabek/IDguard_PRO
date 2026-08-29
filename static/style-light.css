@@ -322,6 +322,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
     gap: 10px;
 }
 .stream-header span { font-weight: 500; font-size: 1rem; }
+.stream-name-wrap { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.stream-last-seen { font-size: 0.75rem; font-weight: 400 !important; color: var(--text-muted); font-family: var(--font-mono); }
 
 .stream-thumb {
     width: 100%;
@@ -660,17 +662,25 @@ input:checked + .slider:before { transform: translateX(21px); background: #fffff
     background: var(--card-bg-inset);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    padding: 13px 14px;
+    padding: 10px;
     display: flex;
-    justify-content: space-between;
-    align-items: center;
+    flex-direction: column;
     gap: 10px;
     cursor: pointer;
     transition: border-color 0.15s;
 }
 .event-item:hover { border-color: var(--primary); }
+.event-body {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
 .event-thumb {
-    width: 120px;
+    position: relative;
+    width: 100%;
+    max-width: 480px;
     aspect-ratio: 16/9;
     flex-shrink: 0;
     border-radius: var(--radius-sm);
@@ -684,6 +694,18 @@ input:checked + .slider:before { transform: translateX(21px); background: #fffff
 }
 .event-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .event-thumb i { color: var(--text-dim); font-size: 1.3rem; }
+.thumb-conf-badge {
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    background: rgba(20, 19, 27, 0.75);
+    color: var(--primary);
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 5px;
+    text-transform: capitalize;
+}
 .day-sep {
     font-size: 0.75rem;
     font-weight: 600;
@@ -709,6 +731,11 @@ input:checked + .slider:before { transform: translateX(21px); background: #fffff
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
+    cursor: pointer;
+}
+.event-ai-desc.expanded {
+    -webkit-line-clamp: unset;
+    display: block;
 }
 .event-ai-desc i { color: var(--primary); margin-right: 4px; }
 .event-actions { display: flex; gap: 4px; flex-shrink: 0; }
@@ -799,6 +826,29 @@ input:checked + .slider:before { transform: translateX(21px); background: #fffff
 }
 .close-btn:hover { color: var(--text); }
 .player-controls { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.lightbox-ai-desc {
+    background: var(--card-bg-inset);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 4px 14px;
+}
+.lightbox-ai-desc summary {
+    padding: 10px 0;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--text);
+    list-style: none;
+}
+.lightbox-ai-desc summary::-webkit-details-marker { display: none; }
+.lightbox-ai-desc summary i { color: var(--primary); margin-right: 6px; }
+.lightbox-ai-desc p {
+    margin: 0 0 12px;
+    color: var(--text);
+    font-size: 0.88rem;
+    line-height: 1.55;
+    white-space: pre-wrap;
+}
 .player-controls button {
     background: var(--card-bg-inset);
     border: 1px solid var(--border);
@@ -857,7 +907,6 @@ input:checked + .slider:before { transform: translateX(21px); background: #fffff
     .collapse-body { padding: 4px 14px 14px; }
     .status-metric-box { padding: 10px; }
     .event-item { padding: 10px; gap: 8px; }
-    .event-thumb { width: 56px; }
     .ai-model-box { padding: 12px; }
     .status-table { min-width: 420px; }
     .pipeline-bar { padding: 10px 14px; }
@@ -887,4 +936,35 @@ input:checked + .slider:before { transform: translateX(21px); background: #fffff
 .toast.show {
     opacity: 1;
     transform: translateX(-50%) translateY(0);
+}
+
+.ollama-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 9999px;
+    color: var(--text-muted);
+    background: var(--card-bg-inset);
+    border: 1px solid var(--border);
+}
+.ollama-status-badge.ok { color: var(--success); border-color: rgba(62, 207, 142, 0.4); background: var(--success-soft); }
+.ollama-status-badge.error { color: var(--danger); border-color: rgba(242, 84, 91, 0.4); background: var(--danger-soft); }
+.ollama-status-badge .rec-dot { background: currentColor; box-shadow: 0 0 6px currentColor; }
+
+.log-view {
+    background: #0a090c;
+    color: #d7d2c8;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    line-height: 1.5;
+    max-height: 400px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
 }

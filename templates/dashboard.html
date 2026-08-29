@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -39,7 +39,7 @@
         <!-- CCTV-Hauptbereich: Streams + letzte Aufnahmen, das eigentlich Wichtige -->
         <div class="grid">
             <div class="card">
-                <h2><i class="fa-solid fa-video"></i> Kamera-Streams</h2>
+                <h2><i class="fa-solid fa-video"></i> Camera Streams</h2>
                 <div>
                     {% for stream in streams %}
                     <div class="stream-container">
@@ -58,7 +58,7 @@
                         </div>
                         <div class="thumb-wrap">
                             <img id="thumb-{{ stream }}" class="stream-thumb" src="/thumbnail/{{ stream }}" alt="{{ stream }} Thumbnail" onclick="openLiveView('{{ stream }}')" style="opacity:0;" onload="this.style.opacity=1" onerror="this.style.opacity=0">
-                            {% if overrides.get(stream, 'ON') == 'ON' %}<span class="thumb-live-dot" title="Aktiv"></span>{% endif %}
+                            {% if overrides.get(stream, 'ON') == 'ON' %}<span class="thumb-live-dot" title="Active"></span>{% endif %}
                             <span class="thumb-rec-badge" id="rec-{{ stream }}" style="display:none;"><span class="rec-dot"></span>REC</span>
                         </div>
                     </div>
@@ -86,7 +86,7 @@
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
                     <div class="settings-section">
-                        <div class="settings-section-label"><i class="fa-solid fa-robot"></i> KI-Modell</div>
+                        <div class="settings-section-label"><i class="fa-solid fa-robot"></i> AI Model</div>
                         <div class="settings-grid">
                             <div class="settings-group">
                                 <label>YOLO Version</label>
@@ -102,7 +102,7 @@
                                     <option value="n" {% if settings.get('MODEL_SIZE') == 'n' %}selected{% endif %}>Nano (n)</option>
                                     <option value="s" {% if settings.get('MODEL_SIZE') == 's' %}selected{% endif %}>Small (s)</option>
                                     <option value="m" {% if settings.get('MODEL_SIZE') == 'm' %}selected{% endif %}>Medium (m)</option>
-                                    <option value="b" {% if settings.get('MODEL_SIZE') == 'b' %}selected{% endif %}>Big (b - nur v10)</option>
+                                    <option value="b" {% if settings.get('MODEL_SIZE') == 'b' %}selected{% endif %}>Big (b - v10 only)</option>
                                     <option value="l" {% if settings.get('MODEL_SIZE') == 'l' %}selected{% endif %}>Large (l)</option>
                                     <option value="x" {% if settings.get('MODEL_SIZE', 'x') == 'x' %}selected{% endif %}>Extra Large (x - RTX 5090)</option>
                                 </select>
@@ -111,7 +111,7 @@
                     </div>
 
                     <div class="settings-section">
-                        <div class="settings-section-label"><i class="fa-solid fa-crosshairs"></i> Erkennung</div>
+                        <div class="settings-section-label"><i class="fa-solid fa-crosshairs"></i> Detection</div>
                         <div class="settings-group" style="margin-bottom: 14px;">
                             <label>Confidence Threshold</label>
                             <div class="range-wrap">
@@ -143,7 +143,7 @@
                     </div>
 
                     <div class="settings-section">
-                        <div class="settings-section-label"><i class="fa-solid fa-film"></i> Aufnahme-Timing</div>
+                        <div class="settings-section-label"><i class="fa-solid fa-film"></i> Recording Timing</div>
                         <div class="settings-grid settings-grid-3">
                             <div class="settings-group">
                                 <label>Target FPS</label>
@@ -161,71 +161,111 @@
                     </div>
 
                     <div class="settings-section">
-                        <div class="settings-section-label"><i class="fa-solid fa-hard-drive"></i> Speicher</div>
+                        <div class="settings-section-label"><i class="fa-solid fa-hard-drive"></i> Storage</div>
                         <div class="settings-group" style="margin-bottom: 14px;">
-                            <label>Unarchivierte Aufnahmen automatisch löschen nach (Tage, 0 = nie)</label>
+                            <label>Automatically delete unarchived recordings after (days, 0 = never)</label>
                             <input type="number" name="RETENTION_DAYS" min="0" max="365" value="{{ settings.get('RETENTION_DAYS', 0) }}">
                         </div>
                         <div class="settings-grid">
                             <div class="settings-group">
-                                <label>Filmstrip-Frames pro Video (0 = aus)</label>
+                                <label>Filmstrip frames per video (0 = off)</label>
                                 <input type="number" name="FILMSTRIP_COUNT" min="0" max="2000" value="{{ settings.get('FILMSTRIP_COUNT', 0) }}">
                             </div>
                             <div class="settings-group">
-                                <label>Filmstrip-Intervall (Sek.)</label>
+                                <label>Filmstrip interval (sec.)</label>
                                 <input type="number" name="FILMSTRIP_INTERVAL_SEC" min="0.5" max="30" step="0.5" value="{{ settings.get('FILMSTRIP_INTERVAL_SEC', 2.0) }}">
                             </div>
                         </div>
                     </div>
 
                     <div class="settings-section">
-                        <div class="settings-section-label"><i class="fa-solid fa-wand-magic-sparkles"></i> KI-Videoanalyse (Ollama)</div>
+                        <div class="settings-section-label"><i class="fa-solid fa-wand-magic-sparkles"></i> AI Video Analysis (Ollama)</div>
                         <p class="settings-hint" style="margin-top: -4px; margin-bottom: 12px;">
-                            Optional: schickt die großen Filmstrip-Frames (siehe oben, muss &gt; 0 stehen) nach
-                            jeder Aufnahme an ein selbst gehostetes <strong>Ollama</strong> mit einem
-                            Vision-Modell und lässt sich beschreiben, was im Video passiert. Standardmäßig
-                            aus — braucht eine laufende Ollama-Instanz mit passendem Modell, z.B.:
+                            Optional: after each recording, sends the large filmstrip frames (see above,
+                            must be &gt; 0) to a self-hosted <strong>Ollama</strong> instance with a
+                            vision model and has it describe what happened in the video. Off by default —
+                            needs a running Ollama instance with a suitable model, e.g.:
                             <code>docker exec -it ollama ollama pull llava:latest</code>
-                            (~5-8 GB VRAM zusätzlich zur Pipeline). Ohne Ollama einfach ausgeschaltet lassen.
-                            <strong>Wichtig:</strong> Ollama unterstützt kein natives Video — jedes Modell
-                            bekommt immer eine Bild-Sequenz (die Filmstrip-Frames), nie die Video-Datei
-                            selbst. Bei unbekannten/ungetesteten Modellen vorher kurz prüfen, ob sie
-                            überhaupt Bilder verarbeiten (manche "Uncensored"-Finetunes sind reine
-                            Text-Modelle ohne Vision-Unterstützung).
+                            (~5-8 GB VRAM in addition to the pipeline). Just leave it off if you don't run Ollama.
+                            <strong>Important:</strong> Ollama has no native video support — every model
+                            always receives an image sequence (the filmstrip frames), never the video file
+                            itself. For unfamiliar/untested models, check first whether they actually
+                            process images at all (some "uncensored" finetunes are text-only models
+                            with no vision support).
                         </p>
                         <div class="settings-group" style="margin-bottom: 14px;">
                             <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
                                 <input type="checkbox" name="AI_ANALYSIS_ENABLED" {% if settings.get('AI_ANALYSIS_ENABLED') %}checked{% endif %} style="width:auto;">
-                                Aktivieren
+                                Enable
                             </label>
-                            <span id="ollamaStatus" class="ollama-status-badge" style="margin-top:8px; display:inline-flex;"><span class="rec-dot"></span>Prüfe...</span>
+                            <span id="ollamaStatus" class="ollama-status-badge" style="margin-top:8px; display:inline-flex;"><span class="rec-dot"></span>Checking...</span>
                         </div>
                         <div class="settings-grid">
                             <div class="settings-group">
-                                <label>Ollama-URL</label>
+                                <label>Ollama URL</label>
                                 <input type="text" name="OLLAMA_URL" value="{{ settings.get('OLLAMA_URL', 'http://localhost:11434') }}">
                             </div>
                             <div class="settings-group">
-                                <label>Vision-Modell</label>
+                                <label>Vision Model</label>
                                 {% set known_models = ['llava:latest', 'huihui_ai/qwen3-vl-abliterated:8b', 'orcarouter/Qwen3.8-27B-Uncensored'] %}
                                 {% set current_model = settings.get('OLLAMA_VISION_MODEL', 'huihui_ai/qwen3-vl-abliterated:8b') %}
                                 <select id="ollamaModelPreset" {% if current_model in known_models %}name="OLLAMA_VISION_MODEL"{% endif %} onchange="onModelPresetChange()">
-                                    <option value="huihui_ai/qwen3-vl-abliterated:8b" {% if current_model == 'huihui_ai/qwen3-vl-abliterated:8b' %}selected{% endif %}>huihui_ai/qwen3-vl-abliterated:8b — unzensiert, Vision bestätigt ✅</option>
-                                    <option value="llava:latest" {% if current_model == 'llava:latest' %}selected{% endif %}>llava:latest — sehr zuverlässig, getestet ✅</option>
-                                    <option value="orcarouter/Qwen3.8-27B-Uncensored" {% if current_model == 'orcarouter/Qwen3.8-27B-Uncensored' %}selected{% endif %}>orcarouter/Qwen3.8-27B-Uncensored — unzensiert, Vision bestätigt</option>
-                                    <option value="__custom__" {% if current_model not in known_models %}selected{% endif %}>Eigenes Modell…</option>
+                                    <option value="huihui_ai/qwen3-vl-abliterated:8b" {% if current_model == 'huihui_ai/qwen3-vl-abliterated:8b' %}selected{% endif %}>huihui_ai/qwen3-vl-abliterated:8b — uncensored, vision confirmed ✅</option>
+                                    <option value="llava:latest" {% if current_model == 'llava:latest' %}selected{% endif %}>llava:latest — very reliable, tested ✅</option>
+                                    <option value="orcarouter/Qwen3.8-27B-Uncensored" {% if current_model == 'orcarouter/Qwen3.8-27B-Uncensored' %}selected{% endif %}>orcarouter/Qwen3.8-27B-Uncensored — uncensored, vision confirmed</option>
+                                    <option value="__custom__" {% if current_model not in known_models %}selected{% endif %}>Custom model…</option>
                                 </select>
-                                <input type="text" id="ollamaModelCustom" {% if current_model not in known_models %}name="OLLAMA_VISION_MODEL"{% endif %} value="{{ current_model }}" placeholder="z.B. llava:13b" style="margin-top:6px; {% if current_model in known_models %}display:none;{% endif %}">
+                                <input type="text" id="ollamaModelCustom" {% if current_model not in known_models %}name="OLLAMA_VISION_MODEL"{% endif %} value="{{ current_model }}" placeholder="e.g. llava:13b" style="margin-top:6px; {% if current_model in known_models %}display:none;{% endif %}">
                             </div>
                             <div class="settings-group">
-                                <label>Max. Frames pro Analyse</label>
+                                <label>Max. frames per analysis</label>
                                 <input type="number" name="AI_ANALYZE_MAX_FRAMES" min="1" max="64" value="{{ settings.get('AI_ANALYZE_MAX_FRAMES', 12) }}">
                             </div>
                         </div>
                     </div>
 
                     <div class="settings-section">
-                        <div class="settings-section-label"><i class="fa-solid fa-tv"></i> Anzeige</div>
+                        <div class="settings-section-label"><i class="fa-solid fa-ear-listen"></i> Audio Trigger (CLAP, optional)</div>
+                        <p class="settings-hint" style="margin-top: -4px; margin-bottom: 12px;">
+                            In addition to image detection: also triggers a recording when a configured
+                            <strong>sound</strong> is detected — regardless of whether anything is visible
+                            in the frame. Uses <a href="https://github.com/LAION-AI/CLAP" target="_blank" rel="noopener">CLAP</a>,
+                            a model that compares audio directly with freely entered text — no fixed
+                            category list like classic sound classifiers. One category per line, any
+                            number active at once, e.g.:
+                            <code>whispering</code>, <code>glass breaking</code>, <code>dog barking</code>,
+                            <code>screaming</code>. Runs in its own background thread — never blocks
+                            recording, even with a slow or missing GPU. Requires
+                            <code>pip install transformers</code> in the venv; without it, the feature
+                            simply stays inactive (no error).
+                        </p>
+                        <div class="settings-group" style="margin-bottom: 14px;">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" name="AUDIO_TRIGGER_ENABLED" {% if settings.get('AUDIO_TRIGGER_ENABLED') %}checked{% endif %} style="width:auto;">
+                                Enable
+                            </label>
+                        </div>
+                        <div class="settings-group" style="margin-bottom: 14px;">
+                            <label>Categories (one per line)</label>
+                            <textarea name="AUDIO_TRIGGER_CATEGORIES" rows="6" style="width:100%; background:var(--card-bg-inset); border:1px solid var(--border); color:var(--text); border-radius:var(--radius-sm); padding:10px 12px; font-family:var(--font-mono); font-size:0.9rem;" placeholder="whispering&#10;glass breaking&#10;dog barking&#10;screaming">{{ settings.get('AUDIO_TRIGGER_CATEGORIES', ['speaking', 'whispering', 'drawer opening', 'drawer sliding', 'curtain opening', 'fabric rustling', 'footsteps', 'door creaking', 'window opening', 'keys jingling'])|join('\n') }}</textarea>
+                        </div>
+                        <div class="settings-grid">
+                            <div class="settings-group">
+                                <label>Threshold (similarity)</label>
+                                <div class="range-wrap">
+                                    <input type="range" min="0.05" max="0.95" step="0.05" name="AUDIO_TRIGGER_THRESHOLD" value="{{ settings.get('AUDIO_TRIGGER_THRESHOLD', 0.3) }}" oninput="document.getElementById('audiothresh_val').innerText = this.value">
+                                    <span id="audiothresh_val" class="range-val">{{ settings.get('AUDIO_TRIGGER_THRESHOLD', 0.3) }}</span>
+                                </div>
+                            </div>
+                            <div class="settings-group">
+                                <label>Check interval (sec.)</label>
+                                <input type="number" name="AUDIO_TRIGGER_INTERVAL_SEC" min="0.5" max="30" step="0.5" value="{{ settings.get('AUDIO_TRIGGER_INTERVAL_SEC', 2.0) }}">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <div class="settings-section-label"><i class="fa-solid fa-tv"></i> Display</div>
                         <div class="settings-group" style="margin-bottom: 14px;">
                             <label>Theme</label>
                             <select name="THEME">
@@ -234,7 +274,7 @@
                             </select>
                         </div>
                         <div class="settings-group" style="margin-bottom: 14px;">
-                            <label>Kamera-Vorschau-Rate (Grid + Live-View)</label>
+                            <label>Camera preview rate (grid + live view)</label>
                             <div class="range-wrap">
                                 <input type="range" min="0.5" max="5" step="0.5" name="THUMBNAIL_FPS" value="{{ settings.get('THUMBNAIL_FPS', 1) }}" oninput="document.getElementById('thumbfps_val').innerText = this.value + ' fps'">
                                 <span id="thumbfps_val" class="range-val">{{ settings.get('THUMBNAIL_FPS', 1) }} fps</span>
@@ -243,16 +283,16 @@
                         <div class="settings-group">
                             <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
                                 <input type="checkbox" name="SHOW_DETECTION_BOXES" {% if settings.get('SHOW_DETECTION_BOXES', True) %}checked{% endif %} style="width:auto;">
-                                Erkennungs-Boxen live in Vorschau/Lightbox einzeichnen
+                                Draw detection boxes live in preview/lightbox
                             </label>
                         </div>
                     </div>
 
                     <button type="submit" class="btn-save" id="applyBtn">
                         <i class="fa-solid fa-arrows-rotate"></i>
-                        <span id="applyBtnText">Einstellungen anwenden</span>
+                        <span id="applyBtnText">Apply Settings</span>
                     </button>
-                    <p class="settings-hint">Läuft die Pipeline bereits, wird sie bei pipeline-relevanten Änderungen automatisch neu gestartet, damit sie sofort greifen.</p>
+                    <p class="settings-hint">If the pipeline is already running, it will automatically restart on pipeline-relevant changes so they take effect immediately.</p>
                 </form>
             </div>
         </details>
@@ -265,7 +305,7 @@
             <div class="collapse-body">
                 <div class="ai-model-box">
                     <div class="ai-model-row">
-                        <span class="ai-model-label"><i class="fa-solid fa-robot"></i> Aktives KI-Modell</span>
+                        <span class="ai-model-label"><i class="fa-solid fa-robot"></i> Active AI Model</span>
                         <span class="ai-model-val" id="stat-active-model">
                             {% if system_status and system_status.active_model %}
                                 {{ system_status.active_model }}
@@ -275,7 +315,7 @@
                         </span>
                     </div>
                     <div class="ai-model-row">
-                        <span class="ai-model-label"><i class="fa-solid fa-folder-open"></i> Modell-Datei</span>
+                        <span class="ai-model-label"><i class="fa-solid fa-folder-open"></i> Model File</span>
                         <span style="font-family: monospace; color: var(--text); word-break: break-all;" id="stat-model-file">
                             {% if system_status and system_status.model_filename %}
                                 {{ system_status.model_filename }}
@@ -336,7 +376,7 @@
                             <span class="metric-label"><i class="fa-solid fa-hard-drive"></i> Storage</span>
                             <span id="stat-disk-text">--%</span>
                         </div>
-                        <div class="status-metric-value" id="stat-disk-val">-- GB frei</div>
+                        <div class="status-metric-value" id="stat-disk-val">-- GB free</div>
                         <div class="status-metric-sub" id="stat-disk-sub">von -- GB</div>
                         <div class="status-progress-bar">
                             <div id="stat-disk-bar" class="status-progress-fill" style="width: 0%;"></div>
@@ -389,7 +429,7 @@
                                 {% endfor %}
                             {% else %}
                             <tr>
-                                <td colspan="5" style="text-align: center; color: var(--text-muted);">Keine aktiven Pipeline-Prozesse gefunden.</td>
+                                <td colspan="5" style="text-align: center; color: var(--text-muted);">No active pipeline processes found.</td>
                             </tr>
                             {% endif %}
                         </tbody>
@@ -404,8 +444,8 @@
                 <i class="fa-solid fa-chevron-down chevron"></i>
             </summary>
             <div class="collapse-body">
-                <p class="settings-hint" style="margin-top: -4px;">Letzte 100 Zeilen aus <code>logs/pipeline_runtime.log</code>, aktualisiert alle 5s solange geöffnet.</p>
-                <pre id="logView" class="log-view">Lädt…</pre>
+                <p class="settings-hint" style="margin-top: -4px;">Last 100 lines from <code>logs/pipeline_runtime.log</code>, refreshed every 5s while open.</p>
+                <pre id="logView" class="log-view">Loading…</pre>
             </div>
         </details>
 
@@ -436,10 +476,14 @@
                 <button onclick="setSpeed(8.0, this)">8x</button>
             </div>
             <div class="player-controls">
-                <button onclick="skipTime(-10)" title="10s zurück"><i class="fa-solid fa-backward"></i> 10s</button>
-                <button onclick="skipTime(10)" title="10s vor">10s <i class="fa-solid fa-forward"></i></button>
-                <a id="downloadLink" href="#" class="btn-download" title="Video herunterladen"><i class="fa-solid fa-download"></i> Download</a>
+                <button onclick="skipTime(-10)" title="Back 10s"><i class="fa-solid fa-backward"></i> 10s</button>
+                <button onclick="skipTime(10)" title="Forward 10s">10s <i class="fa-solid fa-forward"></i></button>
+                <a id="downloadLink" href="#" class="btn-download" title="Download video"><i class="fa-solid fa-download"></i> Download</a>
             </div>
+            <details class="lightbox-ai-desc" id="lightboxAiDesc" style="display:none;">
+                <summary><i class="fa-solid fa-wand-magic-sparkles"></i> AI Description</summary>
+                <p id="lightboxAiDescText"></p>
+            </details>
         </div>
     </div>
 
@@ -518,7 +562,7 @@
         document.getElementById('settingsForm').addEventListener('submit', function() {
             const btn = document.getElementById('applyBtn');
             btn.disabled = true;
-            document.getElementById('applyBtnText').innerText = 'Wird angewendet…';
+            document.getElementById('applyBtnText').innerText = 'Applying…';
             btn.querySelector('i').className = 'fa-solid fa-spinner fa-spin';
         });
 
@@ -542,12 +586,12 @@
             const params = new URLSearchParams(window.location.search);
             if (params.get('saved')) {
                 showToast(params.get('restarted') === '1'
-                    ? 'Einstellungen gespeichert — Pipeline wird neu gestartet…'
-                    : 'Einstellungen gespeichert.');
+                    ? 'Settings saved — pipeline restarting…'
+                    : 'Settings saved.');
                 window.history.replaceState({}, '', window.location.pathname);
             }
             if (params.get('analyze_error')) {
-                showToast('⚠️ AI-Analyse nicht gestartet: ' + params.get('analyze_error'), 6000);
+                showToast('⚠️ AI analysis not started: ' + params.get('analyze_error'), 6000);
                 window.history.replaceState({}, '', window.location.pathname);
             }
         })();
@@ -607,7 +651,7 @@
 
         function moreButtonHtml(kind) {
             if (moreState[kind].done) return '';
-            const label = moreState[kind].loading ? 'Lädt...' : 'Ältere laden';
+            const label = moreState[kind].loading ? 'Loading...' : 'Load older';
             return `<button type="button" class="btn-load-more" onclick="loadMoreEvents('${kind}')" ${moreState[kind].loading ? 'disabled' : ''}>${label}</button>`;
         }
 
@@ -628,8 +672,8 @@
         function dayLabel(d) {
             const now = new Date(), y = new Date(now); y.setDate(y.getDate() - 1);
             const fmt = dt => String(dt.getDate()).padStart(2,'0') + '.' + String(dt.getMonth()+1).padStart(2,'0') + '.' + dt.getFullYear();
-            if (d === fmt(now)) return 'Heute';
-            if (d === fmt(y)) return 'Gestern';
+            if (d === fmt(now)) return 'Today';
+            if (d === fmt(y)) return 'Yesterday';
             return d;
         }
 
@@ -643,11 +687,11 @@
         }
         function relTime(date) {
             const mins = Math.floor((Date.now() - date.getTime()) / 60000);
-            if (mins < 1) return 'gerade eben';
-            if (mins < 60) return `vor ${mins} Min`;
+            if (mins < 1) return 'just now';
+            if (mins < 60) return `${mins} min ago`;
             const hrs = Math.floor(mins / 60);
-            if (hrs < 24) return `vor ${hrs} Std`;
-            return `vor ${Math.floor(hrs / 24)} Tg`;
+            if (hrs < 24) return `${hrs}h ago`;
+            return `${Math.floor(hrs / 24)}d ago`;
         }
         function updateLastSeen(recentEvents) {
             const streams = {{ streams | tojson }};
@@ -683,6 +727,10 @@
             }
         }
 
+        // Nachschlage-Map filename -> Event-Objekt, damit die Lightbox (die nur
+        // den Dateinamen kennt) trotzdem an die AI-Beschreibung kommt.
+        const eventDataMap = {};
+
         function renderEvents(events, archived) {
             if (!events || events.length === 0) {
                 const icon = archived ? 'fa-box-open' : 'fa-film';
@@ -695,6 +743,7 @@
             let html = '', lastDate = null, alt = false;
             events.forEach(ev => {
                 const fn = ev.filename;
+                eventDataMap[fn] = ev;
                 const datePart = ev.datetime.split(' ')[0];
                 if (datePart !== lastDate) {
                     html += `<div class="day-sep">${dayLabel(datePart)}</div>`;
@@ -715,27 +764,27 @@
                 const analyzeBtn = showAnalyzeBtn
                     ? `<form action="${analyzeUrl}" method="POST" style="margin:0">
                          <input type="hidden" name="csrf_token" value="${CSRF_TOKEN}">
-                         <button type="submit" class="btn-analyze" title="${ev.ai_description ? 'Neu analysieren' : 'Analysieren'}" onclick="event.stopPropagation()"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
+                         <button type="submit" class="btn-analyze" title="${ev.ai_description ? 'Re-analyze' : 'Analyze'}" onclick="event.stopPropagation()"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
                        </form>`
                     : '';
                 const actions = (archived
                     ? `<form action="/delete_archived/${fn}" method="POST" style="margin:0" onsubmit="return confirm('Are you sure you want to permanently delete this video?');">
                          <input type="hidden" name="csrf_token" value="${CSRF_TOKEN}">
-                         <button type="submit" class="btn-delete" title="Video endgültig löschen" onclick="event.stopPropagation()"><i class="fa-solid fa-trash-can"></i></button>
+                         <button type="submit" class="btn-delete" title="Permanently delete video" onclick="event.stopPropagation()"><i class="fa-solid fa-trash-can"></i></button>
                        </form>`
                     : `<form action="/archive/${fn}" method="POST" style="margin:0">
                          <input type="hidden" name="csrf_token" value="${CSRF_TOKEN}">
-                         <button type="submit" class="btn-archive" title="Video archivieren" onclick="event.stopPropagation()"><i class="fa-solid fa-box-archive"></i></button>
+                         <button type="submit" class="btn-archive" title="Archive video" onclick="event.stopPropagation()"><i class="fa-solid fa-box-archive"></i></button>
                        </form>
                        <form action="/delete/${fn}" method="POST" style="margin:0" onsubmit="return confirm('Are you sure you want to delete this video?');">
                          <input type="hidden" name="csrf_token" value="${CSRF_TOKEN}">
-                         <button type="submit" class="btn-delete" title="Video löschen" onclick="event.stopPropagation()"><i class="fa-solid fa-trash-can"></i></button>
+                         <button type="submit" class="btn-delete" title="Delete video" onclick="event.stopPropagation()"><i class="fa-solid fa-trash-can"></i></button>
                        </form>`) + analyzeBtn;
                 let aiLine = '';
                 if (ev.ai_pending) {
-                    aiLine = `<span class="event-ai-desc event-ai-pending"><i class="fa-solid fa-spinner fa-spin"></i> Analysiere...</span>`;
+                    aiLine = `<span class="event-ai-desc event-ai-pending"><i class="fa-solid fa-spinner fa-spin"></i> Analyzing...</span>`;
                 } else if (ev.ai_description) {
-                    aiLine = `<span class="event-ai-desc"><i class="fa-solid fa-wand-magic-sparkles"></i> ${escapeHtml(ev.ai_description)}</span>`;
+                    aiLine = `<span class="event-ai-desc" title="Click to expand/collapse" onclick="event.stopPropagation(); this.classList.toggle('expanded')"><i class="fa-solid fa-wand-magic-sparkles"></i> ${escapeHtml(ev.ai_description)}</span>`;
                 }
                 html += `<div class="event-item${alt ? ' event-item-alt' : ''}" onclick="openLightbox('${fn}', ${archived})">
                     <div class="event-thumb" data-default-src="${defaultSrc}" data-fs-base="${fsBase}" data-fs-count="${ev.filmstrip_count || 0}">${thumbHtml}${confBadge}</div>
@@ -844,8 +893,8 @@
                     }
                     if (data.disk) {
                         document.getElementById('stat-disk-text').innerText = data.disk.percent + '%';
-                        document.getElementById('stat-disk-val').innerText = data.disk.free + ' GB frei';
-                        document.getElementById('stat-disk-sub').innerText = 'von ' + data.disk.total + ' GB';
+                        document.getElementById('stat-disk-val').innerText = data.disk.free + ' GB free';
+                        document.getElementById('stat-disk-sub').innerText = 'of ' + data.disk.total + ' GB';
                         const diskBar = document.getElementById('stat-disk-bar');
                         diskBar.style.width = data.disk.percent + '%';
                         diskBar.className = 'status-progress-fill ' + (data.disk.percent > 90 ? 'danger' : data.disk.percent > 75 ? 'warning' : '');
@@ -854,7 +903,7 @@
                         const tbody = document.getElementById('processes-tbody');
                         if (tbody) {
                             if (data.processes.length === 0) {
-                                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Keine aktiven Pipeline-Prozesse gefunden.</td></tr>';
+                                tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">No active pipeline processes found.</td></tr>';
                             } else {
                                 let rowsHtml = '';
                                 data.processes.forEach(proc => {
@@ -893,7 +942,7 @@
                     if (data.ollama_status) {
                         const badge = document.getElementById('ollamaStatus');
                         if (badge) {
-                            const labels = {ok: 'Ollama erreichbar', error: 'Ollama nicht erreichbar', disabled: 'Ollama-Check inaktiv'};
+                            const labels = {ok: 'Ollama reachable', error: 'Ollama unreachable', disabled: 'Ollama check disabled'};
                             badge.className = 'ollama-status-badge ' + (data.ollama_status === 'ok' ? 'ok' : data.ollama_status === 'error' ? 'error' : '');
                             badge.innerHTML = '<span class="rec-dot"></span>' + (labels[data.ollama_status] || data.ollama_status);
                         }
@@ -925,6 +974,16 @@
             videoPlayer.load();
             downloadLink.href = src;
             downloadLink.setAttribute('download', filename);
+
+            const ev = eventDataMap[filename];
+            const descBox = document.getElementById('lightboxAiDesc');
+            if (ev && ev.ai_description) {
+                document.getElementById('lightboxAiDescText').textContent = ev.ai_description;
+                descBox.style.display = 'block';
+                descBox.open = false;
+            } else {
+                descBox.style.display = 'none';
+            }
 
             videoPlayer.onloadeddata = () => {
                 loader.style.display = 'none';

@@ -559,6 +559,18 @@ def save_pipeline_settings():
         ai_max_frames = int(request.form.get('AI_ANALYZE_MAX_FRAMES', 12))
     except (TypeError, ValueError):
         ai_max_frames = 12
+    try:
+        audio_threshold = float(request.form.get('AUDIO_TRIGGER_THRESHOLD', 0.3))
+    except (TypeError, ValueError):
+        audio_threshold = 0.3
+    try:
+        audio_interval = float(request.form.get('AUDIO_TRIGGER_INTERVAL_SEC', 2.0))
+    except (TypeError, ValueError):
+        audio_interval = 2.0
+    audio_categories = [
+        line.strip() for line in request.form.get('AUDIO_TRIGGER_CATEGORIES', '').splitlines()
+        if line.strip()
+    ][:20]  # Sicherheitsdecke — 20 Kategorien sind mehr als genug, jede kostet einen CLAP-Vergleich pro Durchlauf
 
     old_settings = load_settings()
 
@@ -579,7 +591,11 @@ def save_pipeline_settings():
         "OLLAMA_URL": request.form.get('OLLAMA_URL', 'http://localhost:11434').strip() or 'http://localhost:11434',
         "OLLAMA_VISION_MODEL": request.form.get('OLLAMA_VISION_MODEL', 'llava:latest').strip() or 'llava:latest',
         "AI_ANALYZE_MAX_FRAMES": _clamp(ai_max_frames, 1, 64),
-        "SHOW_DETECTION_BOXES": request.form.get('SHOW_DETECTION_BOXES') == 'on'
+        "SHOW_DETECTION_BOXES": request.form.get('SHOW_DETECTION_BOXES') == 'on',
+        "AUDIO_TRIGGER_ENABLED": request.form.get('AUDIO_TRIGGER_ENABLED') == 'on',
+        "AUDIO_TRIGGER_CATEGORIES": audio_categories,
+        "AUDIO_TRIGGER_THRESHOLD": round(_clamp(audio_threshold, 0.05, 0.95), 2),
+        "AUDIO_TRIGGER_INTERVAL_SEC": round(_clamp(audio_interval, 0.5, 30.0), 1)
     }
 
     with open(SETTINGS_F, 'w') as f:
