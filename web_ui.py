@@ -25,6 +25,10 @@ from helpers import (
     LATEST_FRAMES, start_thumbnail_thread, is_pipeline_running,
     load_overrides, load_settings, save_overrides, format_size
 )
+try:
+    import search_index
+except ImportError:
+    search_index = None  # Optionales Feature — Dashboard läuft unverändert ohne Suche
 
 app = Flask(__name__)
 
@@ -145,8 +149,22 @@ def _event_from_file(f):
         # recorder_pipeline.py legt beim Trigger einen Screenshot mit
         # gleichem Basisnamen ab (<name>.mp4 -> <name>.jpg)
         thumb_path = os.path.splitext(f)[0] + '.jpg'
-        fs_dir = os.path.join(os.path.dirname(f), '.thumbs', os.path.splitext(os.path.basename(f))[0], 'small')
+        fs_base_dir = os.path.join(os.path.dirname(f), '.thumbs', os.path.splitext(os.path.basename(f))[0])
+        fs_dir = os.path.join(fs_base_dir, 'small')
         fs_count = len(glob.glob(os.path.join(fs_dir, '*.jpg'))) if os.path.isdir(fs_dir) else 0
+        # Durch Reservoir Sampling (siehe recorder_pipeline.py) entspricht die
+        # Dateinummer NICHT mehr zwangsläufig der zeitlichen Reihenfolge —
+        # timestamps.json verrät die echte Chronologie. Fehlt sie (alte
+        # Aufnahmen von vor diesem Fix), einfach numerisch sortieren.
+        fs_order = list(range(fs_count))
+        ts_path = os.path.join(fs_base_dir, 'timestamps.json')
+        if fs_count and os.path.exists(ts_path):
+            try:
+                with open(ts_path) as tsf:
+                    ts_map = json.load(tsf)
+                fs_order = sorted(range(fs_count), key=lambda i: ts_map.get(str(i), i))
+            except Exception:
+                pass
         ai_desc = None
         ai_path = os.path.splitext(f)[0] + '.ai.json'
         if os.path.exists(ai_path):
@@ -172,6 +190,7 @@ def _event_from_file(f):
             'size': format_size(size),
             'has_thumbnail': os.path.exists(thumb_path),
             'filmstrip_count': fs_count,
+            'filmstrip_order': fs_order,
             'ai_description': ai_desc,
             'ai_pending': ai_pending,
             'trigger_confidence': trigger_conf,
@@ -450,6 +469,30 @@ def api_log():
     except Exception as e:
         return json.dumps({'lines': [], 'error': str(e)})
 
+@app.route('/api/search')
+@requires_auth
+def api_search():
+    if search_index is None:
+        return json.dumps({'results': [], 'error': 'Search index module not available.'})
+    query = request.args.get('q', '').strip()
+    if not query:
+        return json.dumps({'results': []})
+    try:
+        matches = search_index.search(query)
+    except Exception as e:
+        return json.dumps({'results': [], 'error': str(e)})
+
+    results = []
+    for filename, base_dir, description, score in matches:
+        full_path = os.path.join(base_dir, filename)
+        if not os.path.exists(full_path):
+            continue  # Datei zwischenzeitlich gelöscht, Index noch nicht nachgezogen
+        ev = _event_from_file(full_path)
+        if ev:
+            ev['archived'] = (os.path.abspath(base_dir) == os.path.abspath(ARCHIVE_DIR))
+            results.append(ev)
+    return json.dumps({'results': results})
+
 @app.route('/health')
 def health():
     """Bewusst OHNE @requires_auth: für externe Watchdogs/Monitoring gedacht.
@@ -646,6 +689,8 @@ def delete_video(filename: str):
         except Exception as e:
             print(f"Fehler beim Löschen: {e}")
         _remove_matching_thumbnail(file_path)
+        if search_index is not None:
+            search_index.remove_event(filename)
     _event_cache.clear()
     return redirect(url_for('dashboard'))
 
@@ -682,6 +727,8 @@ def archive_video(filename: str):
                 shutil.move(fs_src, os.path.join(ARCHIVE_DIR, '.thumbs', os.path.basename(fs_src)))
             except Exception as e:
                 print(f"Fehler beim Archivieren des Filmstrips: {e}")
+        if search_index is not None:
+            search_index.update_location(filename, ARCHIVE_DIR)
     _event_cache.clear()
     return redirect(url_for('dashboard'))
 
@@ -696,6 +743,8 @@ def delete_archived_video(filename: str):
         except Exception as e:
             print(f"Fehler beim Löschen: {e}")
         _remove_matching_thumbnail(file_path)
+        if search_index is not None:
+            search_index.remove_event(filename)
     _event_cache.clear()
     return redirect(url_for('dashboard'))
 

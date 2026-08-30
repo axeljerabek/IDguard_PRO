@@ -71,6 +71,13 @@
                     <i class="fa-solid fa-clapperboard"></i> Recent Recordings
                     <span id="event-count" class="count-badge">{{ recent_events|length }}</span>
                 </h2>
+                <div class="search-bar">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <input type="text" id="searchInput" placeholder="Search descriptions (e.g. 'person carrying a box')..." onkeydown="if(event.key==='Enter') runSearch()">
+                    <button type="button" onclick="runSearch()">Search</button>
+                    <button type="button" id="searchClearBtn" onclick="clearSearch()" style="display:none;" title="Clear search"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div id="searchStatus" style="display:none;"></div>
                 <div class="event-list" id="recent-event-list"></div>
             </div>
         </div>
@@ -731,6 +738,49 @@
         // den Dateinamen kennt) trotzdem an die AI-Beschreibung kommt.
         const eventDataMap = {};
 
+        // Welche Beschreibungen der Nutzer aufgeklappt hat — muss über den 3s-
+        // Poll hinweg erhalten bleiben, sonst klappt renderEvents() (das bei
+        // jedem Poll das komplette innerHTML neu aufbaut) alles wieder zu,
+        // bevor man fertig gelesen hat.
+        const expandedDescriptions = new Set();
+        function toggleAiDesc(fn, el) {
+            el.classList.toggle('expanded');
+            if (el.classList.contains('expanded')) expandedDescriptions.add(fn);
+            else expandedDescriptions.delete(fn);
+        }
+
+        // Suche: solange aktiv, überschreibt der normale 3s-Poll die
+        // Recent-Liste NICHT — sonst würde jedes Poll die Suchergebnisse
+        // wieder durch die normale Liste ersetzen.
+        let searchActive = false;
+        function runSearch() {
+            const q = document.getElementById('searchInput').value.trim();
+            if (!q) return;
+            const statusEl = document.getElementById('searchStatus');
+            statusEl.style.display = 'block';
+            statusEl.textContent = 'Searching...';
+            fetch('/api/search?q=' + encodeURIComponent(q))
+                .then(r => r.json())
+                .then(data => {
+                    searchActive = true;
+                    document.getElementById('searchClearBtn').style.display = 'inline-flex';
+                    const results = data.results || [];
+                    statusEl.textContent = data.error
+                        ? ('Search error: ' + data.error)
+                        : `${results.length} result${results.length === 1 ? '' : 's'} for "${q}"`;
+                    document.getElementById('recent-event-list').innerHTML = renderEvents(results, false);
+                    document.getElementById('event-count').innerText = results.length;
+                })
+                .catch(() => { statusEl.textContent = 'Search failed.'; });
+        }
+        function clearSearch() {
+            searchActive = false;
+            document.getElementById('searchInput').value = '';
+            document.getElementById('searchStatus').style.display = 'none';
+            document.getElementById('searchClearBtn').style.display = 'none';
+            updateSystemStatus();
+        }
+
         function renderEvents(events, archived) {
             if (!events || events.length === 0) {
                 const icon = archived ? 'fa-box-open' : 'fa-film';
@@ -750,16 +800,17 @@
                     lastDate = datePart;
                     alt = !alt;
                 }
+                const isArchived = ev.archived !== undefined ? ev.archived : archived;
                 const base = fn.replace(/\.mp4$/i, '');
-                const defaultSrc = (archived ? '/thumb/archive/' : '/thumb/') + base + '.jpg';
-                const fsBase = (archived ? '/filmstrip/archive/' : '/filmstrip/') + base + '/';
+                const defaultSrc = (isArchived ? '/thumb/archive/' : '/thumb/') + base + '.jpg';
+                const fsBase = (isArchived ? '/filmstrip/archive/' : '/filmstrip/') + base + '/';
                 const thumbHtml = ev.has_thumbnail
                     ? `<img src="${defaultSrc}" alt="" loading="lazy">`
                     : `<i class="fa-regular fa-file-video"></i>`;
                 const confBadge = (ev.trigger_confidence != null)
                     ? `<span class="thumb-conf-badge">${escapeHtml(ev.trigger_class || '')} ${Math.round(ev.trigger_confidence * 100)}%</span>`
                     : '';
-                const analyzeUrl = (archived ? '/analyze/archive/' : '/analyze/') + fn;
+                const analyzeUrl = (isArchived ? '/analyze/archive/' : '/analyze/') + fn;
                 const showAnalyzeBtn = (ev.filmstrip_count || 0) > 0 && !ev.ai_pending;
                 const analyzeBtn = showAnalyzeBtn
                     ? `<form action="${analyzeUrl}" method="POST" style="margin:0">
@@ -767,7 +818,7 @@
                          <button type="submit" class="btn-analyze" title="${ev.ai_description ? 'Re-analyze' : 'Analyze'}" onclick="event.stopPropagation()"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
                        </form>`
                     : '';
-                const actions = (archived
+                const actions = (isArchived
                     ? `<form action="/delete_archived/${fn}" method="POST" style="margin:0" onsubmit="return confirm('Are you sure you want to permanently delete this video?');">
                          <input type="hidden" name="csrf_token" value="${CSRF_TOKEN}">
                          <button type="submit" class="btn-delete" title="Permanently delete video" onclick="event.stopPropagation()"><i class="fa-solid fa-trash-can"></i></button>
@@ -784,16 +835,17 @@
                 if (ev.ai_pending) {
                     aiLine = `<span class="event-ai-desc event-ai-pending"><i class="fa-solid fa-spinner fa-spin"></i> Analyzing...</span>`;
                 } else if (ev.ai_description) {
-                    aiLine = `<span class="event-ai-desc" title="Click to expand/collapse" onclick="event.stopPropagation(); this.classList.toggle('expanded')"><i class="fa-solid fa-wand-magic-sparkles"></i> ${escapeHtml(ev.ai_description)}</span>`;
+                    const isExpanded = expandedDescriptions.has(fn);
+                    aiLine = `<span class="event-ai-desc${isExpanded ? ' expanded' : ''}" title="Click to expand/collapse" onclick="event.stopPropagation(); toggleAiDesc('${fn}', this)"><i class="fa-solid fa-wand-magic-sparkles"></i> ${escapeHtml(ev.ai_description)}</span>`;
                 }
-                html += `<div class="event-item${alt ? ' event-item-alt' : ''}" onclick="openLightbox('${fn}', ${archived})">
-                    <div class="event-thumb" data-default-src="${defaultSrc}" data-fs-base="${fsBase}" data-fs-count="${ev.filmstrip_count || 0}">${thumbHtml}${confBadge}</div>
+                html += `<div class="event-item${alt ? ' event-item-alt' : ''}" onclick="openLightbox('${fn}', ${isArchived})">
+                    <div class="event-thumb" data-default-src="${defaultSrc}" data-fs-base="${fsBase}" data-fs-count="${ev.filmstrip_count || 0}" data-fs-order="${(ev.filmstrip_order || []).join(',')}">${thumbHtml}${confBadge}</div>
                     <div class="event-body">
                         <div class="event-info">
                             <span class="event-name">${fn}</span>
                             <span class="event-meta">
                                 <span><i class="fa-regular fa-calendar"></i> ${ev.datetime}</span>
-                                <span><i class="fa-solid fa-hard-drive"></i> ${ev.size}</span>
+                                <span><i class="fa-solid fa-hard-drive"></i> ${ev.size}</span>${isArchived ? ' <span title="Archived"><i class="fa-solid fa-box-archive"></i></span>' : ''}
                             </span>
                             ${aiLine}
                         </div>
@@ -804,27 +856,60 @@
             return html;
         }
 
-        // Filmstrip-Hover-Scrub: Mausposition links/rechts der Mitte spult vor/zurück,
-        // Mitte zeigt das Standard-Thumbnail. Per Event-Delegation, überlebt Re-Renders.
-        document.addEventListener('mousemove', e => {
-            const thumb = e.target.closest('.event-thumb');
-            if (!thumb) return;
+        // Filmstrip-Hover-Scrub: Position links/rechts der Mitte entspricht einem
+        // Zeitpunkt im Filmstrip (kein Vor-/Zurückspulen per Bewegungsrichtung,
+        // sondern absolute Position wie bei einer Fortschrittsleiste). Mitte
+        // zeigt das Standard-Thumbnail. data-fs-order übersetzt "Position N in
+        // der Sequenz" -> "tatsächliche Datei-Nummer", da Reservoir Sampling
+        // (recorder_pipeline.py) Slot-Nummern nicht mehr chronologisch vergibt.
+        // Per Event-Delegation, überlebt Re-Renders. Maus UND Touch (Smartphone).
+        function filmstripSrcAt(thumb, ratio) {
             const count = parseInt(thumb.dataset.fsCount || '0', 10);
-            if (count < 2) return;
+            if (count < 2) return thumb.dataset.defaultSrc;
+            if (Math.abs(ratio - 0.5) < 0.08) return thumb.dataset.defaultSrc;
+            const pos = Math.min(count - 1, Math.max(0, Math.floor(ratio * count)));
+            const orderStr = thumb.dataset.fsOrder || '';
+            const order = orderStr ? orderStr.split(',').map(Number) : null;
+            const idx = (order && order.length === count) ? order[pos] : pos;
+            return thumb.dataset.fsBase + idx;
+        }
+
+        function scrubAt(thumb, clientX) {
             const img = thumb.querySelector('img');
             if (!img) return;
             const rect = thumb.getBoundingClientRect();
-            const ratio = (e.clientX - rect.left) / rect.width;
-            if (Math.abs(ratio - 0.5) < 0.08) {
-                img.src = thumb.dataset.defaultSrc;
-                return;
-            }
-            const idx = Math.min(count - 1, Math.max(0, Math.floor(ratio * count)));
-            img.src = thumb.dataset.fsBase + idx;
+            const ratio = (clientX - rect.left) / rect.width;
+            img.src = filmstripSrcAt(thumb, ratio);
+        }
+
+        document.addEventListener('mousemove', e => {
+            const thumb = e.target.closest('.event-thumb');
+            if (!thumb) return;
+            scrubAt(thumb, e.clientX);
         });
         document.addEventListener('mouseout', e => {
             const thumb = e.target.closest('.event-thumb');
             if (thumb && !thumb.contains(e.relatedTarget)) {
+                const img = thumb.querySelector('img');
+                if (img && thumb.dataset.defaultSrc) img.src = thumb.dataset.defaultSrc;
+            }
+        });
+
+        // Touch: tippen+ziehen scrubbt genauso wie die Maus. passive:true, damit
+        // normales Scrollen der Seite nicht blockiert wird (Kompromiss: ein
+        // diagonaler Wisch scrollt UND scrubbt gleichzeitig — fühlt sich in der
+        // Praxis besser an als Scrollen komplett zu sperren).
+        document.addEventListener('touchstart', e => {
+            const thumb = e.target.closest('.event-thumb');
+            if (thumb && e.touches[0]) scrubAt(thumb, e.touches[0].clientX);
+        }, { passive: true });
+        document.addEventListener('touchmove', e => {
+            const thumb = e.target.closest('.event-thumb');
+            if (thumb && e.touches[0]) scrubAt(thumb, e.touches[0].clientX);
+        }, { passive: true });
+        document.addEventListener('touchend', e => {
+            const thumb = e.target.closest('.event-thumb');
+            if (thumb) {
                 const img = thumb.querySelector('img');
                 if (img && thumb.dataset.defaultSrc) img.src = thumb.dataset.defaultSrc;
             }
@@ -919,7 +1004,7 @@
                             }
                         }
                     }
-                    if (data.recent_events) {
+                    if (data.recent_events && !searchActive) {
                         const merged = data.recent_events.concat(extraEvents.recent);
                         document.getElementById('recent-event-list').innerHTML = renderEvents(merged, false) + moreButtonHtml('recent');
                         document.getElementById('event-count').innerText = merged.length;

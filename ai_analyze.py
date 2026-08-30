@@ -23,6 +23,10 @@ try:
     from config import SETTINGS_F
 except ImportError:
     SETTINGS_F = "pipeline_settings.json"
+try:
+    import search_index
+except ImportError:
+    search_index = None  # Optionales Feature — Analyse läuft unverändert ohne Suche
 
 
 def _load_settings():
@@ -40,10 +44,14 @@ MAX_FRAMES = int(os.environ.get("AI_ANALYZE_MAX_FRAMES", _settings.get("AI_ANALY
 
 PROMPT = (
     "Das sind aufeinanderfolgende Standbilder aus einer Sicherheitskamera-"
-    "Aufnahme, in zeitlicher Reihenfolge. Beschreibe in 1-2 knappen Sätzen "
-    "auf Deutsch, was passiert: wer/was zu sehen ist und was diese Person "
-    "oder dieses Objekt tut. Nur was tatsächlich sichtbar ist, keine "
-    "Spekulation."
+    "Aufnahme, in zeitlicher Reihenfolge. Beschreibe auf Deutsch in 3-5 Sätzen "
+    "detailliert, was passiert. Geh dabei ein auf: wer/was zu sehen ist "
+    "(Anzahl Personen, ungefähres Aussehen/Kleidung falls erkennbar, oder "
+    "Fahrzeug/Tier/Objekt-Art), was diese Person oder dieses Objekt konkret "
+    "tut, in welche Richtung sie sich bewegt, ob etwas getragen oder "
+    "mitgeführt wird, und wie sich die Szene über die Bildfolge hinweg "
+    "verändert (Ankunft, Handlung, Abgang). Nur was tatsächlich sichtbar "
+    "ist, keine Spekulation über Absichten oder Identität."
 )
 
 
@@ -53,7 +61,22 @@ def _xml_escape(s):
 
 
 def _pick_frames(frame_dir, max_frames):
-    files = sorted(glob.glob(os.path.join(frame_dir, "*.jpg")))
+    files = glob.glob(os.path.join(frame_dir, "*.jpg"))
+    # Reservoir Sampling (recorder_pipeline.py) vergibt Slot-Nummern nicht mehr
+    # zeitlich geordnet — timestamps.json (im übergeordneten Ordner) verrät die
+    # echte Chronologie. Fehlt sie (alte Aufnahmen von vor diesem Fix), einfach
+    # nach Dateiname sortieren wie bisher.
+    ts_path = os.path.join(os.path.dirname(frame_dir), "timestamps.json")
+    if os.path.exists(ts_path):
+        try:
+            with open(ts_path) as tf:
+                ts_map = json.load(tf)
+            files.sort(key=lambda p: ts_map.get(os.path.splitext(os.path.basename(p))[0].lstrip('0') or '0', 0))
+        except Exception:
+            files.sort()
+    else:
+        files.sort()
+
     if len(files) > max_frames:
         step = len(files) / max_frames
         files = [files[int(i * step)] for i in range(max_frames)]
@@ -152,6 +175,12 @@ def _analyze_inner(video_basename, base_dir):
             f.write(xmp)
     except Exception as e:
         print(f"❌ Konnte {xmp_path} nicht schreiben: {e}")
+
+    if search_index is not None:
+        try:
+            search_index.index_event(f"{video_basename}.mp4", base_dir, description)
+        except Exception as e:
+            print(f"⚠️ Suchindex-Update fehlgeschlagen für {video_basename}: {e}")
 
     print(f"✅ AI-Analyse fertig für {video_basename}: {description}")
 

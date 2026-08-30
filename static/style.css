@@ -651,6 +651,43 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
 }
 
 /* Recent Recordings / Archived Event Lists */
+.search-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--card-bg-inset);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 8px 12px;
+    margin-bottom: 12px;
+    color: var(--text-muted);
+}
+.search-bar input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-size: 0.92rem;
+    outline: none;
+}
+.search-bar button {
+    background: var(--primary-soft);
+    color: var(--primary);
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: 6px 14px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.search-bar button:hover { background: var(--primary); color: #fff; }
+#searchClearBtn { background: transparent; color: var(--text-muted); padding: 6px 10px; }
+#searchStatus {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+}
 .event-list {
     max-height: 420px;
     overflow-y: auto;
