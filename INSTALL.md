@@ -13,10 +13,10 @@ Before proceeding with the Python installation, your system must provide the nec
 *   **CUDA Toolkit:** The CUDA toolkit should be available and compatible with your driver (recommended: `12.8` or newer).
 *   **ffmpeg:** Required as a system binary — not just the Python bindings — for on-the-fly video transcoding when you play back a recording in the dashboard (the recording pipeline itself uses PyAV directly and does not need this, but the web UI's playback route does).
 *   **System Packages:** You need Python 3, the venv module, and ffmpeg.
-```bash
+    ```bash
     sudo apt update
     sudo apt install python3 python3-pip python3-venv git ffmpeg -y
-```
+    ```
 
 ## 2. Clone the Repository
 
@@ -33,13 +33,13 @@ To keep your system clean, we use an isolated virtual environment (`.venv`). Thi
 > **Shortcut:** `init_venv.sh` does steps 3 and 4 below in one go (creates the venv fresh and installs everything from `requirements.txt`). Run `bash init_venv.sh` and skip ahead to [Section 5](#5-configuration-crucial) if you'd rather not do this by hand.
 
 1.  **Create the venv:**
-```bash 
+    ```bash 
     python3 -m venv .venv
-```
+    ```
 2.  **Activate the environment:**
-```bash
+    ```bash
     source .venv/bin/activate
-```
+    ```
     *(After activation, you should see `(.venv)` prepended to your terminal prompt.)*
 
 ## 4. Install Dependencies
@@ -64,6 +64,23 @@ This is entirely optional — IDguard PRO records and detects normally with no O
 ### Optional: Audio Trigger and Semantic Search (no extra install step)
 
 The audio trigger (CLAP) and semantic search (`sentence-transformers`) packages are already included in `requirements.txt`, so nothing extra to install here. Their actual models (a few hundred MB each) download automatically from Hugging Face the first time you enable and use each feature — not during this install step. Both are off unless you turn them on in Settings.
+
+### Optional: Face Recognition and Speech Transcription — a real gotcha with `onnxruntime`
+
+`insightface` (face recognition) and `faster-whisper` both declare a dependency on plain `onnxruntime` (CPU-only) — but `requirements.txt` also installs `onnxruntime-gpu` for actual GPU acceleration. Both packages install into the **same** `onnxruntime` Python module, so whichever one physically writes its files last silently wins — with no error, no warning, just quiet CPU-only inference from then on regardless of which one `pip show` claims is "installed." This is a known packaging quirk of `onnxruntime`/`onnxruntime-gpu`, not specific to this project.
+
+**If you used `init_venv.sh`, this is already handled** — it runs the fix-up below automatically after installing and prints the resulting providers so you can see at a glance whether GPU support made it through. Docker builds do the same, as a build-time warning (not a hard failure — GPU acceleration for this one optional feature isn't worth blocking the whole image over).
+
+**If you installed manually** (or just want to double-check), verify:
+```bash
+python3 -c "import onnxruntime; print(onnxruntime.get_available_providers())"
+```
+If `CUDAExecutionProvider` is missing from the list (only `CPUExecutionProvider`/`AzureExecutionProvider` show up), fix it with:
+```bash
+pip uninstall -y onnxruntime onnxruntime-gpu
+pip install --force-reinstall --no-deps onnxruntime-gpu
+```
+The `--no-deps` matters — without it, reinstalling can immediately pull the CPU package back in via insightface/faster-whisper's own dependency chain and overwrite the GPU one again. Worth re-running this check after any future `pip install -r requirements.txt` outside of `init_venv.sh` (e.g. a manual upgrade), since the collision can silently reoccur depending on the order pip happens to install things in — that order isn't guaranteed to match `requirements.txt`'s line order.
 
 ## 5. Configuration (Crucial!)
 

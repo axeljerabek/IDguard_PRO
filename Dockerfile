@@ -24,9 +24,22 @@ WORKDIR /app
 # cached und nicht bei jeder Code-Änderung neu ausführt.
 COPY requirements.txt .
 
+# Fix für einen echten Packaging-Konflikt: insightface/faster-whisper hängen
+# selbst am reinen (CPU-only) onnxruntime, das denselben Python-Modul-
+# Namespace wie onnxruntime-gpu teilt — je nach pip-Installationsreihenfolge
+# kann das CPU-Paket zuletzt geschrieben werden und onnxruntime-gpu lautlos
+# überschreiben, ohne Fehlermeldung, nur stille CPU-Inferenz für
+# Gesichtserkennung/Transkription. Unten erzwungen richtiggestellt. Bewusst
+# NUR eine Warnung, kein Build-Abbruch, falls die GPU-Provider trotzdem
+# fehlen — Gesichtserkennung/Transkription sind optional und standardmäßig
+# aus, CPU-Fallback funktioniert weiterhin, nur langsamer (gleiche
+# Philosophie wie beim NVENC/NVDEC-Fallback an anderer Stelle im Projekt).
 RUN pip3 install --no-cache-dir --upgrade pip && \
     pip3 install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu128 && \
-    pip3 install --no-cache-dir -r requirements.txt
+    pip3 install --no-cache-dir -r requirements.txt && \
+    pip3 uninstall -y onnxruntime onnxruntime-gpu && \
+    pip3 install --no-cache-dir --force-reinstall --no-deps onnxruntime-gpu && \
+    python3 -c "import onnxruntime as ort; providers = ort.get_available_providers(); print('onnxruntime providers:', providers); print('WARNUNG: CUDAExecutionProvider fehlt - Gesichtserkennung/Transkription laufen auf CPU statt GPU. Siehe INSTALL.md.' if 'CUDAExecutionProvider' not in providers else 'onnxruntime GPU-Unterstuetzung OK.')"
 
 COPY . .
 
