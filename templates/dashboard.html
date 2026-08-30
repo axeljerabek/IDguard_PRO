@@ -940,8 +940,13 @@
                 const triggerLine = triggerParts.length
                     ? `<span class="event-trigger-line"><i class="fa-solid fa-bolt"></i> ${escapeHtml(triggerParts.join(' and '))}</span>`
                     : '';
-                const topicLine = ev.top_topic
-                    ? `<span class="event-topic-line"><i class="fa-solid fa-tag"></i> Category: ${escapeHtml(ev.top_topic)}${ev.top_topic_confidence != null ? ` (${Math.round(ev.top_topic_confidence)}%)` : ''}</span>`
+                const topicList = (ev.detected_topics && ev.detected_topics.length)
+                    ? ev.detected_topics
+                    : (ev.top_topic ? [{topic: ev.top_topic, score: ev.top_topic_confidence}] : []);
+                const topicLine = topicList.length
+                    ? `<span class="event-topic-line"><i class="fa-solid fa-tag"></i> ${
+                        topicList.map(t => `${escapeHtml(t.topic)}${t.score != null ? ` (${Math.round(t.score)}%)` : ''}`).join(', ')
+                      }</span>`
                     : '';
                 const analyzeUrl = (isArchived ? '/analyze/archive/' : '/analyze/') + fn;
                 const showAnalyzeBtn = (ev.filmstrip_count || 0) > 0 && !ev.ai_pending;

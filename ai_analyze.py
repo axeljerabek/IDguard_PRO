@@ -210,12 +210,17 @@ def _analyze_inner(video_basename, base_dir):
 
     topics_result = {}
     top_topic, top_topic_score = None, None
+    detected_topics = []  # alle Themen über der Schwelle, absteigend sortiert
     if AI_TOPICS_ENABLED and AI_TOPICS:
         topics_result = _classify_topics(images_b64, AI_TOPICS)
         qualifying = {t: s for t, s in topics_result.items() if s >= AI_TOPICS_THRESHOLD}
         if qualifying:
-            top_topic = max(qualifying, key=qualifying.get)
-            top_topic_score = qualifying[top_topic]
+            detected_topics = [
+                {"topic": t, "score": s}
+                for t, s in sorted(qualifying.items(), key=lambda kv: kv[1], reverse=True)
+            ]
+            top_topic = detected_topics[0]["topic"]
+            top_topic_score = detected_topics[0]["score"]
 
     # 1) Eigene JSON-Metadatei — vom Dashboard gelesen
     meta_path = os.path.join(base_dir, f"{video_basename}.ai.json")
@@ -228,7 +233,11 @@ def _analyze_inner(video_basename, base_dir):
         }
         if topics_result:
             meta["topics"] = topics_result
-        if top_topic:
+        if detected_topics:
+            meta["detected_topics"] = detected_topics
+            # top_topic/top_topic_confidence bleiben zusätzlich erhalten — z.B.
+            # für den Export-Ordnernamen, der bewusst nur EIN Thema im Namen
+            # trägt, sonst wird der Ordnername schnell unhandlich lang.
             meta["top_topic"] = top_topic
             meta["top_topic_confidence"] = top_topic_score
         with open(meta_path, "w", encoding="utf-8") as f:

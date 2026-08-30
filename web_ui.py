@@ -167,6 +167,7 @@ def _event_from_file(f):
                 pass
         ai_desc = None
         top_topic, top_topic_conf = None, None
+        detected_topics = []
         ai_path = os.path.splitext(f)[0] + '.ai.json'
         if os.path.exists(ai_path):
             try:
@@ -175,6 +176,7 @@ def _event_from_file(f):
                 ai_desc = ai_meta.get('description')
                 top_topic = ai_meta.get('top_topic')
                 top_topic_conf = ai_meta.get('top_topic_confidence')
+                detected_topics = ai_meta.get('detected_topics') or []
             except Exception:
                 pass
         ai_pending = os.path.exists(os.path.splitext(f)[0] + '.ai.pending')
@@ -202,6 +204,7 @@ def _event_from_file(f):
             'ai_pending': ai_pending,
             'top_topic': top_topic,
             'top_topic_confidence': top_topic_conf,
+            'detected_topics': detected_topics,
             'trigger_confidence': trigger_conf,
             'trigger_class': trigger_cls,
             'audio_trigger_label': audio_trigger_label,
