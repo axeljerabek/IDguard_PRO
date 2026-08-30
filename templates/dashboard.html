@@ -338,6 +338,39 @@
                     </div>
 
                     <div class="settings-section">
+                        <div class="settings-section-label"><i class="fa-solid fa-closed-captioning"></i> Speech Transcription (Whisper, optional)</div>
+                        <p class="settings-hint" style="margin-top: -4px; margin-bottom: 12px;">
+                            Transcribes spoken audio from each recording using a locally-run Whisper
+                            model — separate from the audio trigger above (CLAP only recognizes sound
+                            <em>categories</em>, not actual words). The result is saved to the sidecar
+                            metadata and is semantically searchable, just like the AI description.
+                        </p>
+                        <div class="settings-group" style="margin-bottom: 14px;">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" name="TRANSCRIPTION_ENABLED" {% if settings.get('TRANSCRIPTION_ENABLED') %}checked{% endif %} style="width:auto;">
+                                Enable
+                            </label>
+                        </div>
+                        <div class="settings-grid">
+                            <div class="settings-group">
+                                <label>Model size</label>
+                                <select name="WHISPER_MODEL_SIZE">
+                                    {% set whisper_model = settings.get('WHISPER_MODEL_SIZE', 'small') %}
+                                    <option value="tiny" {% if whisper_model == 'tiny' %}selected{% endif %}>Tiny (fastest, least accurate)</option>
+                                    <option value="base" {% if whisper_model == 'base' %}selected{% endif %}>Base</option>
+                                    <option value="small" {% if whisper_model == 'small' %}selected{% endif %}>Small (recommended default)</option>
+                                    <option value="medium" {% if whisper_model == 'medium' %}selected{% endif %}>Medium</option>
+                                    <option value="large-v3" {% if whisper_model == 'large-v3' %}selected{% endif %}>Large-v3 (most accurate, slowest)</option>
+                                </select>
+                            </div>
+                            <div class="settings-group">
+                                <label>Language (blank = auto-detect)</label>
+                                <input type="text" name="TRANSCRIPTION_LANGUAGE" value="{{ settings.get('TRANSCRIPTION_LANGUAGE', '') }}" placeholder="e.g. en, de — blank for auto">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
                         <div class="settings-section-label"><i class="fa-solid fa-file-export"></i> Export</div>
                         <p class="settings-hint" style="margin-top: -4px; margin-bottom: 12px;">
                             Copies the video, thumbnail, and all sidecar metadata for an event into its
@@ -983,6 +1016,12 @@
                     const isExpanded = expandedDescriptions.has(fn);
                     aiLine = `<span class="event-ai-desc${isExpanded ? ' expanded' : ''}" title="Click to expand/collapse" onclick="event.stopPropagation(); toggleAiDesc('${fn}', this)"><i class="fa-solid fa-wand-magic-sparkles"></i> ${escapeHtml(ev.ai_description)}</span>`;
                 }
+                let transcriptLine = '';
+                if (ev.transcript) {
+                    const transcriptKey = fn + '::transcript';
+                    const isTranscriptExpanded = expandedDescriptions.has(transcriptKey);
+                    transcriptLine = `<span class="event-ai-desc${isTranscriptExpanded ? ' expanded' : ''}" title="Click to expand/collapse" onclick="event.stopPropagation(); toggleAiDesc('${transcriptKey}', this)"><i class="fa-solid fa-closed-captioning"></i> "${escapeHtml(ev.transcript)}"</span>`;
+                }
                 html += `<div class="event-item${alt ? ' event-item-alt' : ''}" onclick="openLightbox('${fn}', ${isArchived})">
                     <div class="event-thumb" data-default-src="${defaultSrc}" data-fs-base="${fsBase}" data-fs-count="${ev.filmstrip_count || 0}" data-fs-order="${(ev.filmstrip_order || []).join(',')}">${thumbHtml}${confBadge}</div>
                     <div class="event-body">
@@ -995,6 +1034,7 @@
                             ${triggerLine}
                             ${topicLine}
                             ${aiLine}
+                            ${transcriptLine}
                         </div>
                         <div class="event-actions">${actions}</div>
                     </div>

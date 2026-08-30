@@ -61,15 +61,18 @@ def _connect():
             description TEXT NOT NULL,
             embedding BLOB,
             topics TEXT,
+            transcript TEXT,
             updated_at REAL
         )
     """)
-    # Bestehende Datenbanken (von vor der Themen-Funktion) fehlt die Spalte —
-    # ALTER TABLE nachrüsten, statt eine Migration zu verlangen.
-    try:
-        conn.execute("ALTER TABLE events ADD COLUMN topics TEXT")
-    except sqlite3.OperationalError:
-        pass  # Spalte existiert schon — Normalfall nach dem ersten Start mit dieser Version
+    # Bestehende Datenbanken (von vor der Themen-/Transkript-Funktion) fehlen
+    # die Spalten — ALTER TABLE nachrüsten, statt eine Migration zu verlangen.
+    for column_sql in ("ALTER TABLE events ADD COLUMN topics TEXT",
+                        "ALTER TABLE events ADD COLUMN transcript TEXT"):
+        try:
+            conn.execute(column_sql)
+        except sqlite3.OperationalError:
+            pass  # Spalte existiert schon — Normalfall nach dem ersten Start mit dieser Version
     return conn
 
 
@@ -82,30 +85,49 @@ def _unpack(blob):
     return struct.unpack(f"{n}f", blob)
 
 
-def index_event(filename, base_dir, description, topics=None):
-    """Von ai_analyze.py nach jeder erfolgreichen Analyse aufgerufen (auch
-    bei manuellem Re-Analyze) — überschreibt einen vorhandenen Eintrag.
-    topics: Liste qualifizierender Themen-Namen (optional), zusätzlich zur
-    Beschreibung durchsuchbar."""
-    if not description:
-        return
-    embedding = None
-    model = _get_model()
-    if model is not None:
-        try:
-            embedding = _pack(model.encode(description, normalize_embeddings=True).tolist())
-        except Exception as e:
-            print(f"⚠️ Konnte Such-Embedding nicht berechnen: {e}")
-    topics_text = ", ".join(topics) if topics else None
+def index_event(filename, base_dir, description=None, topics=None, transcript=None):
+    """Von ai_analyze.py und/oder transcribe_audio.py aufgerufen. Liest einen
+    evtl. schon vorhandenen Eintrag, ergänzt NUR die hier übergebenen Felder
+    (None = "unverändert lassen", nicht "leeren") und berechnet das Embedding
+    aus allem bisher Bekannten (Beschreibung + Themen + Transkript) neu — so
+    spielt es keine Rolle, ob die Vision-Analyse oder die Transkription
+    zuerst fertig wird, keiner der beiden Schritte überschreibt den anderen.
+    topics: Liste von Themen-Namen (optional)."""
     try:
         conn = _connect()
+        row = conn.execute(
+            "SELECT description, topics, transcript FROM events WHERE filename = ?", (filename,)
+        ).fetchone()
+    except Exception as e:
+        print(f"⚠️ Suchindex-Lesefehler: {e}")
+        return
+
+    old_description, old_topics, old_transcript = row if row else (None, None, None)
+    final_description = description if description is not None else (old_description or "")
+    final_topics = ", ".join(topics) if topics is not None else old_topics
+    final_transcript = transcript if transcript is not None else old_transcript
+
+    if not final_description and not final_transcript:
+        conn.close()
+        return  # nichts Sinnvolles zu indexieren
+
+    combined_text = " ".join(filter(None, [final_description, final_topics, final_transcript]))
+    embedding = None
+    model = _get_model()
+    if model is not None and combined_text.strip():
+        try:
+            embedding = _pack(model.encode(combined_text, normalize_embeddings=True).tolist())
+        except Exception as e:
+            print(f"⚠️ Konnte Such-Embedding nicht berechnen: {e}")
+
+    try:
         conn.execute(
-            "INSERT INTO events (filename, base_dir, description, embedding, topics, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, strftime('%s','now')) "
+            "INSERT INTO events (filename, base_dir, description, embedding, topics, transcript, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, strftime('%s','now')) "
             "ON CONFLICT(filename) DO UPDATE SET base_dir=excluded.base_dir, "
             "description=excluded.description, embedding=excluded.embedding, "
-            "topics=excluded.topics, updated_at=excluded.updated_at",
-            (filename, base_dir, description, embedding, topics_text)
+            "topics=excluded.topics, transcript=excluded.transcript, updated_at=excluded.updated_at",
+            (filename, base_dir, final_description, embedding, final_topics, final_transcript)
         )
         conn.commit()
         conn.close()
@@ -145,7 +167,7 @@ def search(query, top_k=30):
         return []
     try:
         conn = _connect()
-        rows = conn.execute("SELECT filename, base_dir, description, embedding, topics FROM events").fetchall()
+        rows = conn.execute("SELECT filename, base_dir, description, embedding, topics, transcript FROM events").fetchall()
         conn.close()
     except Exception:
         return []
@@ -160,8 +182,12 @@ def search(query, top_k=30):
             q_embedding = None
 
     results = []
-    for filename, base_dir, description, embedding_blob, topics_text in rows:
-        text_hit = q_lower in (description or "").lower() or q_lower in (topics_text or "").lower()
+    for filename, base_dir, description, embedding_blob, topics_text, transcript_text in rows:
+        text_hit = (
+            q_lower in (description or "").lower()
+            or q_lower in (topics_text or "").lower()
+            or q_lower in (transcript_text or "").lower()
+        )
         sim = 0.0
         if q_embedding is not None and embedding_blob:
             try:

@@ -168,6 +168,7 @@ def _event_from_file(f):
         ai_desc = None
         top_topic, top_topic_conf = None, None
         detected_topics = []
+        transcript = None
         ai_path = os.path.splitext(f)[0] + '.ai.json'
         if os.path.exists(ai_path):
             try:
@@ -177,6 +178,7 @@ def _event_from_file(f):
                 top_topic = ai_meta.get('top_topic')
                 top_topic_conf = ai_meta.get('top_topic_confidence')
                 detected_topics = ai_meta.get('detected_topics') or []
+                transcript = ai_meta.get('transcript')
             except Exception:
                 pass
         ai_pending = os.path.exists(os.path.splitext(f)[0] + '.ai.pending')
@@ -205,6 +207,7 @@ def _event_from_file(f):
             'top_topic': top_topic,
             'top_topic_confidence': top_topic_conf,
             'detected_topics': detected_topics,
+            'transcript': transcript,
             'trigger_confidence': trigger_conf,
             'trigger_class': trigger_cls,
             'audio_trigger_label': audio_trigger_label,
@@ -446,14 +449,20 @@ def dashboard():
 
 def _trigger_analysis(base_dir, filename):
     settings = load_settings()
-    if not settings.get('AI_ANALYSIS_ENABLED'):
-        return False, "KI-Videoanalyse ist nicht aktiviert (Settings)."
+    ai_enabled = settings.get('AI_ANALYSIS_ENABLED')
+    transcription_enabled = settings.get('TRANSCRIPTION_ENABLED')
+    if not ai_enabled and not transcription_enabled:
+        return False, "Neither AI video analysis nor transcription is enabled (Settings)."
     basename = os.path.splitext(filename)[0]
-    fs_dir = os.path.join(base_dir, '.thumbs', basename, 'large')
-    if not os.path.isdir(fs_dir) or not glob.glob(os.path.join(fs_dir, '*.jpg')):
-        return False, "Keine Filmstrip-Frames für dieses Video vorhanden."
+    if ai_enabled:
+        fs_dir = os.path.join(base_dir, '.thumbs', basename, 'large')
+        if (not os.path.isdir(fs_dir) or not glob.glob(os.path.join(fs_dir, '*.jpg'))) and not transcription_enabled:
+            return False, "No filmstrip frames available for this video."
+        # Fehlende Filmstrip-Frames sind kein harter Fehler, solange Transkription
+        # aktiv ist — postprocess.py lässt die Vision-Analyse dann intern einfach
+        # leer laufen (ai_analyze.py prüft das selbst) und transkribiert trotzdem.
     try:
-        subprocess.Popen([sys.executable, os.path.join(SCRIPT_DIR, 'ai_analyze.py'), basename, base_dir])
+        subprocess.Popen([sys.executable, os.path.join(SCRIPT_DIR, 'postprocess.py'), basename, base_dir])
         _event_cache.clear()
         return True, None
     except Exception as e:
@@ -792,7 +801,10 @@ def save_pipeline_settings():
         "AI_TOPICS_ENABLED": request.form.get('AI_TOPICS_ENABLED') == 'on',
         "AI_TOPICS": ai_topics,
         "AI_TOPICS_THRESHOLD": round(_clamp(topics_threshold, 0, 100), 0),
-        "EXPORT_DIR": request.form.get('EXPORT_DIR', '').strip()
+        "EXPORT_DIR": request.form.get('EXPORT_DIR', '').strip(),
+        "TRANSCRIPTION_ENABLED": request.form.get('TRANSCRIPTION_ENABLED') == 'on',
+        "WHISPER_MODEL_SIZE": request.form.get('WHISPER_MODEL_SIZE', 'small') if request.form.get('WHISPER_MODEL_SIZE') in ('tiny', 'base', 'small', 'medium', 'large-v3') else 'small',
+        "TRANSCRIPTION_LANGUAGE": request.form.get('TRANSCRIPTION_LANGUAGE', '').strip()
     }
 
     with open(SETTINGS_F, 'w') as f:

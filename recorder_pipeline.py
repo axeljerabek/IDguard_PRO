@@ -61,11 +61,14 @@ def _load_filmstrip_settings():
     except Exception:
         return 0, 2.0
 
-def _ai_analysis_enabled():
-    """Standardmäßig AUS — nicht jeder hat Ollama laufen. Nur per Settings aktiv."""
+def _postprocessing_enabled():
+    """Ob überhaupt Grund besteht, postprocess.py zu starten — Vision-Analyse
+    ODER Transkription reicht schon, postprocess.py entscheidet dann selbst
+    pro Schritt anhand seines eigenen Enabled-Flags weiter."""
     try:
         with open(SETTINGS_F) as f:
-            return bool(json.load(f).get('AI_ANALYSIS_ENABLED', False))
+            s = json.load(f)
+        return bool(s.get('AI_ANALYSIS_ENABLED', False)) or bool(s.get('TRANSCRIPTION_ENABLED', False))
     except Exception:
         return False
 
@@ -769,17 +772,17 @@ class CameraAgent(multiprocessing.Process):
                                             close_writer()
                                             state = "IDLE"
                                             _write_state(self.name, "IDLE")
-                                            if _ai_analysis_enabled():
+                                            if _postprocessing_enabled():
                                                 try:
                                                     vb = os.path.splitext(os.path.basename(video_file_path))[0]
                                                     subprocess.Popen(
-                                                        [sys.executable, os.path.join(DIR, 'ai_analyze.py'), vb, ALERTS_DIR]
+                                                        [sys.executable, os.path.join(DIR, 'postprocess.py'), vb, ALERTS_DIR]
                                                         # stdout/stderr NICHT auf DEVNULL: Fehler (z.B. Ollama nicht
                                                         # erreichbar) landen so im selben Log wie die restliche Pipeline
                                                         # statt spurlos zu verschwinden.
                                                     )
                                                 except Exception as e:
-                                                    self.logger.warning(f"⚠️ [{self.name}] Konnte AI-Analyse nicht starten: {e}")
+                                                    self.logger.warning(f"⚠️ [{self.name}] Konnte Nachbearbeitung nicht starten: {e}")
 
                         # AUDIO FRAME PROCESSING
                         elif packet.stream.type == 'audio':
