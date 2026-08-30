@@ -11,3 +11,7 @@ python-multipart
 av
 sentence-transformers
 transformers
+faster-whisper
+insightface
+onnxruntime-gpu
+scikit-learn
