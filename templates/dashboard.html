@@ -371,6 +371,42 @@
                     </div>
 
                     <div class="settings-section">
+                        <div class="settings-section-label"><i class="fa-solid fa-user-group"></i> Face Recognition (optional)</div>
+                        <p class="settings-hint" style="margin-top: -4px; margin-bottom: 12px;">
+                            Detects faces in each recording, groups similar ones together, and lets you
+                            name the groups in the <strong>People</strong> section below. New faces are
+                            checked against already-named people automatically; anything unmatched needs
+                            a "Re-cluster" run (People section) before it can be named. Runs entirely
+                            locally via <a href="https://github.com/deepinsight/insightface" target="_blank" rel="noopener">InsightFace</a>.
+                        </p>
+                        <div class="settings-group" style="margin-bottom: 14px;">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" name="FACE_RECOGNITION_ENABLED" {% if settings.get('FACE_RECOGNITION_ENABLED') %}checked{% endif %} style="width:auto;">
+                                Enable
+                            </label>
+                        </div>
+                        <div class="settings-grid">
+                            <div class="settings-group">
+                                <label>Model pack</label>
+                                <select name="FACE_MODEL_PACK">
+                                    {% set face_pack = settings.get('FACE_MODEL_PACK', 'buffalo_s') %}
+                                    <option value="buffalo_s" {% if face_pack == 'buffalo_s' %}selected{% endif %}>buffalo_s (fastest)</option>
+                                    <option value="buffalo_m" {% if face_pack == 'buffalo_m' %}selected{% endif %}>buffalo_m</option>
+                                    <option value="buffalo_l" {% if face_pack == 'buffalo_l' %}selected{% endif %}>buffalo_l (most accurate buffalo)</option>
+                                    <option value="antelopev2" {% if face_pack == 'antelopev2' %}selected{% endif %}>antelopev2 (largest, slowest)</option>
+                                </select>
+                            </div>
+                            <div class="settings-group">
+                                <label>Min. detection confidence</label>
+                                <div class="range-wrap">
+                                    <input type="range" min="0.1" max="0.95" step="0.05" name="FACE_MIN_CONFIDENCE" value="{{ settings.get('FACE_MIN_CONFIDENCE', 0.5) }}" oninput="document.getElementById('faceconf_val').innerText = Math.round(this.value * 100) + '%'">
+                                    <span id="faceconf_val" class="range-val">{{ (settings.get('FACE_MIN_CONFIDENCE', 0.5) * 100)|int }}%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
                         <div class="settings-section-label"><i class="fa-solid fa-file-export"></i> Export</div>
                         <p class="settings-hint" style="margin-top: -4px; margin-bottom: 12px;">
                             Copies the video, thumbnail, and all sidecar metadata for an event into its
@@ -558,6 +594,32 @@
                         </tbody>
                     </table>
                 </div>
+            </div>
+        </details>
+
+        <details class="collapse-card" id="peopleCard" ontoggle="if (this.open && !peopleLoaded) loadPeopleData();">
+            <summary>
+                <span><i class="fa-solid fa-users"></i> People</span>
+                <i class="fa-solid fa-chevron-down chevron"></i>
+            </summary>
+            <div class="collapse-body">
+                <p class="settings-hint" style="margin-top: -4px;">
+                    Faces detected across your recordings, grouped automatically. Name a group to turn
+                    it into a person — new matching faces get assigned to them automatically from then
+                    on. Click any face thumbnail's <i class="fa-solid fa-xmark"></i> if detection got it
+                    wrong (not actually a face); click a person's name to rename, or their
+                    <i class="fa-solid fa-trash-can"></i> to un-name them (their faces stay, just become
+                    unassigned again).
+                </p>
+                <button type="button" class="btn-add-camera" onclick="reclusterFaces()" style="margin-bottom:16px;">
+                    <i class="fa-solid fa-arrows-rotate"></i> Re-cluster unlabeled faces
+                </button>
+
+                <h4 style="margin: 0 0 10px 0; font-size: 0.9rem; color: var(--text-muted);">Named people</h4>
+                <div id="peopleGrid" class="people-grid"><p class="settings-hint">Loading…</p></div>
+
+                <h4 style="margin: 24px 0 10px 0; font-size: 0.9rem; color: var(--text-muted);">Unlabeled groups</h4>
+                <div id="clustersGrid"></div>
             </div>
         </details>
 
@@ -875,6 +937,168 @@
                 })
                 .catch(() => {});
         }
+        // --- People / Face Recognition ---
+        let peopleLoaded = false;
+        let currentPeople = [];
+        let currentClusters = {};
+
+        function loadPeopleData() {
+            peopleLoaded = true;
+            fetch('/api/people_data')
+                .then(r => r.json())
+                .then(data => {
+                    currentPeople = data.people || [];
+                    currentClusters = data.clusters || {};
+                    renderPeopleGrid();
+                    renderClustersGrid();
+                })
+                .catch(() => {
+                    document.getElementById('peopleGrid').innerHTML = '<p class="settings-hint">Failed to load.</p>';
+                });
+        }
+
+        function renderPeopleGrid() {
+            const container = document.getElementById('peopleGrid');
+            if (!currentPeople.length) {
+                container.innerHTML = '<p class="settings-hint">No named people yet — name a group below once faces have been detected.</p>';
+                return;
+            }
+            container.innerHTML = currentPeople.map(p => `
+                <div class="person-card" data-person-id="${p.id}">
+                    <img src="/face_crop/${p.representative_face_id}" class="person-face" alt="${escapeHtml(p.name)}" onclick="togglePersonFaces(${p.id})">
+                    <div class="person-name" onclick="renamePersonPrompt(${p.id}, '${escapeHtml(p.name).replace(/'/g, "\\'")}')">${escapeHtml(p.name)} <i class="fa-solid fa-pen" style="font-size:0.7em;"></i></div>
+                    <div class="person-count">${p.face_count} face${p.face_count === 1 ? '' : 's'}</div>
+                    <button type="button" class="btn-delete" onclick="deletePerson(${p.id})" title="Un-name this person (faces stay, become unassigned)"><i class="fa-solid fa-trash-can"></i></button>
+                    <div class="person-faces-expand" id="personFaces_${p.id}" style="display:none;"></div>
+                </div>
+            `).join('');
+        }
+
+        function togglePersonFaces(personId) {
+            const el = document.getElementById('personFaces_' + personId);
+            if (!el) return;
+            if (el.style.display !== 'none') {
+                el.style.display = 'none';
+                return;
+            }
+            el.style.display = 'block';
+            el.innerHTML = '<p class="settings-hint">Loading…</p>';
+            fetch('/api/person_faces/' + personId)
+                .then(r => r.json())
+                .then(data => {
+                    const faces = data.faces || [];
+                    el.innerHTML = faces.map(f => `
+                        <div class="face-thumb-wrap">
+                            <img src="/face_crop/${f.id}" class="face-thumb" title="${escapeHtml(f.filename)}">
+                            <button type="button" class="face-thumb-remove" onclick="unassignFace(${f.id}, ${personId})" title="Remove from this person"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                    `).join('') || '<p class="settings-hint">No faces.</p>';
+                });
+        }
+
+        function renderClustersGrid() {
+            const container = document.getElementById('clustersGrid');
+            const clusterIds = Object.keys(currentClusters);
+            if (!clusterIds.length) {
+                container.innerHTML = '<p class="settings-hint">No unlabeled groups right now. Run "Re-cluster" after new recordings come in with faces in them.</p>';
+                return;
+            }
+            const peopleOptions = currentPeople.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+            container.innerHTML = clusterIds.map(cid => {
+                const faces = currentClusters[cid];
+                const faceThumbs = faces.map(f => `
+                    <div class="face-thumb-wrap">
+                        <img src="/face_crop/${f.id}" class="face-thumb" title="${escapeHtml(f.filename)}">
+                        <button type="button" class="face-thumb-remove" onclick="rejectFace(${f.id})" title="Not a face"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                `).join('');
+                return `
+                    <div class="cluster-card">
+                        <div class="cluster-faces">${faceThumbs}</div>
+                        <div class="cluster-actions">
+                            <input type="text" placeholder="Name this person" id="clusterName_${cid}">
+                            <button type="button" class="btn-save" onclick="nameCluster('${cid}')">Save</button>
+                            ${peopleOptions ? `
+                            <select id="clusterMerge_${cid}">
+                                <option value="">Merge into existing…</option>
+                                ${peopleOptions}
+                            </select>
+                            <button type="button" class="btn-save" onclick="mergeCluster('${cid}')">Merge</button>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function _postForm(url, fields) {
+            const body = new URLSearchParams();
+            body.append('csrf_token', CSRF_TOKEN);
+            for (const [key, val] of Object.entries(fields)) {
+                if (Array.isArray(val)) val.forEach(v => body.append(key, v));
+                else body.append(key, val);
+            }
+            return fetch(url, { method: 'POST', body }).then(r => r.json());
+        }
+
+        function nameCluster(cid) {
+            const input = document.getElementById('clusterName_' + cid);
+            const name = input.value.trim();
+            if (!name) return;
+            const faceIds = currentClusters[cid].map(f => f.id);
+            _postForm('/api/create_person', { name: name, face_ids: faceIds }).then(res => {
+                if (res.ok) { showToast('Person "' + name + '" created.'); loadPeopleData(); }
+                else showToast('⚠️ ' + (res.error || 'Failed to create person.'));
+            });
+        }
+
+        function mergeCluster(cid) {
+            const select = document.getElementById('clusterMerge_' + cid);
+            const personId = select.value;
+            if (!personId) return;
+            const faceIds = currentClusters[cid].map(f => f.id);
+            _postForm('/api/assign_to_person', { person_id: personId, face_ids: faceIds }).then(res => {
+                if (res.ok) { showToast('Merged into existing person.'); loadPeopleData(); }
+                else showToast('⚠️ ' + (res.error || 'Failed to merge.'));
+            });
+        }
+
+        function rejectFace(faceId) {
+            _postForm('/api/reject_face', { face_id: faceId }).then(res => {
+                if (res.ok) loadPeopleData();
+            });
+        }
+
+        function unassignFace(faceId, personId) {
+            _postForm('/api/unassign_face', { face_id: faceId }).then(res => {
+                if (res.ok) loadPeopleData();
+            });
+        }
+
+        function deletePerson(personId) {
+            if (!confirm('Un-name this person? Their faces stay and become unassigned again — nothing is deleted.')) return;
+            _postForm('/api/delete_person', { person_id: personId }).then(res => {
+                if (res.ok) loadPeopleData();
+            });
+        }
+
+        function renamePersonPrompt(personId, oldName) {
+            const newName = prompt('Rename person:', oldName);
+            if (!newName || newName === oldName) return;
+            _postForm('/api/rename_person', { person_id: personId, name: newName }).then(res => {
+                if (res.ok) loadPeopleData();
+                else showToast('⚠️ ' + (res.error || 'Failed to rename.'));
+            });
+        }
+
+        function reclusterFaces() {
+            showToast('Re-clustering faces…');
+            _postForm('/api/recluster_faces', {}).then(res => {
+                if (res.ok) { showToast('Re-clustering done.'); loadPeopleData(); }
+                else showToast('⚠️ Re-cluster failed: ' + (res.error || 'unknown error'), 6000);
+            });
+        }
+
         function onLogToggle() {
             const card = document.getElementById('logCard');
             if (card.open) {

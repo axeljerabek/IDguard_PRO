@@ -26,6 +26,7 @@ sys.path.append(DIR)
 
 import ai_analyze
 import transcribe_audio
+import face_recognize
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
@@ -34,3 +35,4 @@ if __name__ == "__main__":
     video_basename, base_dir = sys.argv[1], sys.argv[2]
     ai_analyze.analyze(video_basename, base_dir)
     transcribe_audio.transcribe(video_basename, base_dir)
+    face_recognize.recognize(video_basename, base_dir)

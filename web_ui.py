@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, Response, abort
+from flask import Flask, render_template, request, redirect, url_for, Response, abort, send_file
 import os
 import sys
 import glob
@@ -29,6 +29,10 @@ try:
     import search_index
 except ImportError:
     search_index = None  # Optionales Feature — Dashboard läuft unverändert ohne Suche
+try:
+    import faces_db
+except ImportError:
+    faces_db = None  # Optionales Feature — Dashboard läuft unverändert ohne Gesichtserkennung
 
 app = Flask(__name__)
 
@@ -644,6 +648,141 @@ def api_search():
             results.append(ev)
     return json.dumps({'results': results})
 
+@app.route('/api/people_data')
+@requires_auth
+def api_people_data():
+    if faces_db is None:
+        return json.dumps({'people': [], 'clusters': {}, 'error': 'Face recognition module not available.'})
+    return json.dumps({
+        'people': faces_db.list_people(),
+        'clusters': faces_db.list_clusters()
+    })
+
+@app.route('/api/person_faces/<int:person_id>')
+@requires_auth
+def api_person_faces(person_id):
+    if faces_db is None:
+        return json.dumps({'faces': [], 'error': 'Face recognition module not available.'})
+    return json.dumps({'faces': faces_db.get_faces_for_person(person_id)})
+
+@app.route('/face_crop/<int:face_id>')
+@requires_auth
+def face_crop(face_id):
+    if faces_db is None:
+        abort(404)
+    face = faces_db.get_face(face_id)
+    if not face:
+        abort(404)
+    base_dir, crop_path = face['base_dir'], face['crop_path']
+    full_path = os.path.abspath(os.path.join(base_dir, crop_path))
+    # Sicherheitscheck: der aufgelöste Pfad muss tatsächlich innerhalb ALERTS_DIR
+    # oder ARCHIVE_DIR liegen (verhindert Path-Traversal über einen manipulierten
+    # base_dir/crop_path-Datensatz)
+    if not (full_path.startswith(os.path.abspath(ALERTS_DIR)) or full_path.startswith(os.path.abspath(ARCHIVE_DIR))):
+        abort(403)
+    if not os.path.exists(full_path):
+        abort(404)
+    return send_file(full_path)
+
+@app.route('/api/create_person', methods=['POST'])
+@requires_auth
+def api_create_person():
+    _verify_csrf()
+    if faces_db is None:
+        return json.dumps({'ok': False, 'error': 'Face recognition module not available.'})
+    name = request.form.get('name', '').strip()
+    face_ids = [int(x) for x in request.form.getlist('face_ids') if x.isdigit()]
+    if not name or not face_ids:
+        return json.dumps({'ok': False, 'error': 'Name and at least one face are required.'})
+    person_id = faces_db.create_person(name, face_ids)
+    return json.dumps({'ok': person_id is not None, 'person_id': person_id})
+
+@app.route('/api/assign_to_person', methods=['POST'])
+@requires_auth
+def api_assign_to_person():
+    _verify_csrf()
+    if faces_db is None:
+        return json.dumps({'ok': False, 'error': 'Face recognition module not available.'})
+    try:
+        person_id = int(request.form.get('person_id'))
+    except (TypeError, ValueError):
+        return json.dumps({'ok': False, 'error': 'Invalid person_id.'})
+    face_ids = [int(x) for x in request.form.getlist('face_ids') if x.isdigit()]
+    faces_db.assign_faces_to_person(person_id, face_ids)
+    return json.dumps({'ok': True})
+
+@app.route('/api/unassign_face', methods=['POST'])
+@requires_auth
+def api_unassign_face():
+    _verify_csrf()
+    if faces_db is None:
+        return json.dumps({'ok': False, 'error': 'Face recognition module not available.'})
+    try:
+        face_id = int(request.form.get('face_id'))
+    except (TypeError, ValueError):
+        return json.dumps({'ok': False, 'error': 'Invalid face_id.'})
+    faces_db.unassign_face(face_id)
+    return json.dumps({'ok': True})
+
+@app.route('/api/reject_face', methods=['POST'])
+@requires_auth
+def api_reject_face():
+    _verify_csrf()
+    if faces_db is None:
+        return json.dumps({'ok': False, 'error': 'Face recognition module not available.'})
+    try:
+        face_id = int(request.form.get('face_id'))
+    except (TypeError, ValueError):
+        return json.dumps({'ok': False, 'error': 'Invalid face_id.'})
+    faces_db.reject_face(face_id)
+    return json.dumps({'ok': True})
+
+@app.route('/api/rename_person', methods=['POST'])
+@requires_auth
+def api_rename_person():
+    _verify_csrf()
+    if faces_db is None:
+        return json.dumps({'ok': False, 'error': 'Face recognition module not available.'})
+    try:
+        person_id = int(request.form.get('person_id'))
+    except (TypeError, ValueError):
+        return json.dumps({'ok': False, 'error': 'Invalid person_id.'})
+    new_name = request.form.get('name', '').strip()
+    if not new_name:
+        return json.dumps({'ok': False, 'error': 'Name cannot be empty.'})
+    faces_db.rename_person(person_id, new_name)
+    return json.dumps({'ok': True})
+
+@app.route('/api/delete_person', methods=['POST'])
+@requires_auth
+def api_delete_person():
+    _verify_csrf()
+    if faces_db is None:
+        return json.dumps({'ok': False, 'error': 'Face recognition module not available.'})
+    try:
+        person_id = int(request.form.get('person_id'))
+    except (TypeError, ValueError):
+        return json.dumps({'ok': False, 'error': 'Invalid person_id.'})
+    faces_db.delete_person(person_id)
+    return json.dumps({'ok': True})
+
+@app.route('/api/recluster_faces', methods=['POST'])
+@requires_auth
+def api_recluster_faces():
+    _verify_csrf()
+    try:
+        result = subprocess.run(
+            [sys.executable, os.path.join(SCRIPT_DIR, 'cluster_faces.py')],
+            capture_output=True, text=True, timeout=60
+        )
+        if result.returncode != 0:
+            return json.dumps({'ok': False, 'error': result.stderr.strip()[:300]})
+        return json.dumps({'ok': True, 'output': result.stdout.strip()[-500:]})
+    except subprocess.TimeoutExpired:
+        return json.dumps({'ok': False, 'error': 'Clustering timed out (60s).'})
+    except Exception as e:
+        return json.dumps({'ok': False, 'error': str(e)})
+
 @app.route('/health')
 def health():
     """Bewusst OHNE @requires_auth: für externe Watchdogs/Monitoring gedacht.
@@ -769,6 +908,10 @@ def save_pipeline_settings():
         topics_threshold = float(request.form.get('AI_TOPICS_THRESHOLD', 50))
     except (TypeError, ValueError):
         topics_threshold = 50
+    try:
+        face_min_confidence = float(request.form.get('FACE_MIN_CONFIDENCE', 0.5))
+    except (TypeError, ValueError):
+        face_min_confidence = 0.5
     ai_topics = [
         line.strip() for line in request.form.get('AI_TOPICS', '').splitlines()
         if line.strip()
@@ -804,7 +947,10 @@ def save_pipeline_settings():
         "EXPORT_DIR": request.form.get('EXPORT_DIR', '').strip(),
         "TRANSCRIPTION_ENABLED": request.form.get('TRANSCRIPTION_ENABLED') == 'on',
         "WHISPER_MODEL_SIZE": request.form.get('WHISPER_MODEL_SIZE', 'small') if request.form.get('WHISPER_MODEL_SIZE') in ('tiny', 'base', 'small', 'medium', 'large-v3') else 'small',
-        "TRANSCRIPTION_LANGUAGE": request.form.get('TRANSCRIPTION_LANGUAGE', '').strip()
+        "TRANSCRIPTION_LANGUAGE": request.form.get('TRANSCRIPTION_LANGUAGE', '').strip(),
+        "FACE_RECOGNITION_ENABLED": request.form.get('FACE_RECOGNITION_ENABLED') == 'on',
+        "FACE_MODEL_PACK": request.form.get('FACE_MODEL_PACK', 'buffalo_s') if request.form.get('FACE_MODEL_PACK') in ('buffalo_s', 'buffalo_m', 'buffalo_l', 'antelopev2') else 'buffalo_s',
+        "FACE_MIN_CONFIDENCE": round(_clamp(face_min_confidence, 0.1, 0.95), 2)
     }
 
     with open(SETTINGS_F, 'w') as f:

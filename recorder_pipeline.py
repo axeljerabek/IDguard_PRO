@@ -62,13 +62,16 @@ def _load_filmstrip_settings():
         return 0, 2.0
 
 def _postprocessing_enabled():
-    """Ob überhaupt Grund besteht, postprocess.py zu starten — Vision-Analyse
-    ODER Transkription reicht schon, postprocess.py entscheidet dann selbst
-    pro Schritt anhand seines eigenen Enabled-Flags weiter."""
+    """Ob überhaupt Grund besteht, postprocess.py zu starten — Vision-Analyse,
+    Transkription ODER Gesichtserkennung reicht schon, postprocess.py
+    entscheidet dann selbst pro Schritt anhand seines eigenen Enabled-Flags
+    weiter."""
     try:
         with open(SETTINGS_F) as f:
             s = json.load(f)
-        return bool(s.get('AI_ANALYSIS_ENABLED', False)) or bool(s.get('TRANSCRIPTION_ENABLED', False))
+        return (bool(s.get('AI_ANALYSIS_ENABLED', False))
+                or bool(s.get('TRANSCRIPTION_ENABLED', False))
+                or bool(s.get('FACE_RECOGNITION_ENABLED', False)))
     except Exception:
         return False
 
