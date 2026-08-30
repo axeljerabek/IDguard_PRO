@@ -1,8 +1,26 @@
 # IDguard PRO
 
-IDguard PRO watches your cameras, decides what's actually worth recording, saves the event, and — if you want — tells you afterwards in plain words what happened in it, in a way you can later search back through. It does that by chaining several small, specialized models together instead of expecting one AI to handle it all: a YOLO model (v10, v12, or v26 — your choice) watches every frame live and spots the moment something worth recording is happening; an audio model (CLAP) can independently trigger a recording on a sound alone, even with nothing visible in frame; the recording itself then saves the event with a short buffer before and after; a vision-language model (via Ollama) looks at the finished clip afterwards and writes a description of what it saw; and a small text-embedding model makes those descriptions searchable by meaning, not just exact words. Each model only does the one job it's good at, and the handoff between them is automatic. Everything runs on your own hardware, with GPU acceleration end to end — decoding, detection, and encoding — no cloud involved.
+IDguard PRO watches your cameras, decides what's actually worth recording, saves the event, and — if you want — tells you afterwards in plain words what happened in it, in a way you can later search back through. It does that by chaining several small, specialized models together instead of expecting one AI to handle it all: a YOLO model (v10, v12, or v26 — your choice) watches every frame live and spots the moment something worth recording is happening; an audio model (CLAP) can independently trigger a recording on a sound alone, even with nothing visible in frame; the recording itself then saves the event with a short buffer before and after; a vision-language model (via Ollama) looks at the finished clip afterwards and writes a description of what it saw, plus an optional yes/no read on categories you define yourself; and a small text-embedding model makes all of that searchable by meaning, not just exact words. Each model only does the one job it's good at, and the handoff between them is automatic. Everything runs on your own hardware, with GPU acceleration end to end — decoding, detection, and encoding — no cloud involved.
 
-Some of this code was written with AI (Google Gemini, Claude, Claude Code, and local models). But the architecture — deciding how the pieces should fit together, and the work of actually making it all run reliably — was still a person's job.
+Parts of this code was written with AI (Google Gemini, Claude, Claude Code, and local models). But the architecture — deciding how the pieces should fit together, and the work of actually making it all run reliably — was still a person's job.
+
+## Why IDguard PRO, instead of Motion or Frigate?
+
+Short answer: it depends what you want, and it's worth being honest about that up front rather than oversell.
+
+**[Motion](https://motion-project.github.io/) / [MotionEye](https://github.com/motioneye-project/motioneye)** trigger on pixel differences between frames. That's the classic approach, it's been reliable for decades, and it genuinely doesn't know *what* changed — a cloud shadow, headlights, a moth near the lens, and an actual intruder all look the same to it: "pixels changed." IDguard PRO's whole starting point was replacing that with an actual object detector as the trigger, so a recording only starts when something you've told it to care about is actually there.
+
+**[Frigate](https://frigate.video/)** is the closer, and frankly more mature, comparison — it already does AI object detection as the trigger, and (worth saying plainly, since I didn't want to write this without checking) its recent versions have their own semantic search (CLIP/Jina embeddings) and an optional generative-AI scene description, which is functionally similar to two of IDguard PRO's pieces. Frigate is also a considerably bigger project at this point: face recognition, license plate reading, a much wider hardware-acceleration matrix (Coral, Hailo, Intel iGPU, Apple Silicon, NVIDIA), an active community, and a paid model fine-tuning service if the stock accuracy isn't enough for you.
+
+So the honest positioning isn't "better than Frigate." It's a smaller, single-purpose project that makes a few different choices, useful to know about if any of these actually matter for your setup:
+
+* **Audio as an independent trigger, not just a search aid.** CLAP listens continuously and can start a recording on sound alone — with nothing in frame — matched against categories you type yourself (`glass breaking`, `whispering`, `drawer opening`, whatever), not a fixed pretrained class list. This is the one piece I haven't found in the more established tools in this space.
+* **User-defined topic classification, not just free-text search.** Beyond describing a scene, you can hand the vision model your own categories — `break-in`, `accident`, `mail carrier` — and get a yes/no-with-confidence read per category, saved to the sidecar metadata and searchable, not just a description you have to search through afterward.
+* **A one-line "why did this trigger" readout** on every recording — which detector fired, what it saw, at what confidence, whether it was the camera or the microphone — instead of having to infer it from the clip itself.
+* **A single-box, GPU-heavy design point.** Built and tuned around one well-specced GPU (RTX 2060 through RTX 5090) rather than spreading detection across many cheap accelerators — the right trade-off if you already have a capable box and would rather not manage a Coral/Hailo fleet.
+* **Small enough to read start to finish.** No plugin ecosystem, no paid tier, no protocol integrations to reason about — if you want to know exactly what a self-hosted camera pipeline is doing with your video, there's a lot less of it to read here than in a project with years of accumulated features.
+
+If you want a mature, broadly-hardware-compatible NVR with a big feature set and a real community behind it, Frigate is very likely the better choice today. If you want the smaller, single-purpose version of the same idea — or you're specifically after audio-based triggering or user-defined topic classification — that's what this is for.
 
 ## Overview
 
@@ -13,21 +31,23 @@ The core mission of IDguard PRO is to act as an intelligent edge-computing senti
 ### Detection & Recording
 * **Switchable AI Backends:** YOLOv10, YOLOv12, and YOLO26, selectable per deployment (see model comparison below), with model size from Nano to Extra Large.
 * **Event-Driven Recording:** Automatic MP4 recording triggered by detection, with configurable pre-roll and post-roll buffers to capture the arrival and departure of subjects.
-* **Live Detection-Box Overlays:** Optionally see exactly what the model sees, in real time — bounding boxes (color-coded per class) drawn directly into the camera grid previews and the live-view lightbox, reusing the inference the pipeline already runs (no extra GPU cost). Toggle in Settings → Anzeige.
+* **"Why did this trigger" readout:** every recording shows a one-line summary of what actually caused it — object class and confidence from the vision model, and/or the matched category and confidence from the audio trigger — right in the dashboard, not something you have to guess from the clip.
+* **Live Detection-Box Overlays:** Optionally see exactly what the model sees, in real time — bounding boxes (color-coded per class) drawn directly into the camera grid previews and the live-view lightbox, reusing the inference the pipeline already runs (no extra GPU cost). Toggle in Settings → Display.
 * **Trigger Screenshots:** Every recording gets an automatic screenshot with the detection box drawn in, taken at the trigger frame, plus a small confidence/class badge (e.g. "person 87%") shown right on the thumbnail in the dashboard.
-* **Configurable Filmstrip Thumbnails:** A configurable number of small + large preview frames captured after pre-roll for each event. The small frames (with detection boxes, for humans) power a hover-to-scrub filmstrip preview right in the dashboard; the large frames (kept raw/unannotated, for cleaner AI input) are sized for feeding into a vision AI.
+* **Configurable Filmstrip Thumbnails:** A configurable number of small + large preview frames captured across the *entire* event — using reservoir sampling plus a guaranteed final-frame slot, so even a long-running event still gets frames spread across its full length and never loses coverage of how it ended. The small frames (with detection boxes, for humans) power a hover-to-scrub filmstrip preview (works on touch too); the large frames (kept raw/unannotated, for cleaner AI input) are sized for feeding into a vision AI.
 * **Resilient by Design:** Cameras that crash or disconnect auto-restart with the same config. If the AI model fails to load (e.g. a transient GPU/driver hiccup), the pipeline keeps retrying in the background instead of silently going blind.
 * **GPU-Aware Startup:** Detects the installed GPU (Turing through Blackwell) and automatically determines whether FP16 and cuDNN are safe to use, with a staged self-test and fallback — same codebase runs unmodified from an RTX 2060 up to an RTX 5090.
 * **Full Hardware Pipeline:** NVDEC-accelerated decoding and NVENC-accelerated encoding where available, with automatic, self-healing fallback to software decode/encode per-stream if hardware acceleration isn't supported or a camera drops out.
 * **Accurate Timing:** Frame timestamps are wall-clock based rather than a fixed frame counter, so a brief network stall shows up as a natural pause in the recording instead of the rest of the clip playing back too fast.
 * **Race-Safe Model Download:** The YOLO checkpoint auto-downloads on first run via an atomic, per-process temp-file + rename, with a timeout and a minimum-size sanity check — safe even though multiple processes (master, every camera worker, the dashboard) import the same config module concurrently.
 
-### Optional AI Scene Description (Ollama)
+### Optional AI Scene Description & Topic Classification (Ollama)
 * After a recording finishes, IDguard PRO can optionally hand the large filmstrip frames to a locally hosted **Ollama** vision model and have it describe what happened in the clip in plain language.
-* **Model picker with tested presets** in Settings, plus a free-text "Eigenes Modell…" option for anything else pulled into Ollama. Note: Ollama has no native video-file input — every model, regardless of which one you pick, receives the same image-sequence (the filmstrip frames), never the raw video.
+* **Topic classification:** define your own categories in Settings — `break-in`, `accident`, `mail carrier`, anything — and the vision model gives each a 0–100 match score for the scene. The best match above your threshold is shown next to the description, saved into the sidecar metadata (including as searchable XMP keywords), and semantically searchable. Worth saying plainly: this score is the model's own self-reported guess via a prompt, not a calibrated probability like the detection confidence elsewhere in the pipeline — treat it as a useful sort/filter signal, not a certainty.
+* **Model picker with tested presets** in Settings, plus a free-text "Custom model…" option for anything else pulled into Ollama. Note: Ollama has no native video-file input — every model, regardless of which one you pick, receives the same image sequence (the filmstrip frames), never the raw video.
 * A **live Ollama-connectivity badge** in Settings shows at a glance whether the configured endpoint is reachable, so a misconfigured URL or a down container is visible without needing to open a terminal.
 * The result is written both as a small JSON file (shown directly in the dashboard, next to Recent Recordings and Archive) and as an XMP sidecar file for compatibility with photo/video managers like **Immich**.
-* A manual **re-analyze button** per recording (and a visible "Analysiere…" state while it's running) — useful for re-running with a different model, or for older recordings from before AI analysis was enabled.
+* A manual **re-analyze button** per recording (and a visible "Analyzing…" state while it's running) — useful for re-running with a different model, or for older recordings from before AI analysis was enabled.
 * Fully optional and off by default — no Ollama instance required unless you turn it on.
 
 ### Audio Trigger (CLAP)
@@ -37,19 +57,25 @@ The core mission of IDguard PRO is to act as an intelligent edge-computing senti
 * Off by default; enabling/disabling and editing categories takes effect live, no restart needed.
 
 ### Semantic Search
-* A search bar over Recent Recordings finds events by their AI-generated descriptions — both by exact text match and by **meaning**, so "person carrying a box" also finds a description that says "individual holding a package."
+* A search bar over Recent Recordings finds events by their AI-generated descriptions and detected topics — both by exact text match and by **meaning**, so "person carrying a box" also finds a description that says "individual holding a package."
 * Semantic matching is powered by a small local sentence-embedding model (`all-MiniLM-L6-v2`), stored in a lightweight SQLite index — no external vector database needed at the scale a self-hosted camera system runs at.
 * Falls back to plain text search automatically if the embedding model isn't installed — search stays usable either way.
-* Search results mix current and archived recordings in one list, each still fully actionable (archive/delete/re-analyze) from the results themselves.
+* Search results mix current and archived recordings in one list, each still fully actionable (archive/delete/re-analyze/export) from the results themselves.
+
+### Export
+* Bundles a recording — video, trigger screenshot, all sidecar metadata (AI description, topics, XMP), and the full filmstrip folder — into one clearly named folder: `Event_<Camera>_<Timestamp> Topic_<Topic>` (the topic suffix only appears if one was detected).
+* Destination is one setting: a **local path** copies directly, a **remote `user@host:/path`** uses `rsync` instead. Remote export assumes passwordless SSH key access is already set up between the two machines — this can't configure that part for you.
+* Off by default (no Export button shown) until a destination is configured in Settings.
 
 ### Web Dashboard
 * **CCTV-style layout:** a slim pipeline control bar up top, live camera previews and Recent Recordings front and center, with Settings, Hardware/System Status, Log, and Archive tucked into collapsible sections out of the way.
+* **Cameras managed entirely in the dashboard:** add, edit, or remove cameras (name + RTMP/RTSP URL) from Settings → Cameras — no more hand-editing `config.py` to change your camera list.
 * **Live previews:** per-camera thumbnails and a full live view, with a configurable refresh rate (0.5–5 fps slider) — disabled or unreachable cameras simply show nothing instead of flickering broken-image icons.
 * **REC indicators everywhere:** a live badge on any camera thumbnail currently recording, plus the browser tab title itself switches to "🔴 REC · IDguard PRO" while any camera is active — visible even from a background tab.
-* **"Zuletzt aktiv" per camera:** each camera in the live-preview grid shows a relative timestamp of its most recent recorded event.
-* **Card-style recording thumbnails:** large, full-width preview images in Recent Recordings and Archive — enough to actually recognize what happened at a glance, not a tiny icon.
+* **"Last active" per camera:** each camera in the live-preview grid shows a relative timestamp of its most recent recorded event.
+* **Card-style recording thumbnails:** large preview images in Recent Recordings and Archive — enough to actually recognize what happened at a glance, not a tiny icon.
 * **In-dashboard log viewer:** the last 100 lines of the pipeline log, collapsible, auto-refreshing only while open.
-* **Archive workflow:** archive recordings you want to keep permanently, separate from the auto-cleanup pool; deleting or archiving carries thumbnails, filmstrips, confidence metadata, and AI metadata along automatically.
+* **Archive workflow:** archive recordings you want to keep permanently, separate from the auto-cleanup pool; deleting, archiving, or exporting carries thumbnails, filmstrips, and all metadata along automatically.
 * **Auto-retention:** optionally delete un-archived recordings older than N days; archived recordings are never touched by auto-cleanup.
 * **Day-grouped recording lists** with clear separators, and a "load older" control once a list passes 200 entries.
 * **Hardware status at a glance:** CPU, RAM, VRAM, GPU temp, disk space, and NVENC/NVDEC utilization, all live-polled.
@@ -83,7 +109,7 @@ IDguard PRO lets you switch the detection backend per deployment. Here's how the
 * **OS:** Linux-based distribution (Ubuntu recommended).
 * **Memory:** Minimum 8GB RAM (higher recommended for multiple simultaneous streams).
 * **Storage:** Sufficient space for MP4 event recordings, filmstrip thumbnails, and (if archiving) long-term keepers. Auto-retention can cap unarchived storage growth automatically.
-* **Optional:** A locally hosted [Ollama](https://ollama.com) instance with a vision-capable model, if you want AI scene descriptions. `llava` is the most broadly reliable choice (classic CLIP-based architecture); newer vision models vary in Ollama compatibility by build — the Settings page shows a live reachability check to help catch a broken model/endpoint quickly. See Settings → KI-Videoanalyse for the pull command and VRAM budget.
+* **Optional:** A locally hosted [Ollama](https://ollama.com) instance with a vision-capable model, if you want AI scene descriptions or topic classification. `llava` is the most broadly reliable choice (classic CLIP-based architecture); newer vision models vary in Ollama compatibility by build — the Settings page shows a live reachability check to help catch a broken model/endpoint quickly. See Settings → AI Video Analysis for the pull command and VRAM budget.
 
 ## Tech Stack
 
@@ -95,28 +121,30 @@ IDguard PRO lets you switch the detection backend per deployment. Here's how the
 * **Optional AI Analysis:** [Ollama](https://ollama.com) (any vision-capable model — `llava` recommended as a reliable default, with a model picker for others)
 * **Optional Audio Trigger:** [CLAP](https://github.com/LAION-AI/CLAP) (`laion/clap-htsat-unfused`, via `transformers`)
 * **Optional Semantic Search:** `sentence-transformers` (`all-MiniLM-L6-v2`) with a SQLite index for storage
+* **Export:** Local filesystem copy or `rsync` for remote destinations
 * **Process Management:** Threading, multiprocessing, and subprocess modules
 
 ## Installation
 
-Detailed installation steps, including virtual environment setup and dependency management, are provided in the accompanying [INSTALL.md](./INSTALL.md) file.
+Detailed installation steps, including virtual environment setup and dependency management, are provided in the accompanying [INSTALL.md](./INSTALL.md) file. A Docker-based install is also available — see [DOCKER.md](./DOCKER.md).
 
 ## Project Structure
 
-* `web_ui.py`: Flask web dashboard — routes, settings, event/thumbnail/filmstrip serving, log/health endpoints, Ollama connectivity check, search API.
+* `web_ui.py`: Flask web dashboard — routes, settings, camera management, event/thumbnail/filmstrip serving, log/health endpoints, Ollama connectivity check, search API, export.
 * `recorder_pipeline.py`: Core detection and recording logic — one process per camera, GPU-aware startup, filmstrip capture, shared live-preview frames, optional detection-box overlays, audio-trigger integration.
-* `ai_analyze.py`: Optional post-recording AI scene analysis via Ollama; writes dashboard metadata + Immich XMP sidecar; indexes the description for search.
+* `ai_analyze.py`: Optional post-recording AI scene analysis and topic classification via Ollama; writes dashboard metadata + Immich XMP sidecar; indexes the description and topics for search.
 * `audio_trigger.py`: Optional CLAP-based audio trigger — runs in its own background thread per camera, never blocks recording.
-* `search_index.py`: SQLite-backed search index — full-text + semantic (sentence-transformers) matching over AI descriptions.
+* `search_index.py`: SQLite-backed search index — full-text + semantic (sentence-transformers) matching over AI descriptions and topics.
 * `backfill_thumbnails.py`, `backfill_filmstrips.py`, `backfill_search_index.py`: Standalone utilities to retroactively generate thumbnails/filmstrips/search entries for older recordings.
 * `helpers.py`: Shared utilities for the dashboard — settings/override I/O, live-preview frame handling (reuses the pipeline's own decode when it's running).
-* `config.py`: System-wide configuration, race-safe model auto-download, and defensive settings validation.
+* `config.py`: System-wide configuration, race-safe model auto-download, and defensive settings validation. Camera list lives in `streams.json` (dashboard-managed), not here.
 * `templates/dashboard.html`, `static/style.css`, `static/style-light.css`, `static/favicon.svg`: The dashboard UI, in dark and day themes.
 * `start_detached.sh`, `stop.sh`: Pipeline lifecycle scripts with duplicate-instance and graceful-shutdown handling.
 * `watchdog.sh`: Optional cron-friendly health check + auto-restart for the web dashboard.
+* `Dockerfile`, `docker-compose.yml`: Optional containerized setup — see [DOCKER.md](./DOCKER.md).
 * `alerts/`: Recorded event MP4s, trigger screenshots + confidence metadata, and filmstrip/AI metadata (auto-generated). Includes an `archive/` subfolder for permanently kept recordings.
 * `logs/`: Application and system logs for debugging and auditing — also viewable directly in the dashboard.
-* `search_index.db`: SQLite database backing semantic search (auto-created).
+* `search_index.db`, `streams.json`, `pipeline_settings.json`, `stream_overrides.json`: Local, gitignored runtime data — camera list, live settings, and the search database.
 
 ## Tested Hardware & Configurations
 
@@ -131,7 +159,7 @@ The system has been thoroughly tested and runs rock-solid across both compact ed
 
 ## Acknowledgements & Citation
 
-This project utilizes [YOLOv10](https://github.com/THU-MIG/yolov10), [YOLOv12](https://github.com/sunsmarterjie/yolov12), and YOLO26, and is powered by the [Ultralytics](https://github.com/ultralytics/ultralytics) framework for real-time object detection. Optional scene analysis is powered by [Ollama](https://ollama.com), optional audio triggering by [CLAP](https://github.com/LAION-AI/CLAP), and optional semantic search by [sentence-transformers](https://www.sbert.net/).
+This project utilizes [YOLOv10](https://github.com/THU-MIG/yolov10), [YOLOv12](https://github.com/sunsmarterjie/yolov12), and YOLO26, and is powered by the [Ultralytics](https://github.com/ultralytics/ultralytics) framework for real-time object detection. Optional scene analysis and topic classification are powered by [Ollama](https://ollama.com), optional audio triggering by [CLAP](https://github.com/LAION-AI/CLAP), and optional semantic search by [sentence-transformers](https://www.sbert.net/).
 
 If you use this repository, please consider citing the original YOLOv10 paper:
 
@@ -146,4 +174,4 @@ If you use this repository, please consider citing the original YOLOv10 paper:
 
 ## Disclaimer
 
-This software is intended for educational and private security purposes. Users are responsible for ensuring that their use of surveillance technology — including the optional AI scene-description feature — complies with all local, regional, and international laws regarding privacy and data protection.
+This software is intended for educational and private security purposes. Users are responsible for ensuring that their use of surveillance technology — including the optional AI scene-description and topic-classification features — complies with all local, regional, and international laws regarding privacy and data protection.
