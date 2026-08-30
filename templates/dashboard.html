@@ -307,6 +307,54 @@
                     </div>
 
                     <div class="settings-section">
+                        <div class="settings-section-label"><i class="fa-solid fa-tag"></i> Topic Classification (via Vision Model, optional)</div>
+                        <p class="settings-hint" style="margin-top: -4px; margin-bottom: 12px;">
+                            Adds a second question to each AI analysis: how well does the scene match one
+                            of your own categories, e.g. <code>break-in</code>, <code>accident</code>,
+                            <code>mail carrier</code>? One per line, any number. The best-matching category
+                            (if above the threshold) is shown next to the description, saved to the sidecar
+                            metadata, and searchable. <strong>Honest caveat:</strong> this is the vision
+                            model's own self-reported guess via a prompt — not a calibrated probability
+                            like the detection confidence above. Treat it as a useful sorting signal, not
+                            a certainty. Requires AI Video Analysis (above) to be enabled.
+                        </p>
+                        <div class="settings-group" style="margin-bottom: 14px;">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" name="AI_TOPICS_ENABLED" {% if settings.get('AI_TOPICS_ENABLED') %}checked{% endif %} style="width:auto;">
+                                Enable
+                            </label>
+                        </div>
+                        <div class="settings-group" style="margin-bottom: 14px;">
+                            <label>Categories (one per line)</label>
+                            <textarea name="AI_TOPICS" rows="4" style="width:100%; background:var(--card-bg-inset); border:1px solid var(--border); color:var(--text); border-radius:var(--radius-sm); padding:10px 12px; font-family:var(--font-mono); font-size:0.9rem;" placeholder="break-in&#10;accident&#10;mail carrier">{{ settings.get('AI_TOPICS', [])|join('\n') }}</textarea>
+                        </div>
+                        <div class="settings-group">
+                            <label>Threshold (% match to count as detected)</label>
+                            <div class="range-wrap">
+                                <input type="range" min="0" max="100" step="5" name="AI_TOPICS_THRESHOLD" value="{{ settings.get('AI_TOPICS_THRESHOLD', 50) }}" oninput="document.getElementById('topicsthresh_val').innerText = this.value + '%'">
+                                <span id="topicsthresh_val" class="range-val">{{ settings.get('AI_TOPICS_THRESHOLD', 50)|int }}%</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <div class="settings-section-label"><i class="fa-solid fa-file-export"></i> Export</div>
+                        <p class="settings-hint" style="margin-top: -4px; margin-bottom: 12px;">
+                            Copies the video, thumbnail, and all sidecar metadata for an event into its
+                            own folder, named e.g. <code>Event_Garden_20260830_081734 Topic_Accident</code>.
+                            Leave empty to hide the Export button. Two destination types:
+                            <strong>local path</strong> (e.g. <code>/mnt/backup/idguard-exports</code>) copies
+                            directly; <strong>remote path</strong> (e.g. <code>user@host:/path</code>) uses
+                            <code>rsync</code> — this requires passwordless SSH key access to already be set
+                            up between this machine and the remote one; nothing here can configure that for you.
+                        </p>
+                        <div class="settings-group">
+                            <label>Export folder</label>
+                            <input type="text" name="EXPORT_DIR" value="{{ settings.get('EXPORT_DIR', '') }}" placeholder="/mnt/backup/idguard-exports or user@host:/path">
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
                         <div class="settings-section-label"><i class="fa-solid fa-tv"></i> Display</div>
                         <div class="settings-group" style="margin-bottom: 14px;">
                             <label>Theme</label>
@@ -543,6 +591,7 @@
         const INITIAL_ARCHIVED = {{ archived_events | tojson }};
         const THUMBNAIL_INTERVAL_MS = {{ thumbnail_interval_ms }};
         const DEFAULT_TITLE = document.title;
+        const EXPORT_ENABLED = {{ 'true' if settings.get('EXPORT_DIR') else 'false' }};
 
         // --- Model-Size-Filter je YOLO-Version ('b' ist nur für v10 gültig) ---
         const SIZE_RULES = {
@@ -661,6 +710,14 @@
                 showToast(params.get('restarted') === '1'
                     ? 'Cameras saved — pipeline restarting…'
                     : 'Cameras saved.');
+                window.history.replaceState({}, '', window.location.pathname);
+            }
+            if (params.get('exported')) {
+                showToast('✅ Exported to "' + params.get('exported') + '"');
+                window.history.replaceState({}, '', window.location.pathname);
+            }
+            if (params.get('export_error')) {
+                showToast('⚠️ Export failed: ' + params.get('export_error'), 6000);
                 window.history.replaceState({}, '', window.location.pathname);
             }
         })();
@@ -872,12 +929,33 @@
                 const confBadge = (ev.trigger_confidence != null)
                     ? `<span class="thumb-conf-badge">${escapeHtml(ev.trigger_class || '')} ${Math.round(ev.trigger_confidence * 100)}%</span>`
                     : '';
+                const triggerParts = [];
+                if (ev.trigger_class && ev.trigger_confidence != null) {
+                    triggerParts.push(`${ev.trigger_class} detected (${Math.round(ev.trigger_confidence * 100)}%)`);
+                }
+                if (ev.audio_trigger_label) {
+                    const pct = ev.audio_trigger_confidence != null ? ` (${Math.round(ev.audio_trigger_confidence * 100)}%)` : '';
+                    triggerParts.push(`heard "${ev.audio_trigger_label}"${pct}`);
+                }
+                const triggerLine = triggerParts.length
+                    ? `<span class="event-trigger-line"><i class="fa-solid fa-bolt"></i> ${escapeHtml(triggerParts.join(' and '))}</span>`
+                    : '';
+                const topicLine = ev.top_topic
+                    ? `<span class="event-topic-line"><i class="fa-solid fa-tag"></i> Category: ${escapeHtml(ev.top_topic)}${ev.top_topic_confidence != null ? ` (${Math.round(ev.top_topic_confidence)}%)` : ''}</span>`
+                    : '';
                 const analyzeUrl = (isArchived ? '/analyze/archive/' : '/analyze/') + fn;
                 const showAnalyzeBtn = (ev.filmstrip_count || 0) > 0 && !ev.ai_pending;
                 const analyzeBtn = showAnalyzeBtn
                     ? `<form action="${analyzeUrl}" method="POST" style="margin:0">
                          <input type="hidden" name="csrf_token" value="${CSRF_TOKEN}">
                          <button type="submit" class="btn-analyze" title="${ev.ai_description ? 'Re-analyze' : 'Analyze'}" onclick="event.stopPropagation()"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
+                       </form>`
+                    : '';
+                const exportUrl = (isArchived ? '/export/archive/' : '/export/') + fn;
+                const exportBtn = EXPORT_ENABLED
+                    ? `<form action="${exportUrl}" method="POST" style="margin:0">
+                         <input type="hidden" name="csrf_token" value="${CSRF_TOKEN}">
+                         <button type="submit" class="btn-export" title="Export to configured folder" onclick="event.stopPropagation()"><i class="fa-solid fa-file-export"></i></button>
                        </form>`
                     : '';
                 const actions = (isArchived
@@ -892,7 +970,7 @@
                        <form action="/delete/${fn}" method="POST" style="margin:0" onsubmit="return confirm('Are you sure you want to delete this video?');">
                          <input type="hidden" name="csrf_token" value="${CSRF_TOKEN}">
                          <button type="submit" class="btn-delete" title="Delete video" onclick="event.stopPropagation()"><i class="fa-solid fa-trash-can"></i></button>
-                       </form>`) + analyzeBtn;
+                       </form>`) + analyzeBtn + exportBtn;
                 let aiLine = '';
                 if (ev.ai_pending) {
                     aiLine = `<span class="event-ai-desc event-ai-pending"><i class="fa-solid fa-spinner fa-spin"></i> Analyzing...</span>`;
@@ -909,6 +987,8 @@
                                 <span><i class="fa-regular fa-calendar"></i> ${ev.datetime}</span>
                                 <span><i class="fa-solid fa-hard-drive"></i> ${ev.size}</span>${isArchived ? ' <span title="Archived"><i class="fa-solid fa-box-archive"></i></span>' : ''}
                             </span>
+                            ${triggerLine}
+                            ${topicLine}
                             ${aiLine}
                         </div>
                         <div class="event-actions">${actions}</div>

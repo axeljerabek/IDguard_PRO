@@ -41,6 +41,9 @@ _settings = _load_settings()
 OLLAMA_URL = os.environ.get("OLLAMA_URL", _settings.get("OLLAMA_URL", "http://localhost:11434"))
 OLLAMA_MODEL = os.environ.get("OLLAMA_VISION_MODEL", _settings.get("OLLAMA_VISION_MODEL", "llava:latest"))
 MAX_FRAMES = int(os.environ.get("AI_ANALYZE_MAX_FRAMES", _settings.get("AI_ANALYZE_MAX_FRAMES", 12)))
+AI_TOPICS_ENABLED = bool(_settings.get("AI_TOPICS_ENABLED", False))
+AI_TOPICS = [t.strip() for t in _settings.get("AI_TOPICS", []) if isinstance(t, str) and t.strip()]
+AI_TOPICS_THRESHOLD = float(_settings.get("AI_TOPICS_THRESHOLD", 50))
 
 PROMPT = (
     "Das sind aufeinanderfolgende Standbilder aus einer Sicherheitskamera-"
@@ -99,6 +102,69 @@ def analyze(video_basename, base_dir):
                 pass
 
 
+def _classify_topics(images_b64, topics):
+    """Fragt das Vision-Modell separat, wie gut die Szene zu den in den
+    Settings konfigurierten Themen passt (z.B. "break-in", "accident",
+    "mail carrier").
+
+    WICHTIG, ehrlich gesagt: das ist die Selbsteinschätzung des Sprachmodells
+    per Prompt, KEINE kalibrierte Wahrscheinlichkeit wie bei YOLO (trainiert
+    auf gelabelten Bounding-Boxes) oder CLAP (Cosine-Ähnlichkeit in einem
+    Embedding-Raum). Ein LLM, das "80" antwortet, hat das nicht gegen echte
+    Trainingsdaten kalibriert — es ist einfach die plausibelste Zahl, die das
+    Modell dafür hält. Als grobe Sortierung/Filterung taugt das trotzdem gut.
+    """
+    if not topics:
+        return {}
+    topic_list = ", ".join(f'"{t}"' for t in topics)
+    prompt = (
+        "Look at these images again, from the same security camera recording. "
+        f"For each of these categories: {topic_list} — "
+        "give a number from 0 to 100 for how well the scene matches that "
+        "category, based only on what is visible. Respond with ONLY a JSON "
+        "object mapping each category name exactly as given to its number, "
+        "nothing else, no explanation, no markdown."
+    )
+    payload = json.dumps({
+        "model": OLLAMA_MODEL,
+        "prompt": prompt,
+        "images": images_b64,
+        "format": "json",
+        "stream": False
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        f"{OLLAMA_URL}/api/generate", data=payload,
+        headers={"Content-Type": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            result = json.loads(resp.read().decode("utf-8"))
+        raw = result.get("response", "").strip()
+        parsed = json.loads(raw)
+        if not isinstance(parsed, dict):
+            raise ValueError(f"Erwartete ein JSON-Objekt, bekam: {type(parsed)}")
+    except Exception as e:
+        print(f"⚠️ Themen-Klassifikation fehlgeschlagen: {e}")
+        return {}
+
+    scores = {}
+    for t in topics:
+        val = parsed.get(t)
+        if val is None:
+            # Manche Modelle normalisieren Groß-/Kleinschreibung oder
+            # Leerzeichen im zurückgegebenen Key — tolerant nachschauen,
+            # statt den Treffer wegen einer Kleinigkeit zu verlieren.
+            for k, v in parsed.items():
+                if isinstance(k, str) and k.strip().lower() == t.lower():
+                    val = v
+                    break
+        try:
+            scores[t] = max(0.0, min(100.0, float(val)))
+        except (TypeError, ValueError):
+            pass
+    return scores
+
+
 def _analyze_inner(video_basename, base_dir):
     frame_dir = os.path.join(base_dir, ".thumbs", video_basename, "large")
     if not os.path.isdir(frame_dir):
@@ -142,21 +208,46 @@ def _analyze_inner(video_basename, base_dir):
         print(f"⚠️ Ollama lieferte keine Beschreibung für {video_basename}.")
         return
 
+    topics_result = {}
+    top_topic, top_topic_score = None, None
+    if AI_TOPICS_ENABLED and AI_TOPICS:
+        topics_result = _classify_topics(images_b64, AI_TOPICS)
+        qualifying = {t: s for t, s in topics_result.items() if s >= AI_TOPICS_THRESHOLD}
+        if qualifying:
+            top_topic = max(qualifying, key=qualifying.get)
+            top_topic_score = qualifying[top_topic]
+
     # 1) Eigene JSON-Metadatei — vom Dashboard gelesen
     meta_path = os.path.join(base_dir, f"{video_basename}.ai.json")
     try:
+        meta = {
+            "description": description,
+            "model": OLLAMA_MODEL,
+            "frame_count": len(images_b64),
+            "ts": time.time()
+        }
+        if topics_result:
+            meta["topics"] = topics_result
+        if top_topic:
+            meta["top_topic"] = top_topic
+            meta["top_topic_confidence"] = top_topic_score
         with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump({
-                "description": description,
-                "model": OLLAMA_MODEL,
-                "frame_count": len(images_b64),
-                "ts": time.time()
-            }, f)
+            json.dump(meta, f)
     except Exception as e:
         print(f"❌ Konnte {meta_path} nicht schreiben: {e}")
 
-    # 2) XMP-Sidecar für Immich (dc:description)
+    # 2) XMP-Sidecar für Immich (dc:description + dc:subject für Themen)
     xmp_path = os.path.join(base_dir, f"{video_basename}.mp4.xmp")
+    subject_block = ""
+    qualifying_topics = {t: s for t, s in topics_result.items() if s >= AI_TOPICS_THRESHOLD}
+    if qualifying_topics:
+        tags_xml = "".join(f"<rdf:li>{_xml_escape(t)}</rdf:li>" for t in qualifying_topics)
+        subject_block = f"""
+   <dc:subject>
+    <rdf:Bag>
+     {tags_xml}
+    </rdf:Bag>
+   </dc:subject>"""
     xmp = f"""<?xpacket begin="\ufeff" id="W5M0MpCehiHzreSzNTczkc9d"?>
 <x:xmpmeta xmlns:x="adobe:ns:meta/">
  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
@@ -165,7 +256,7 @@ def _analyze_inner(video_basename, base_dir):
     <rdf:Alt>
      <rdf:li xml:lang="x-default">{_xml_escape(description)}</rdf:li>
     </rdf:Alt>
-   </dc:description>
+   </dc:description>{subject_block}
   </rdf:Description>
  </rdf:RDF>
 </x:xmpmeta>
@@ -178,7 +269,7 @@ def _analyze_inner(video_basename, base_dir):
 
     if search_index is not None:
         try:
-            search_index.index_event(f"{video_basename}.mp4", base_dir, description)
+            search_index.index_event(f"{video_basename}.mp4", base_dir, description, topics=list(qualifying_topics.keys()))
         except Exception as e:
             print(f"⚠️ Suchindex-Update fehlgeschlagen für {video_basename}: {e}")
 

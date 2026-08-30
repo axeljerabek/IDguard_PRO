@@ -166,15 +166,20 @@ def _event_from_file(f):
             except Exception:
                 pass
         ai_desc = None
+        top_topic, top_topic_conf = None, None
         ai_path = os.path.splitext(f)[0] + '.ai.json'
         if os.path.exists(ai_path):
             try:
                 with open(ai_path) as af:
-                    ai_desc = json.load(af).get('description')
+                    ai_meta = json.load(af)
+                ai_desc = ai_meta.get('description')
+                top_topic = ai_meta.get('top_topic')
+                top_topic_conf = ai_meta.get('top_topic_confidence')
             except Exception:
                 pass
         ai_pending = os.path.exists(os.path.splitext(f)[0] + '.ai.pending')
         trigger_conf, trigger_cls = None, None
+        audio_trigger_label, audio_trigger_conf = None, None
         trigger_path = os.path.splitext(f)[0] + '.trigger.json'
         if os.path.exists(trigger_path):
             try:
@@ -182,6 +187,8 @@ def _event_from_file(f):
                     tmeta = json.load(tf)
                 trigger_conf = tmeta.get('confidence')
                 trigger_cls = tmeta.get('class')
+                audio_trigger_label = tmeta.get('audio_trigger')
+                audio_trigger_conf = tmeta.get('audio_confidence')
             except Exception:
                 pass
         return {
@@ -193,8 +200,12 @@ def _event_from_file(f):
             'filmstrip_order': fs_order,
             'ai_description': ai_desc,
             'ai_pending': ai_pending,
+            'top_topic': top_topic,
+            'top_topic_confidence': top_topic_conf,
             'trigger_confidence': trigger_conf,
-            'trigger_class': trigger_cls
+            'trigger_class': trigger_cls,
+            'audio_trigger_label': audio_trigger_label,
+            'audio_trigger_confidence': audio_trigger_conf
         }
     except OSError:
         return None
@@ -459,6 +470,109 @@ def analyze_archived_video(filename: str):
     ok, err = _trigger_analysis(ARCHIVE_DIR, filename)
     return redirect(url_for('dashboard') if ok else url_for('dashboard', analyze_error=err))
 
+def _export_folder_name(filename, topic=None):
+    """Event_<Kamera>_<Zeitstempel>[ Topic_<Thema>], Dateisystem-sicher
+    (auch für den Fall, dass das Ziel eine Windows-SMB-Freigabe ist)."""
+    base = os.path.splitext(filename)[0]
+    if '_EVENT_' in base:
+        camera, _, timestamp = base.partition('_EVENT_')
+    else:
+        camera, timestamp = base, ''
+    name = f"Event_{camera}_{timestamp}" if timestamp else f"Event_{camera}"
+    if topic:
+        safe_topic = "".join(c for c in topic if c.isalnum() or c in (' ', '-', '_')).strip()
+        if safe_topic:
+            name += f" Topic_{safe_topic}"
+    return "".join(c if c.isalnum() or c in (' ', '_', '-') else '_' for c in name)
+
+def _run_export(src_dir, filename, dest_root):
+    """Kopiert Video + alle Sidecar-Metadaten + Filmstrip-Ordner eines Events
+    in einen eigenen, benannten Unterordner unter dest_root.
+
+    dest_root kann ein lokaler Pfad ODER ein rsync-Remote-Ziel sein
+    (user@host:/pfad) — für Remote-Ziele wird bereits eingerichteter
+    passwortloser SSH-Zugriff (Public-Key-Auth) vorausgesetzt; das kann diese
+    Funktion nicht für euch einrichten, rsync würde sonst nach einem
+    Passwort fragen und (da hier kein Terminal angehängt ist) hängen bleiben
+    bis der Timeout greift."""
+    base = os.path.splitext(filename)[0]
+    video_path = os.path.join(src_dir, filename)
+    if not os.path.exists(video_path):
+        return False, "Video not found."
+
+    topic = None
+    ai_path = os.path.join(src_dir, f"{base}.ai.json")
+    if os.path.exists(ai_path):
+        try:
+            with open(ai_path) as f:
+                topic = json.load(f).get('top_topic')
+        except Exception:
+            pass
+
+    folder_name = _export_folder_name(filename, topic)
+    is_remote = ('@' in dest_root and ':' in dest_root) or dest_root.startswith('rsync://')
+
+    candidates = [
+        video_path,
+        os.path.join(src_dir, f"{base}.jpg"),
+        os.path.join(src_dir, f"{base}.ai.json"),
+        os.path.join(src_dir, f"{base}.trigger.json"),
+        os.path.join(src_dir, f"{filename}.xmp"),
+    ]
+    files_to_copy = [p for p in candidates if os.path.exists(p)]
+    thumbs_dir = os.path.join(src_dir, '.thumbs', base)
+
+    if is_remote:
+        remote_target = dest_root.rstrip('/') + '/' + folder_name + '/'
+        try:
+            args = ['rsync', '-a'] + files_to_copy
+            if os.path.isdir(thumbs_dir):
+                args.append(thumbs_dir)
+            args.append(remote_target)
+            result = subprocess.run(args, capture_output=True, text=True, timeout=300)
+            if result.returncode != 0:
+                return False, f"rsync failed: {result.stderr.strip()[:300]}"
+            return True, folder_name
+        except FileNotFoundError:
+            return False, "rsync is not installed on this system."
+        except subprocess.TimeoutExpired:
+            return False, "rsync timed out (5 min) — is the remote destination reachable?"
+        except Exception as e:
+            return False, str(e)
+    else:
+        try:
+            dest_dir = os.path.join(dest_root, folder_name)
+            os.makedirs(dest_dir, exist_ok=True)
+            for p in files_to_copy:
+                shutil.copy2(p, dest_dir)
+            if os.path.isdir(thumbs_dir):
+                shutil.copytree(thumbs_dir, os.path.join(dest_dir, 'thumbs'), dirs_exist_ok=True)
+            return True, folder_name
+        except Exception as e:
+            return False, str(e)
+
+def _export_route_handler(src_dir, filename):
+    settings = load_settings()
+    export_dir = (settings.get('EXPORT_DIR') or '').strip()
+    if not export_dir:
+        return redirect(url_for('dashboard', export_error="No export folder configured (Settings)."))
+    ok, result = _run_export(src_dir, filename, export_dir)
+    if ok:
+        return redirect(url_for('dashboard', exported=result))
+    return redirect(url_for('dashboard', export_error=result))
+
+@app.route('/export/<filename>', methods=['POST'])
+@requires_auth
+def export_video(filename: str):
+    _verify_csrf()
+    return _export_route_handler(ALERTS_DIR, filename)
+
+@app.route('/export/archive/<filename>', methods=['POST'])
+@requires_auth
+def export_archived_video(filename: str):
+    _verify_csrf()
+    return _export_route_handler(ARCHIVE_DIR, filename)
+
 @app.route('/api/events/<kind>')
 @requires_auth
 def api_events_page(kind):
@@ -639,6 +753,14 @@ def save_pipeline_settings():
         line.strip() for line in request.form.get('AUDIO_TRIGGER_CATEGORIES', '').splitlines()
         if line.strip()
     ][:20]  # Sicherheitsdecke — 20 Kategorien sind mehr als genug, jede kostet einen CLAP-Vergleich pro Durchlauf
+    try:
+        topics_threshold = float(request.form.get('AI_TOPICS_THRESHOLD', 50))
+    except (TypeError, ValueError):
+        topics_threshold = 50
+    ai_topics = [
+        line.strip() for line in request.form.get('AI_TOPICS', '').splitlines()
+        if line.strip()
+    ][:15]  # Sicherheitsdecke — jedes Thema kostet einen Ollama-Vergleich pro Analyse
 
     old_settings = load_settings()
 
@@ -663,7 +785,11 @@ def save_pipeline_settings():
         "AUDIO_TRIGGER_ENABLED": request.form.get('AUDIO_TRIGGER_ENABLED') == 'on',
         "AUDIO_TRIGGER_CATEGORIES": audio_categories,
         "AUDIO_TRIGGER_THRESHOLD": round(_clamp(audio_threshold, 0.05, 0.95), 2),
-        "AUDIO_TRIGGER_INTERVAL_SEC": round(_clamp(audio_interval, 0.5, 30.0), 1)
+        "AUDIO_TRIGGER_INTERVAL_SEC": round(_clamp(audio_interval, 0.5, 30.0), 1),
+        "AI_TOPICS_ENABLED": request.form.get('AI_TOPICS_ENABLED') == 'on',
+        "AI_TOPICS": ai_topics,
+        "AI_TOPICS_THRESHOLD": round(_clamp(topics_threshold, 0, 100), 0),
+        "EXPORT_DIR": request.form.get('EXPORT_DIR', '').strip()
     }
 
     with open(SETTINGS_F, 'w') as f:

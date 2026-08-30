@@ -54,6 +54,7 @@ class AudioTrigger:
 
         self._triggered = False
         self._triggered_label = None
+        self._triggered_score = None
 
         self._stop = threading.Event()
         self._thread = None
@@ -100,9 +101,9 @@ class AudioTrigger:
             pass
 
     def is_triggered(self):
-        """(bool, label_or_None) — welche Kategorie (falls eine) gerade über
-        der Schwelle liegt."""
-        return self._triggered, self._triggered_label
+        """(bool, label_or_None, score_or_None) — welche Kategorie (falls
+        eine) gerade über der Schwelle liegt, und mit welcher Ähnlichkeit."""
+        return self._triggered, self._triggered_label, self._triggered_score
 
     # --- Interner Hintergrund-Thread --------------------------------------
 
@@ -166,6 +167,7 @@ class AudioTrigger:
             if not enabled or not categories or self._text_embeds is None:
                 self._triggered = False
                 self._triggered_label = None
+                self._triggered_score = None
                 self._stop.wait(interval)
                 continue
 
@@ -200,13 +202,16 @@ class AudioTrigger:
                 if best_score >= threshold:
                     self._triggered = True
                     self._triggered_label = self._text_labels[best_idx]
+                    self._triggered_score = best_score
                     self.logger.info(f"🔊 [{self.name}] Audio-Trigger: '{self._triggered_label}' ({best_score:.2f})")
                 else:
                     self._triggered = False
                     self._triggered_label = None
+                    self._triggered_score = None
             except Exception as e:
                 self.logger.warning(f"⚠️ [{self.name}] Audio-Klassifikation fehlgeschlagen: {e}")
                 self._triggered = False
                 self._triggered_label = None
+                self._triggered_score = None
 
             self._stop.wait(interval)

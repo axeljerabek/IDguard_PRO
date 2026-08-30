@@ -4,6 +4,7 @@ import sys
 import subprocess
 import time
 import signal
+import random
 import threading
 import datetime
 import multiprocessing
@@ -341,7 +342,8 @@ class CameraAgent(multiprocessing.Process):
         fs_large_dir = None
         filmstrip_count_target = 0
         filmstrip_interval = 2.0
-        filmstrip_taken = 0
+        filmstrip_taken_total = 0   # ALLE seit Recording-Start gesehenen Kandidaten (fürs Reservoir Sampling)
+        filmstrip_timestamps = {}  # slot_idx (str) -> Sekunden seit Recording-Start, für korrekte Zeitreihenfolge trotz Slot-Überschreibung
         filmstrip_next_time = 0
 
         def close_writer():
@@ -406,29 +408,65 @@ class CameraAgent(multiprocessing.Process):
 
         def capture_filmstrip(img_bgr, results=None):
             """Small (Hover-Scrub, MIT Boxen) + Large (KI-Analyse, bewusst ROH ohne
-            Boxen — sauberere Eingabe für Ollama) Frames im Intervall."""
-            nonlocal filmstrip_taken, filmstrip_next_time
-            if not fs_small_dir or filmstrip_taken >= filmstrip_count_target:
+            Boxen — sauberere Eingabe für Ollama) Frames im Intervall.
+
+            Hybrid aus Reservoir Sampling + garantiertem Ende-Slot:
+            - Der LETZTE Slot wird bei JEDEM Aufruf überschrieben — zeigt also
+              immer den zuletzt aufgenommenen Frame. Garantiert, dass das Ende
+              einer Aktion nie fehlt, egal wie lange sie dauert.
+            - Die übrigen Slots nutzen Reservoir Sampling (Algorithm R): jeder
+              Kandidat hat eine mit der Zeit abnehmende Chance, einen davon zu
+              ersetzen — Ergebnis: gleichmäßige Verteilung über die gesamte
+              bisherige Dauer, egal ob 10 Sekunden oder 30 Minuten.
+            Reines Reservoir Sampling allein GARANTIERT die Ende-Abdeckung nicht
+            (nur im statistischen Mittel) — deshalb der feste Ende-Slot zusätzlich.
+            """
+            nonlocal filmstrip_taken_total, filmstrip_next_time
+            if not fs_small_dir or filmstrip_count_target <= 0:
                 return
             now = time.time()
             if now < filmstrip_next_time:
                 return
             try:
-                idx = filmstrip_taken
-                h, w = img_bgr.shape[:2]
+                reservoir_size = filmstrip_count_target - 1 if filmstrip_count_target >= 2 else filmstrip_count_target
+                end_slot = filmstrip_count_target - 1 if filmstrip_count_target >= 2 else None
 
+                filmstrip_taken_total += 1
+                slot = None
+                if reservoir_size > 0:
+                    if filmstrip_taken_total <= reservoir_size:
+                        slot = filmstrip_taken_total - 1
+                    else:
+                        j = random.randint(0, filmstrip_taken_total - 1)
+                        if j < reservoir_size:
+                            slot = j
+
+                h, w = img_bgr.shape[:2]
                 annotated = img_bgr
                 if results:
                     try:
                         annotated = results[0].plot()
                     except Exception:
                         annotated = img_bgr
+                small_full = cv2.resize(annotated, (560, max(1, int(h * 560 / w))))
+                large_full = img_bgr if w <= 1280 else cv2.resize(img_bgr, (1280, max(1, int(h * 1280 / w))))
 
-                small = cv2.resize(annotated, (560, max(1, int(h * 560 / w))))
-                cv2.imwrite(os.path.join(fs_small_dir, f'{idx:04d}.jpg'), small)
-                large = img_bgr if w <= 1280 else cv2.resize(img_bgr, (1280, max(1, int(h * 1280 / w))))
-                cv2.imwrite(os.path.join(fs_large_dir, f'{idx:04d}.jpg'), large)
-                filmstrip_taken += 1
+                slots_to_write = set()
+                if slot is not None:
+                    slots_to_write.add(slot)
+                if end_slot is not None:
+                    slots_to_write.add(end_slot)
+
+                for s in slots_to_write:
+                    cv2.imwrite(os.path.join(fs_small_dir, f'{s:04d}.jpg'), small_full)
+                    cv2.imwrite(os.path.join(fs_large_dir, f'{s:04d}.jpg'), large_full)
+                    filmstrip_timestamps[str(s)] = round(now - recording_start_time, 2)
+
+                if slots_to_write:
+                    ts_path = os.path.join(os.path.dirname(fs_small_dir), 'timestamps.json')
+                    with open(ts_path, 'w') as tf:
+                        json.dump(filmstrip_timestamps, tf)
+
                 filmstrip_next_time = now + filmstrip_interval
             except Exception:
                 pass
@@ -592,9 +630,9 @@ class CameraAgent(multiprocessing.Process):
                                 # keine eigene State-Machine, keine eigene Aufnahme-Logik.
                                 # is_triggered() liest nur ein Flag, das der Hintergrund-
                                 # Thread setzt — kein blockierender Aufruf.
-                                audio_triggered_now, audio_label = (False, None)
+                                audio_triggered_now, audio_label, audio_score = (False, None, None)
                                 if audio_trigger is not None:
-                                    audio_triggered_now, audio_label = audio_trigger.is_triggered()
+                                    audio_triggered_now, audio_label, audio_score = audio_trigger.is_triggered()
                                     if audio_triggered_now and not target_detected:
                                         self.logger.warning(f"🔊 [{self.name}] Aufnahme durch Audio-Trigger ausgelöst: '{audio_label}'")
                                 target_detected = target_detected or audio_triggered_now
@@ -633,6 +671,8 @@ class CameraAgent(multiprocessing.Process):
                                                 trigger_meta['class'] = str(results[0].names[int(clss[top_idx])])
                                             if audio_triggered_now and audio_label:
                                                 trigger_meta['audio_trigger'] = audio_label
+                                                if audio_score is not None:
+                                                    trigger_meta['audio_confidence'] = round(float(audio_score), 3)
                                             if trigger_meta:
                                                 meta_path = os.path.splitext(video_file_path)[0] + '.trigger.json'
                                                 with open(meta_path, 'w') as mf:
@@ -649,7 +689,8 @@ class CameraAgent(multiprocessing.Process):
                                             os.makedirs(fs_large_dir, exist_ok=True)
                                         else:
                                             fs_small_dir = fs_large_dir = None
-                                        filmstrip_taken = 0
+                                        filmstrip_taken_total = 0
+                                        filmstrip_timestamps = {}
                                         filmstrip_next_time = time.time()
 
                                         h, w = img_bgr.shape[:2]
