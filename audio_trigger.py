@@ -26,6 +26,22 @@ import time
 import numpy as np
 
 
+def _extract_features(output):
+    """get_text_features()/get_audio_features() liefern je nach installierter
+    transformers-Version entweder direkt ein Tensor ODER ein ModelOutput-
+    Objekt (z.B. BaseModelOutputWithPooling) mit dem eigentlichen Tensor als
+    Attribut. Robust gegen beide Fälle, statt blind .norm() draufzurufen."""
+    if hasattr(output, "text_embeds"):
+        return output.text_embeds
+    if hasattr(output, "audio_embeds"):
+        return output.audio_embeds
+    if hasattr(output, "pooler_output"):
+        return output.pooler_output
+    if hasattr(output, "norm"):  # bereits ein rohes Tensor
+        return output
+    raise TypeError(f"Unerwarteter Rückgabetyp von get_*_features(): {type(output)}")
+
+
 class AudioTrigger:
     def __init__(self, logger, name, sample_rate=48000, window_sec=3.0):
         self.logger = logger
@@ -114,7 +130,7 @@ class AudioTrigger:
         import torch
         with torch.no_grad():
             inputs = self._processor(text=categories, return_tensors="pt", padding=True)
-            embeds = self._model.get_text_features(**inputs)
+            embeds = _extract_features(self._model.get_text_features(**inputs))
             embeds = embeds / embeds.norm(dim=-1, keepdim=True)
         self._text_embeds = embeds
         self._text_labels = list(categories)
@@ -162,9 +178,21 @@ class AudioTrigger:
 
             try:
                 import torch
-                inputs = self._processor(audios=snapshot, sampling_rate=self.sample_rate, return_tensors="pt")
+                # Parametername je nach transformers-Version unterschiedlich
+                # ("audio" neu, "audios" älter/deprecated) — beide abdecken.
+                # Welche Exception die Bibliothek beim falschen Namen wirft, ist
+                # nicht garantiert dieselbe über Versionen hinweg -> breit fangen.
+                try:
+                    inputs = self._processor(audio=snapshot, sampling_rate=self.sample_rate, return_tensors="pt")
+                except Exception as e_audio:
+                    try:
+                        inputs = self._processor(audios=snapshot, sampling_rate=self.sample_rate, return_tensors="pt")
+                    except Exception as e_audios:
+                        raise RuntimeError(
+                            f"audio=-Aufruf: {e_audio} | audios=-Aufruf: {e_audios}"
+                        ) from e_audios
                 with torch.no_grad():
-                    audio_embed = self._model.get_audio_features(**inputs)
+                    audio_embed = _extract_features(self._model.get_audio_features(**inputs))
                     audio_embed = audio_embed / audio_embed.norm(dim=-1, keepdim=True)
                     sims = (audio_embed @ self._text_embeds.T).squeeze(0)
                 best_idx = int(sims.argmax())
