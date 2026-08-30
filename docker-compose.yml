@@ -48,6 +48,7 @@ services:
       - ./config.py:/app/config.py
       - ./pipeline_settings.json:/app/pipeline_settings.json
       - ./stream_overrides.json:/app/stream_overrides.json
+      - ./streams.json:/app/streams.json
       - ./alerts:/app/alerts
       - ./logs:/app/logs
       - ./search_index.db:/app/search_index.db
@@ -67,6 +68,7 @@ services:
       - ./config.py:/app/config.py
       - ./pipeline_settings.json:/app/pipeline_settings.json
       - ./stream_overrides.json:/app/stream_overrides.json
+      - ./streams.json:/app/streams.json
       - ./alerts:/app/alerts
       - ./logs:/app/logs
       - ./search_index.db:/app/search_index.db

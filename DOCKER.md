@@ -8,42 +8,42 @@ This is the fastest way to get IDguard PRO running, especially if you don't want
 
 * **Docker** with the modern `docker compose` (V2) plugin — check with `docker compose version`. If you only have the old standalone `docker-compose` (hyphenated, V1), GPU passthrough below may not work reliably; either upgrade, or switch to the `runtime: nvidia` fallback commented in `docker-compose.yml`.
 * **[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)** installed on the host — this is what actually lets a container see the GPU at all. Verify it works before touching this project at all:
-  ```bash
+```bash
   docker run --rm --gpus all nvidia/cuda:12.8.1-runtime-ubuntu22.04 nvidia-smi
-  ```
+```
   If that doesn't show your GPU, nothing below will work either — fix that first.
 * A locally hosted [Ollama](https://ollama.com) instance if you want AI scene descriptions — this project's Docker setup does **not** include Ollama; point `OLLAMA_URL` in the dashboard Settings at wherever yours runs.
 
 ## Setup
 
 1. **Clone the repo:**
-   ```bash
+```bash
    git clone https://github.com/axeljerabek/IDguard_PRO
    cd IDguard_PRO
-   ```
+```
 
 2. **Create your config:**
-   ```bash
+```bash
    cp config.py.example config.py
-   ```
-   Edit `config.py` — at minimum, set your camera `STREAMS`.
+```
+   No camera setup needed here anymore — cameras are added later, live, in the dashboard under Settings → Cameras. `config.py` itself only needs editing if you want non-default `YOLO_VERSION`/`MODEL_SIZE` starting values.
 
 3. **Pre-create the files Docker needs to bind-mount as files, not folders.** This is the single most important step and the easiest one to skip. If a bind-mounted host path doesn't exist yet, Docker creates a **directory** there instead of a file — and the app will fail to open it (or, for the YOLO model file specifically, silently skip its own auto-download, since `config.py`'s download check now treats a real empty file correctly, but a whole *directory* where a file was expected is a different, harder failure).
-   ```bash
-   touch pipeline_settings.json stream_overrides.json search_index.db
+```bash
+   touch pipeline_settings.json stream_overrides.json search_index.db streams.json
    touch yolo26x.pt   # match this to whatever YOLO_VERSION/MODEL_SIZE you set in config.py
    mkdir -p alerts logs
-   ```
-   The YOLO model file can stay empty (0 bytes) — the pipeline will detect that and download it properly on first start. `pipeline_settings.json`/`stream_overrides.json` will be filled in the first time you save Settings in the dashboard; `search_index.db` is filled in automatically once search indexing runs.
+```
+   The YOLO model file can stay empty (0 bytes) — the pipeline will detect that and download it properly on first start. `pipeline_settings.json`/`stream_overrides.json`/`streams.json` will be filled in the first time you save Settings/Cameras in the dashboard (an empty `streams.json` just means no cameras configured yet — add your first one in Settings → Cameras); `search_index.db` is filled in automatically once search indexing runs.
 
 4. **Build and start:**
-   ```bash
+```bash
    docker compose up -d --build
-   ```
+```
    First start downloads the base CUDA image, installs everything, and then downloads the YOLO model from inside the container — this can take a while depending on your connection. Watch progress with:
-   ```bash
+```bash
    docker compose logs -f idguard-pipeline
-   ```
+```
 
 5. **Open the dashboard:** `http://<host-ip>:19473`
 
