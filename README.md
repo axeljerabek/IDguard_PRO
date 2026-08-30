@@ -1,6 +1,6 @@
 # IDguard PRO
 
-IDguard PRO watches your cameras, decides what's actually worth recording, saves the event, and — if you want — tells you afterwards in plain words what happened in it, in a way you can later search back through. It does that by chaining several small, specialized models together instead of expecting one AI to handle it all: a YOLO model (v10, v12, or v26 — your choice) watches every frame live and spots the moment something worth recording is happening; an audio model (CLAP) can independently trigger a recording on a sound alone, even with nothing visible in frame; the recording itself then saves the event with a short buffer before and after; a vision-language model (via Ollama) looks at the finished clip afterwards and writes a description of what it saw, plus an optional yes/no read on categories you define yourself; and a small text-embedding model makes all of that searchable by meaning, not just exact words. Each model only does the one job it's good at, and the handoff between them is automatic. Everything runs on your own hardware, with GPU acceleration end to end — decoding, detection, and encoding — no cloud involved.
+IDguard PRO watches your cameras, decides what's actually worth recording, saves the event, and — if you want — tells you afterwards in plain words what happened in it, who was in it, and what was said, in a way you can later search back through. It does that by chaining several small, specialized models together instead of expecting one AI to handle it all: a YOLO model (v10, v12, or v26 — your choice) watches every frame live and spots the moment something worth recording is happening; an audio model (CLAP) can independently trigger a recording on a sound alone, even with nothing visible in frame; the recording itself then saves the event with a short buffer before and after; a vision-language model (via Ollama) looks at the finished clip afterwards and writes a description of what it saw, plus an optional yes/no read on categories you define yourself; a local Whisper model transcribes anything spoken; a face-recognition model groups and (once you name a few) recognizes who's in frame; and a small text-embedding model makes all of that searchable by meaning, not just exact words. Each model only does the one job it's good at, and the handoff between them is automatic. Everything runs on your own hardware, with GPU acceleration end to end — decoding, detection, and encoding — no cloud involved.
 
 Parts of this code was written with AI (Google Gemini, Claude, Claude Code, and local models). But the architecture — deciding how the pieces should fit together, and the work of actually making it all run reliably — was still a person's job.
 
@@ -10,17 +10,17 @@ Short answer: it depends what you want, and it's worth being honest about that u
 
 **[Motion](https://motion-project.github.io/) / [MotionEye](https://github.com/motioneye-project/motioneye)** trigger on pixel differences between frames. That's the classic approach, it's been reliable for decades, and it genuinely doesn't know *what* changed — a cloud shadow, headlights, a moth near the lens, and an actual intruder all look the same to it: "pixels changed." IDguard PRO's whole starting point was replacing that with an actual object detector as the trigger, so a recording only starts when something you've told it to care about is actually there.
 
-**[Frigate](https://frigate.video/)** is the closer, and frankly more mature, comparison — it already does AI object detection as the trigger, and (worth saying plainly, since I didn't want to write this without checking) its recent versions have their own semantic search (CLIP/Jina embeddings) and an optional generative-AI scene description, which is functionally similar to two of IDguard PRO's pieces. Frigate is also a considerably bigger project at this point: face recognition, license plate reading, a much wider hardware-acceleration matrix (Coral, Hailo, Intel iGPU, Apple Silicon, NVIDIA), an active community, and a paid model fine-tuning service if the stock accuracy isn't enough for you.
+**[Frigate](https://frigate.video/)** is the closer, and frankly more mature, comparison — it already does AI object detection as the trigger, and (worth saying plainly, since getting this wrong once already taught me to check before writing it down) its recent versions have their own semantic search (CLIP/Jina embeddings), generative-AI scene descriptions, speech transcription (Whisper), *and* face recognition — functionally overlapping with most of what's described below. Frigate is also a considerably bigger and more mature project: license plate reading, a much wider hardware-acceleration matrix (Coral, Hailo, Intel iGPU, Apple Silicon, NVIDIA), an active community, and a paid model fine-tuning service if the stock accuracy isn't enough for you.
 
-So the honest positioning isn't "better than Frigate." It's a smaller, single-purpose project that makes a few different choices, useful to know about if any of these actually matter for your setup:
+So the honest positioning isn't "does things Frigate can't." Most of what's below, Frigate can also do at this point, often with a bigger community behind it and more hardware options. What's genuinely different is more about shape than capability:
 
-* **Audio as an independent trigger, not just a search aid.** CLAP listens continuously and can start a recording on sound alone — with nothing in frame — matched against categories you type yourself (`glass breaking`, `whispering`, `drawer opening`, whatever), not a fixed pretrained class list. This is the one piece I haven't found in the more established tools in this space.
-* **User-defined topic classification, not just free-text search.** Beyond describing a scene, you can hand the vision model your own categories — `break-in`, `accident`, `mail carrier` — and get a yes/no-with-confidence read per category, saved to the sidecar metadata and searchable, not just a description you have to search through afterward.
+* **Audio as an independent trigger, not just an enrichment.** CLAP listens continuously and can start a recording on sound alone — with nothing in frame — matched against categories you type yourself (`glass breaking`, `whispering`, `drawer opening`, whatever), not a fixed pretrained class list. Frigate's audio features are closer to detection-and-transcription of what's already being recorded rather than an independent *trigger source* in this specific sense — worth checking their current docs if this distinction matters to you, since this space moves fast.
+* **User-defined topic classification.** Beyond describing a scene, you can hand the vision model your own categories — `break-in`, `accident`, `mail carrier` — and get a yes/no-with-confidence read per category, saved to sidecar metadata and searchable.
 * **A one-line "why did this trigger" readout** on every recording — which detector fired, what it saw, at what confidence, whether it was the camera or the microphone — instead of having to infer it from the clip itself.
 * **A single-box, GPU-heavy design point.** Built and tuned around one well-specced GPU (RTX 2060 through RTX 5090) rather than spreading detection across many cheap accelerators — the right trade-off if you already have a capable box and would rather not manage a Coral/Hailo fleet.
 * **Small enough to read start to finish.** No plugin ecosystem, no paid tier, no protocol integrations to reason about — if you want to know exactly what a self-hosted camera pipeline is doing with your video, there's a lot less of it to read here than in a project with years of accumulated features.
 
-If you want a mature, broadly-hardware-compatible NVR with a big feature set and a real community behind it, Frigate is very likely the better choice today. If you want the smaller, single-purpose version of the same idea — or you're specifically after audio-based triggering or user-defined topic classification — that's what this is for.
+If you want a mature, broadly-hardware-compatible NVR with a big feature set and a real community behind it, Frigate is very likely the better choice today — including for face recognition and transcription specifically, where it now has a head start on real-world testing. If you want the smaller, single-purpose version of the same idea, tuned around one strong GPU rather than a device fleet — that's what this is for.
 
 ## Overview
 
@@ -43,11 +43,11 @@ The core mission of IDguard PRO is to act as an intelligent edge-computing senti
 
 ### Optional AI Scene Description & Topic Classification (Ollama)
 * After a recording finishes, IDguard PRO can optionally hand the large filmstrip frames to a locally hosted **Ollama** vision model and have it describe what happened in the clip in plain language.
-* **Topic classification:** define your own categories in Settings — `break-in`, `accident`, `mail carrier`, anything — and the vision model gives each a 0–100 match score for the scene. The best match above your threshold is shown next to the description, saved into the sidecar metadata (including as searchable XMP keywords), and semantically searchable. Worth saying plainly: this score is the model's own self-reported guess via a prompt, not a calibrated probability like the detection confidence elsewhere in the pipeline — treat it as a useful sort/filter signal, not a certainty.
+* **Topic classification:** define your own categories in Settings — `break-in`, `accident`, `mail carrier`, anything — and the vision model gives each a 0–100 match score for the scene. All categories above your threshold are shown next to the description (not just the top one), saved into the sidecar metadata (including as searchable XMP keywords), and semantically searchable. Worth saying plainly: this score is the model's own self-reported guess via a prompt, not a calibrated probability like the detection confidence elsewhere in the pipeline — treat it as a useful sort/filter signal, not a certainty.
 * **Model picker with tested presets** in Settings, plus a free-text "Custom model…" option for anything else pulled into Ollama. Note: Ollama has no native video-file input — every model, regardless of which one you pick, receives the same image sequence (the filmstrip frames), never the raw video.
 * A **live Ollama-connectivity badge** in Settings shows at a glance whether the configured endpoint is reachable, so a misconfigured URL or a down container is visible without needing to open a terminal.
 * The result is written both as a small JSON file (shown directly in the dashboard, next to Recent Recordings and Archive) and as an XMP sidecar file for compatibility with photo/video managers like **Immich**.
-* A manual **re-analyze button** per recording (and a visible "Analyzing…" state while it's running) — useful for re-running with a different model, or for older recordings from before AI analysis was enabled.
+* A manual **re-analyze button** per recording (also re-runs transcription and face recognition if those are enabled — one button re-triggers everything post-processing–related for that event) and a visible "Analyzing…" state while it's running.
 * Fully optional and off by default — no Ollama instance required unless you turn it on.
 
 ### Audio Trigger (CLAP)
@@ -56,19 +56,34 @@ The core mission of IDguard PRO is to act as an intelligent edge-computing senti
 * Runs in its own background thread per camera — the (comparatively slow) audio classification can never block or delay the recording pipeline itself, even on a slow or missing GPU.
 * Off by default; enabling/disabling and editing categories takes effect live, no restart needed.
 
+### Speech Transcription (Whisper)
+* Transcribes spoken audio from each recording using a locally-run [faster-whisper](https://github.com/SYSTRAN/faster-whisper) model (`tiny` through `large-v3`, selectable in Settings) — separate from the audio trigger above, since CLAP only recognizes sound *categories* ("whispering"), not actual words.
+* GPU-accelerated with automatic CPU fallback; language auto-detected by default, or pinnable in Settings.
+* Runs as part of the same post-recording pipeline stage as the AI description and topic classification — all three are coordinated to run one after another (not in parallel) specifically so they can't clobber each other's entry in the same sidecar metadata file.
+* Transcript is saved to the sidecar metadata and is semantically searchable, exactly like the AI description.
+* Off by default.
+
+### Face Recognition (InsightFace)
+* Detects faces in each recording (on the same filmstrip frames the AI description stage already uses — no extra frame extraction), extracts a face embedding per detection, and automatically matches it against any already-named people.
+* **Model pack is your choice** in Settings: `buffalo_s` (fastest) up through `buffalo_l`, or `antelopev2` (largest). All via [InsightFace](https://github.com/deepinsight/insightface), running fully locally.
+* Faces that don't match anyone yet are grouped by **DBSCAN clustering** (cosine distance over the face embeddings) — no need to tell it how many people to expect in advance, and it won't force an odd one-off face into a group it doesn't belong in.
+* A dedicated **People** section in the dashboard shows named people (with a representative photo and face count, click to expand and review every face assigned to them) and any newly-clustered, not-yet-named groups you can name or merge into an existing person.
+* **Fully correctable, at the individual-face level** — a wrongly grouped photo can be pulled out of a person (goes back into the unlabeled pool) without affecting the rest of that person's faces, and a false detection (something that isn't actually a face) can be rejected outright so it stops showing up anywhere.
+* Off by default.
+
 ### Semantic Search
-* A search bar over Recent Recordings finds events by their AI-generated descriptions and detected topics — both by exact text match and by **meaning**, so "person carrying a box" also finds a description that says "individual holding a package."
+* A search bar over Recent Recordings finds events by their AI-generated descriptions, detected topics, **and now transcribed speech** — both by exact text match and by **meaning**, so "person carrying a box" also finds a description that says "individual holding a package."
 * Semantic matching is powered by a small local sentence-embedding model (`all-MiniLM-L6-v2`), stored in a lightweight SQLite index — no external vector database needed at the scale a self-hosted camera system runs at.
 * Falls back to plain text search automatically if the embedding model isn't installed — search stays usable either way.
 * Search results mix current and archived recordings in one list, each still fully actionable (archive/delete/re-analyze/export) from the results themselves.
 
 ### Export
-* Bundles a recording — video, trigger screenshot, all sidecar metadata (AI description, topics, XMP), and the full filmstrip folder — into one clearly named folder: `Event_<Camera>_<Timestamp> Topic_<Topic>` (the topic suffix only appears if one was detected).
+* Bundles a recording — video, trigger screenshot, all sidecar metadata (AI description, topics, transcript, XMP), and the full filmstrip folder — into one clearly named folder: `Event_<Camera>_<Timestamp> Topic_<Topic>` (the topic suffix only appears if one was detected).
 * Destination is one setting: a **local path** copies directly, a **remote `user@host:/path`** uses `rsync` instead. Remote export assumes passwordless SSH key access is already set up between the two machines — this can't configure that part for you.
 * Off by default (no Export button shown) until a destination is configured in Settings.
 
 ### Web Dashboard
-* **CCTV-style layout:** a slim pipeline control bar up top, live camera previews and Recent Recordings front and center, with Settings, Hardware/System Status, Log, and Archive tucked into collapsible sections out of the way.
+* **CCTV-style layout:** a slim pipeline control bar up top, live camera previews and Recent Recordings front and center, with Settings, Hardware/System Status, People, Log, and Archive tucked into collapsible sections out of the way.
 * **Cameras managed entirely in the dashboard:** add, edit, or remove cameras (name + RTMP/RTSP URL) from Settings → Cameras — no more hand-editing `config.py` to change your camera list.
 * **Live previews:** per-camera thumbnails and a full live view, with a configurable refresh rate (0.5–5 fps slider) — disabled or unreachable cameras simply show nothing instead of flickering broken-image icons.
 * **REC indicators everywhere:** a live badge on any camera thumbnail currently recording, plus the browser tab title itself switches to "🔴 REC · IDguard PRO" while any camera is active — visible even from a background tab.
@@ -88,6 +103,7 @@ The core mission of IDguard PRO is to act as an intelligent edge-computing senti
 * **`backfill_thumbnails.py`:** grabs a frame (via ffmpeg) for older recordings from before the thumbnail feature existed — no detection boxes possible for these (the original inference data is long gone), but at least a visual reference instead of a blank entry.
 * **`backfill_filmstrips.py`:** extracts filmstrip frames (via ffmpeg, evenly spread across the actual video length) for older recordings that predate the filmstrip feature — same format as live-captured filmstrips, so hover-scrub and AI analysis work on them too. Optional `--analyze` flag chains straight into `ai_analyze.py` per video.
 * **`backfill_search_index.py`:** indexes any existing `.ai.json` descriptions into the search database — for descriptions generated before the search feature existed, or after rebuilding the index.
+* **`cluster_faces.py`:** runs the DBSCAN face-grouping pass on demand (also available as a button in the dashboard's People section) — matches unassigned faces against known people first, then groups whatever's left.
 
 None of these touch the live pipeline — safe to run anytime, and safe to re-run (they skip anything already processed).
 
@@ -102,6 +118,15 @@ IDguard PRO lets you switch the detection backend per deployment. Here's how the
 | **YOLO26** | Best all-round default, especially on constrained hardware | Natively end-to-end (NMS-free, like v10) *and* removes Distribution Focal Loss (DFL) entirely — a simplification neither v10 nor v12 has | Up to ~43% faster CPU inference than the previous Ultralytics generation, deployment-first design; newest of the three, so less battle-tested in the wild |
 
 **Rule of thumb:** YOLO26 is the sensible default for most setups. Reach for YOLOv10 if you want the simplest, most predictable latency profile. Reach for YOLOv12 only if you have GPU headroom to burn and accuracy matters more than efficiency.
+
+## Face Recognition Model Comparison
+
+| Model Pack | Best for | Trade-offs |
+| :--- | :--- | :--- |
+| **buffalo_s** | Fastest, lowest resource use | Smallest detection/recognition backbone — fine for well-lit, front-facing faces; may miss more at odd angles or in poor light |
+| **buffalo_m** | Balanced default | Middle ground on speed vs. accuracy |
+| **buffalo_l** | Best accuracy of the buffalo packs | Larger models, more compute per frame |
+| **antelopev2** | Highest accuracy overall | Largest and slowest of the four; also the only pack with a known packaging quirk (its release archive unpacks into a nested folder InsightFace's own loader doesn't expect) — IDguard PRO detects and fixes this automatically on first load, but it's a good example of why this pack needs a bit more patience on first run |
 
 ## Hardware Requirements
 
@@ -120,6 +145,8 @@ IDguard PRO lets you switch the detection backend per deployment. Here's how the
 * **Web Framework:** Flask
 * **Optional AI Analysis:** [Ollama](https://ollama.com) (any vision-capable model — `llava` recommended as a reliable default, with a model picker for others)
 * **Optional Audio Trigger:** [CLAP](https://github.com/LAION-AI/CLAP) (`laion/clap-htsat-unfused`, via `transformers`)
+* **Optional Speech Transcription:** [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
+* **Optional Face Recognition:** [InsightFace](https://github.com/deepinsight/insightface) (buffalo_s/m/l, antelopev2) + `onnxruntime`, with `scikit-learn` (DBSCAN) for clustering
 * **Optional Semantic Search:** `sentence-transformers` (`all-MiniLM-L6-v2`) with a SQLite index for storage
 * **Export:** Local filesystem copy or `rsync` for remote destinations
 * **Process Management:** Threading, multiprocessing, and subprocess modules
@@ -130,11 +157,16 @@ Detailed installation steps, including virtual environment setup and dependency 
 
 ## Project Structure
 
-* `web_ui.py`: Flask web dashboard — routes, settings, camera management, event/thumbnail/filmstrip serving, log/health endpoints, Ollama connectivity check, search API, export.
+* `web_ui.py`: Flask web dashboard — routes, settings, camera management, event/thumbnail/filmstrip serving, log/health endpoints, Ollama connectivity check, search API, export, People (face recognition) API.
 * `recorder_pipeline.py`: Core detection and recording logic — one process per camera, GPU-aware startup, filmstrip capture, shared live-preview frames, optional detection-box overlays, audio-trigger integration.
+* `postprocess.py`: Entry point for all post-recording processing — runs AI description/topics, transcription, and face recognition sequentially (not in parallel) for a finished recording, specifically so none of them race on the same sidecar metadata file.
 * `ai_analyze.py`: Optional post-recording AI scene analysis and topic classification via Ollama; writes dashboard metadata + Immich XMP sidecar; indexes the description and topics for search.
 * `audio_trigger.py`: Optional CLAP-based audio trigger — runs in its own background thread per camera, never blocks recording.
-* `search_index.py`: SQLite-backed search index — full-text + semantic (sentence-transformers) matching over AI descriptions and topics.
+* `transcribe_audio.py`: Optional Whisper-based speech transcription of a finished recording's audio track.
+* `face_recognize.py`: Optional face detection + embedding extraction (InsightFace) on a finished recording's filmstrip frames, with automatic matching against already-named people.
+* `faces_db.py`: SQLite storage for detected faces, named people, and their centroid embeddings.
+* `cluster_faces.py`: On-demand DBSCAN grouping of unassigned faces (also triggerable from the dashboard's People section).
+* `search_index.py`: SQLite-backed search index — full-text + semantic (sentence-transformers) matching over AI descriptions, topics, and transcripts.
 * `backfill_thumbnails.py`, `backfill_filmstrips.py`, `backfill_search_index.py`: Standalone utilities to retroactively generate thumbnails/filmstrips/search entries for older recordings.
 * `helpers.py`: Shared utilities for the dashboard — settings/override I/O, live-preview frame handling (reuses the pipeline's own decode when it's running).
 * `config.py`: System-wide configuration, race-safe model auto-download, and defensive settings validation. Camera list lives in `streams.json` (dashboard-managed), not here.
@@ -142,9 +174,9 @@ Detailed installation steps, including virtual environment setup and dependency 
 * `start_detached.sh`, `stop.sh`: Pipeline lifecycle scripts with duplicate-instance and graceful-shutdown handling.
 * `watchdog.sh`: Optional cron-friendly health check + auto-restart for the web dashboard.
 * `Dockerfile`, `docker-compose.yml`: Optional containerized setup — see [DOCKER.md](./DOCKER.md).
-* `alerts/`: Recorded event MP4s, trigger screenshots + confidence metadata, and filmstrip/AI metadata (auto-generated). Includes an `archive/` subfolder for permanently kept recordings.
+* `alerts/`: Recorded event MP4s, trigger screenshots + confidence metadata, and filmstrip/AI metadata (auto-generated), including detected face crops. Includes an `archive/` subfolder for permanently kept recordings.
 * `logs/`: Application and system logs for debugging and auditing — also viewable directly in the dashboard.
-* `search_index.db`, `streams.json`, `pipeline_settings.json`, `stream_overrides.json`: Local, gitignored runtime data — camera list, live settings, and the search database.
+* `search_index.db`, `faces.db`, `streams.json`, `pipeline_settings.json`, `stream_overrides.json`: Local, gitignored runtime data — camera list, live settings, and the search/face databases.
 
 ## Tested Hardware & Configurations
 
@@ -159,7 +191,7 @@ The system has been thoroughly tested and runs rock-solid across both compact ed
 
 ## Acknowledgements & Citation
 
-This project utilizes [YOLOv10](https://github.com/THU-MIG/yolov10), [YOLOv12](https://github.com/sunsmarterjie/yolov12), and YOLO26, and is powered by the [Ultralytics](https://github.com/ultralytics/ultralytics) framework for real-time object detection. Optional scene analysis and topic classification are powered by [Ollama](https://ollama.com), optional audio triggering by [CLAP](https://github.com/LAION-AI/CLAP), and optional semantic search by [sentence-transformers](https://www.sbert.net/).
+This project utilizes [YOLOv10](https://github.com/THU-MIG/yolov10), [YOLOv12](https://github.com/sunsmarterjie/yolov12), and YOLO26, and is powered by the [Ultralytics](https://github.com/ultralytics/ultralytics) framework for real-time object detection. Optional scene analysis and topic classification are powered by [Ollama](https://ollama.com), optional audio triggering by [CLAP](https://github.com/LAION-AI/CLAP), optional speech transcription by [faster-whisper](https://github.com/SYSTRAN/faster-whisper), optional face recognition by [InsightFace](https://github.com/deepinsight/insightface), and optional semantic search by [sentence-transformers](https://www.sbert.net/).
 
 If you use this repository, please consider citing the original YOLOv10 paper:
 
@@ -174,4 +206,4 @@ If you use this repository, please consider citing the original YOLOv10 paper:
 
 ## Disclaimer
 
-This software is intended for educational and private security purposes. Users are responsible for ensuring that their use of surveillance technology — including the optional AI scene-description and topic-classification features — complies with all local, regional, and international laws regarding privacy and data protection.
+This software is intended for educational and private security purposes. Users are responsible for ensuring that their use of surveillance technology — including the optional AI scene-description, topic-classification, speech-transcription, and face-recognition features — complies with all local, regional, and international laws regarding privacy and data protection. Face recognition and speech transcription in particular carry meaningfully higher privacy stakes than object detection alone; check what your jurisdiction requires (consent, signage, retention limits) before enabling them.
