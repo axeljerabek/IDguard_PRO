@@ -1,0 +1,77 @@
+# IDguard PRO - docker-compose.yml
+#
+# Zwei Services aus demselben Image (nur unterschiedliches command:) — die
+# Aufnahme-Pipeline und das Web-Dashboard sind schon im Code als zwei
+# getrennte, unabhängig lauffähige Prozesse angelegt.
+#
+# WICHTIG: braucht das NVIDIA Container Toolkit auf dem Host
+# (https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+# und den modernen "docker compose" V2-Plugin-Befehl (ohne Bindestrich).
+# Mit dem alten, eigenständigen "docker-compose" (V1) wird die
+# GPU-Reservierung unten bei manchen Setups nicht zuverlässig durchgereicht —
+# in dem Fall stattdessen `runtime: nvidia` + `NVIDIA_VISIBLE_DEVICES=all`
+# als Environment-Variable verwenden (siehe auskommentierte Zeilen unten).
+#
+# Ollama läuft bewusst NICHT mit in diesem Compose-Stack — falls ihr wie
+# Axel schon eine eigene, separate Ollama-Instanz mit vielen Modellen habt,
+# einfach OLLAMA_URL in den Dashboard-Settings drauf zeigen lassen.
+
+x-gpu: &gpu-config
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu, utility, video]
+            # gpu+compute: für YOLO/CLAP-Inferenz
+            # utility: für nvidia-smi (Hardware-Status im Dashboard)
+            # video: für NVENC/NVDEC
+  # Fallback für ältere/eigenständige docker-compose-Installationen, falls
+  # obige Reservierung bei euch nicht greift (auskommentiert lassen, bis
+  # ihr das braucht):
+  # runtime: nvidia
+  # environment:
+  #   - NVIDIA_VISIBLE_DEVICES=all
+  #   - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
+
+services:
+  idguard-pipeline:
+    build: .
+    image: idguard-pro:latest
+    container_name: idguard-pipeline
+    command: ["python3", "recorder_pipeline.py"]
+    restart: unless-stopped
+    network_mode: host   # lokale RTMP-Kameras im Heimnetz — kein Port-Mapping-Gefrickel
+    <<: *gpu-config
+    volumes:
+      - ./config.py:/app/config.py
+      - ./pipeline_settings.json:/app/pipeline_settings.json
+      - ./stream_overrides.json:/app/stream_overrides.json
+      - ./alerts:/app/alerts
+      - ./logs:/app/logs
+      - ./search_index.db:/app/search_index.db
+      - model-cache:/root/.cache/huggingface       # CLAP/sentence-transformers, einmalig heruntergeladen
+      - ultralytics-cache:/root/.config/Ultralytics # YOLO-Modell-Konfiguration
+      - ./yolo26x.pt:/app/yolo26x.pt                # an eure YOLO_VERSION/MODEL_SIZE-Wahl anpassen
+
+  idguard-web:
+    build: .
+    image: idguard-pro:latest
+    container_name: idguard-web
+    command: ["python3", "web_ui.py"]
+    restart: unless-stopped
+    network_mode: host   # Dashboard unter http://<host>:19473
+    <<: *gpu-config       # nur für die nvidia-smi-Statusanzeige, keine eigene Inferenz
+    volumes:
+      - ./config.py:/app/config.py
+      - ./pipeline_settings.json:/app/pipeline_settings.json
+      - ./stream_overrides.json:/app/stream_overrides.json
+      - ./alerts:/app/alerts
+      - ./logs:/app/logs
+      - ./search_index.db:/app/search_index.db
+      - model-cache:/root/.cache/huggingface
+
+volumes:
+  model-cache:
+  ultralytics-cache:

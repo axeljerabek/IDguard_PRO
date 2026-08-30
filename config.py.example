@@ -88,7 +88,13 @@ if os.path.exists(SETTINGS_F):
 #      je eine halb geschriebene Datei
 MODEL_MIN_BYTES = 1_000_000  # 1 MB — großzügige Untergrenze, jedes echte YOLO-.pt ist deutlich größer
 
-if not os.path.exists(MODEL_PATH):
+if not os.path.exists(MODEL_PATH) or os.path.getsize(MODEL_PATH) < MODEL_MIN_BYTES:
+    # Größen-Check hier (nicht nur nach dem Download) ist bewusst: eine leere
+    # oder unvollständige Datei soll als "muss heruntergeladen werden" zählen.
+    # Wichtig z.B. für Docker-Bind-Mounts — mountet man einen Host-Pfad, der
+    # noch nicht existiert, auf eine einzelne Datei, würde Docker sonst ein
+    # Verzeichnis anlegen; per `touch` vorab als leere Datei angelegt, würde
+    # ein reiner Existenz-Check den Download fälschlich überspringen.
     print(f"📥 Modell '{MODEL_FILENAME}' (YOLO {YOLO_VERSION} - {MODEL_SIZE}) nicht gefunden. Lade herunter...")
     tmp_path = f"{MODEL_PATH}.part-{os.getpid()}"
     try:
@@ -106,11 +112,12 @@ if not os.path.exists(MODEL_PATH):
                 f"vermutlich keine gültige Modelldatei (falsche URL / Fehlerseite?)."
             )
 
-        if not os.path.exists(MODEL_PATH):
+        if not os.path.exists(MODEL_PATH) or os.path.getsize(MODEL_PATH) < MODEL_MIN_BYTES:
             os.replace(tmp_path, MODEL_PATH)  # atomar, kein Prozess sieht eine halbe Datei
             print("✅ YOLO-Modell erfolgreich heruntergeladen.")
         else:
-            # Ein paralleler Prozess war schneller fertig — unsere Kopie verwerfen.
+            # Ein paralleler Prozess war schneller fertig (echte Datei, nicht nur
+            # eine leere touch-Datei) — unsere Kopie verwerfen.
             os.remove(tmp_path)
             print("ℹ️ Modell wurde inzwischen von einem anderen Prozess fertig heruntergeladen.")
     except Exception as e:
@@ -122,15 +129,27 @@ if not os.path.exists(MODEL_PATH):
             except OSError:
                 pass
 
-# Stream Configuration Base
-STREAMS = [
-    {"name": "Entrance", "url":  "rtmp://172.168.178.25/pi/test", "enabled": True, "type": "VIDEO"},
-    {"name": "Backdoor",  "url":  "rtmp://172.168.178.25/zero/test", "enabled": True, "type": "VIDEO"},
-    {"name": "Garden",   "url":  "rtmp://172.168.178.25/mevo/test", "enabled": False, "type": "VIDEO"},
-    {"name": "Carport",   "url":  "rtmp://172.168.178.25/zero2/test", "enabled": False, "type": "VIDEO"}
-]
+# Stream Configuration: bevorzugt aus streams.json (per Dashboard-GUI
+# verwaltet, siehe Settings -> Cameras) — kein Bearbeiten dieser Datei mehr
+# nötig, um Kameras hinzuzufügen/zu entfernen. Der Platzhalter unten greift
+# nur, wenn noch keine streams.json existiert (frische Installation, bevor
+# im Dashboard das erste Mal gespeichert wurde).
+STREAMS_F = os.path.join(PROJECT_ROOT, "streams.json")
 
-# Web-UI Stream Overrides anwenden
+STREAMS = [
+    {"name": "Example_Camera", "url": "rtmp://192.168.1.50/live/stream", "enabled": False, "type": "VIDEO"}
+]
+if os.path.exists(STREAMS_F):
+    try:
+        with open(STREAMS_F, 'r') as f:
+            loaded_streams = json.load(f)
+        if isinstance(loaded_streams, list) and loaded_streams:
+            STREAMS = loaded_streams
+    except Exception as e:
+        print(f"Streams-Konfigurationsfehler: {e}")
+
+# Web-UI Stream Overrides anwenden (Ein/Aus-Umschalter pro Kamera im
+# Dashboard, unabhängig von der vollen Kamera-Bearbeitung oben)
 if os.path.exists(OVERRIDE_F):
     try:
         with open(OVERRIDE_F, 'r') as f:

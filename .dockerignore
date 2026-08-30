@@ -1,0 +1,23 @@
+# Persistente Daten gehören als Volumes gemountet, nicht ins Image gebacken
+alerts/
+logs/
+search_index.db
+*.pt
+
+# Lokale Entwicklungsumgebung
+.venv/
+venv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+
+# Lokale Konfiguration — wird als Volume gemountet, nicht mitkopiert
+# (verhindert außerdem, dass eigene Kamera-URLs versehentlich im Image landen,
+# falls das Image mal geteilt/gepusht wird)
+config.py
+pipeline_settings.json
+stream_overrides.json
+
+# Modell-Caches — werden als benannte Volumes gehalten, nicht ins Image
+.cache/
