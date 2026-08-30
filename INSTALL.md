@@ -2,6 +2,8 @@
 
 This document describes the process of installing `IDguard PRO` on a new Linux system (optimized for NVIDIA GPU setups).
 
+> **Looking for the fastest path instead?** See [DOCKER.md](./DOCKER.md) for a Docker-based install — no venv, no manual Python/CUDA setup, just Docker + the NVIDIA Container Toolkit. The steps below are for a bare-metal install (venv, `init_venv.sh`, system packages) — pick one or the other, not both.
+
 ## 1. Prerequisites
 
 Before proceeding with the Python installation, your system must provide the necessary hardware foundations:
@@ -28,6 +30,8 @@ cd IDguard_PRO
 
 To keep your system clean, we use an isolated virtual environment (`.venv`). This prevents conflicts with other Python packages on your machine.
 
+> **Shortcut:** `init_venv.sh` does steps 3 and 4 below in one go (creates the venv fresh and installs everything from `requirements.txt`). Run `bash init_venv.sh` and skip ahead to [Section 5](#5-configuration-crucial) if you'd rather not do this by hand.
+
 1.  **Create the venv:**
     ```bash 
     python3 -m venv .venv
@@ -40,17 +44,10 @@ To keep your system clean, we use an isolated virtual environment (`.venv`). Thi
 
 ## 4. Install Dependencies
 
-This installs the AI models (Ultralytics/YOLO) and the web components. Thanks to `requirements.txt`, most of this is automated — **but PyTorch needs one extra, explicit step**, since a plain `pip install torch` from PyPI does not reliably give you a build with full CUDA support for current-generation GPUs.
+This installs the AI models (Ultralytics/YOLO) and the web components. `requirements.txt` already pins PyTorch's index URL to the CUDA 12.8 wheels at the top of the file, so a plain install pulls in a CUDA-capable build directly — no separate PyTorch step needed:
 
 ```bash
-# First, upgrade pip itself
 pip install --upgrade pip
-
-# Install PyTorch with CUDA 12.8 support EXPLICITLY (needed for Blackwell/RTX 50-series;
-# also works fine on older cards down to Turing/RTX 20-series — one wheel covers both).
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
-
-# Then install the rest of the project dependencies
 pip install -r requirements.txt
 ```
 
@@ -63,6 +60,10 @@ If you want the optional "describe what happened in this recording" feature, you
 docker exec -it <container-name> ollama pull llava:latest
 ```
 This is entirely optional — IDguard PRO records and detects normally with no Ollama installed at all. Everything related to this (enable/disable, endpoint URL, which model) is configured later, live, in the dashboard under Settings → KI-Videoanalyse.
+
+### Optional: Audio Trigger and Semantic Search (no extra install step)
+
+The audio trigger (CLAP) and semantic search (`sentence-transformers`) packages are already included in `requirements.txt`, so nothing extra to install here. Their actual models (a few hundred MB each) download automatically from Hugging Face the first time you enable and use each feature — not during this install step. Both are off unless you turn them on in Settings.
 
 ## 5. Configuration (Crucial!)
 
