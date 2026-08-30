@@ -13,10 +13,10 @@ Before proceeding with the Python installation, your system must provide the nec
 *   **CUDA Toolkit:** The CUDA toolkit should be available and compatible with your driver (recommended: `12.8` or newer).
 *   **ffmpeg:** Required as a system binary — not just the Python bindings — for on-the-fly video transcoding when you play back a recording in the dashboard (the recording pipeline itself uses PyAV directly and does not need this, but the web UI's playback route does).
 *   **System Packages:** You need Python 3, the venv module, and ffmpeg.
-    ```bash
+```bash
     sudo apt update
     sudo apt install python3 python3-pip python3-venv git ffmpeg -y
-    ```
+```
 
 ## 2. Clone the Repository
 
@@ -33,13 +33,13 @@ To keep your system clean, we use an isolated virtual environment (`.venv`). Thi
 > **Shortcut:** `init_venv.sh` does steps 3 and 4 below in one go (creates the venv fresh and installs everything from `requirements.txt`). Run `bash init_venv.sh` and skip ahead to [Section 5](#5-configuration-crucial) if you'd rather not do this by hand.
 
 1.  **Create the venv:**
-    ```bash 
+```bash 
     python3 -m venv .venv
-    ```
+```
 2.  **Activate the environment:**
-    ```bash
+```bash
     source .venv/bin/activate
-    ```
+```
     *(After activation, you should see `(.venv)` prepended to your terminal prompt.)*
 
 ## 4. Install Dependencies
@@ -67,16 +67,13 @@ The audio trigger (CLAP) and semantic search (`sentence-transformers`) packages 
 
 ## 5. Configuration (Crucial!)
 
-Before starting, you must configure the paths and settings in the environment or via `config.py`:
+Before starting, copy the example config file:
+```bash
+cp config.py.example config.py
+```
+`config.py` itself now needs essentially no editing for a normal setup — it only holds infrastructure paths and, if you want non-default starting values, `YOLO_VERSION`/`MODEL_SIZE`. Everything you'd expect to configure by hand — the **camera list** (add/edit/remove, name + RTMP/RTSP URL), FPS, detection thresholds, thumbnails, retention, theme, AI analysis, and more — is set up **live in the dashboard** after first start (Settings → Cameras is where you add your cameras; see `manual.md` for the full reference of what lives where).
 
-*   Verify that camera paths (`RTSP` or local `/dev/videoX`) are correct.
-*   Ensure the project directory permissions allow writing to `alerts/` and `logs/`.
-*   Copy the config.py.example file to config.py and edit it (stream locations etc):
-    ```bash
-    cp config.py.example config.py
-    ```
-
-`config.py` mainly needs your camera list (`STREAMS`) and, if you want non-default starting values, `YOLO_VERSION`/`MODEL_SIZE`. Almost everything else (FPS, thresholds, detection classes, thumbnails, retention, theme, AI analysis, ...) can be changed afterwards, live, from the dashboard's Settings page without touching this file again — see `manual.md` for the full reference of what lives where.
+Just make sure the project directory permissions allow writing to `alerts/` and `logs/` before starting.
 
 ## 6. Starting the System
 
