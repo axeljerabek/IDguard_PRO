@@ -32,3 +32,5 @@ pipeline_settings.json
 .idea/
 .DS_Store
 v10/
+streams.json
+search_index.db

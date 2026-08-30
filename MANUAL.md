@@ -47,8 +47,8 @@ The `STREAMS` list defines the active cameras. This is the one thing you still e
 **Example Configuration:**
 ```python
 STREAMS = [
-    {"name": "Entrance_Main", "url": "rtmp://192.168.178.25/pi/test", "enabled": True, "type": "VIDEO"},
-    {"name": "Garden_North",  "url": "rtmp://192.168.178.25/garden/live", "enabled": False, "type": "VIDEO"}
+    {"name": "Entrance_Main", "url": "rtmp://192.168.1.50/pi/test", "enabled": True, "type": "VIDEO"},
+    {"name": "Garden_North",  "url": "rtmp://192.168.1.50/garden/live", "enabled": False, "type": "VIDEO"}
 ]
 ```
 

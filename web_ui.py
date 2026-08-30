@@ -19,7 +19,7 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 os.chdir(SCRIPT_DIR)
 
-from config import STREAMS, ALERTS_DIR, PROJECT_ROOT, SETTINGS_F, YOLO_VERSION, MODEL_SIZE, MODEL_FILENAME
+from config import STREAMS, STREAMS_F, ALERTS_DIR, PROJECT_ROOT, SETTINGS_F, YOLO_VERSION, MODEL_SIZE, MODEL_FILENAME
 from auth import requires_auth
 from helpers import (
     LATEST_FRAMES, start_thumbnail_thread, is_pipeline_running,
@@ -376,6 +376,29 @@ def get_detailed_system_status():
         'ollama_status': _check_ollama_status(),
     }
 
+def _load_streams_display():
+    """Frische Kamera-Liste fürs Rendern — nicht die beim web_ui.py-Start
+    fixierte STREAMS-Konstante, damit eine gerade gespeicherte Kamera sofort
+    in der GUI auftaucht. Live-Vorschau (helpers.py-Thread) und tatsächliche
+    Aufnahme (recorder_pipeline.py) brauchen trotzdem ihren jeweiligen
+    Prozess-Neustart, um eine neue Kamera wirklich zu bedienen — das kann
+    aus einem laufenden Web-Request heraus nicht sauber selbst ausgelöst
+    werden (würde die eigene Antwort mit abwürgen)."""
+    try:
+        if os.path.exists(STREAMS_F):
+            with open(STREAMS_F) as f:
+                loaded = json.load(f)
+            if isinstance(loaded, list) and loaded:
+                streams_copy = [dict(s) for s in loaded]
+                overrides = load_overrides()
+                for s in streams_copy:
+                    if s.get("name") in overrides:
+                        s["enabled"] = (overrides[s["name"]] == "ON")
+                return streams_copy
+    except Exception:
+        pass
+    return STREAMS
+
 @app.route('/')
 @requires_auth
 def dashboard():
@@ -383,7 +406,8 @@ def dashboard():
     settings = load_settings()
     system_status = get_detailed_system_status()
 
-    streams = [s["name"] for s in STREAMS]
+    streams_full = _load_streams_display()
+    streams = [s["name"] for s in streams_full]
 
     # Konfigurierbare Vorschau-Rate (Grid-Thumbnails + Live-View-Lightbox),
     # per Slider in den Settings zwischen 0.5 und 5 fps einstellbar.
@@ -393,6 +417,7 @@ def dashboard():
     return render_template(
         'dashboard.html',
         streams=streams,
+        streams_full=streams_full,
         overrides=overrides,
         settings=settings,
         available_classes=AVAILABLE_CLASSES,
@@ -661,6 +686,57 @@ def save_pipeline_settings():
         restarted = True
 
     return redirect(url_for('dashboard', saved=1, restarted=int(restarted)))
+
+@app.route('/save_streams', methods=['POST'])
+@requires_auth
+def save_streams():
+    _verify_csrf()
+    names = request.form.getlist('stream_name')
+    urls = request.form.getlist('stream_url')
+    # Ein Hidden-Feld pro Zeile (per Checkbox-onchange auf '0'/'1' gesetzt),
+    # NICHT positions-/index-basiert — bleibt so auch nach dynamischem
+    # Hinzufügen/Entfernen von Zeilen im JS korrekt korreliert.
+    enabled_flags = request.form.getlist('stream_enabled_flag')
+
+    new_streams = []
+    seen_names = set()
+    error = None
+    for name, url, flag in zip(names, urls, enabled_flags):
+        name = name.strip()
+        url = url.strip()
+        if not name or not url:
+            continue  # leere Zeile (z.B. gerade erst per "+ Kamera" hinzugefügt, noch nicht ausgefüllt) überspringen
+        if name in seen_names:
+            error = f"Doppelter Kamera-Name: '{name}' — Namen müssen eindeutig sein."
+            break
+        seen_names.add(name)
+        new_streams.append({
+            "name": name,
+            "url": url,
+            "enabled": flag == '1',
+            "type": "VIDEO"
+        })
+
+    if error:
+        return redirect(url_for('dashboard', stream_error=error))
+    if not new_streams:
+        return redirect(url_for('dashboard', stream_error="At least one camera with a name and URL is required."))
+
+    try:
+        with open(STREAMS_F, 'w') as f:
+            json.dump(new_streams, f, indent=2)
+    except Exception as e:
+        return redirect(url_for('dashboard', stream_error=f"Could not save: {e}"))
+
+    # Kamera-Liste ist immer pipeline-relevant (neue/entfernte CameraAgent-Prozesse) —
+    # anders als die meisten Settings in save_settings() gibt es hier keinen
+    # "live ohne Neustart"-Fall.
+    restarted = False
+    if is_pipeline_running():
+        threading.Thread(target=_restart_pipeline_background, daemon=True).start()
+        restarted = True
+
+    return redirect(url_for('dashboard', streams_saved=1, restarted=int(restarted)))
 
 def _remove_matching_thumbnail(video_path):
     """Löscht Trigger-Screenshot, Filmstrip-Ordner und AI-Metadaten/-Sidecar zu einem Video."""

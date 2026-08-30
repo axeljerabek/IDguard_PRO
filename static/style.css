@@ -651,6 +651,44 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
 }
 
 /* Recent Recordings / Archived Event Lists */
+.stream-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.stream-row input[type="text"] {
+    background: var(--card-bg-inset);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    font-size: 0.88rem;
+}
+.stream-row input[name="stream_name"] { flex: 0 0 140px; }
+.stream-row input[name="stream_url"] { flex: 1; font-family: var(--font-mono); }
+.stream-row-toggle {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    cursor: pointer;
+}
+.stream-row-toggle input { width: auto; }
+.btn-add-camera {
+    background: transparent;
+    border: 1px dashed var(--border);
+    color: var(--text-muted);
+    border-radius: var(--radius-sm);
+    padding: 8px 14px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    width: 100%;
+}
+.btn-add-camera:hover { border-color: var(--primary); color: var(--primary); }
+
 .search-bar {
     display: flex;
     align-items: center;

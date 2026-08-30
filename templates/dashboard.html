@@ -85,6 +85,41 @@
         <!-- Sekundäre Bereiche: aufklappbar, standardmäßig zu -->
         <details class="collapse-card">
             <summary>
+                <span><i class="fa-solid fa-video"></i> Cameras</span>
+                <i class="fa-solid fa-chevron-down chevron"></i>
+            </summary>
+            <div class="collapse-body">
+                <p class="settings-hint" style="margin-top: -4px;">
+                    Add, edit, or remove cameras here — no need to touch <code>config.py</code> anymore.
+                    Saving restarts the recording pipeline automatically so new cameras start being watched
+                    right away. The live preview for a brand-new camera specifically needs the dashboard
+                    itself (<code>web_ui.py</code>) restarted too — everything else (recording, detection)
+                    works immediately.
+                </p>
+                <form action="/save_streams" method="POST" id="streamsForm">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <div id="streamRows">
+                        {% for s in streams_full %}
+                        <div class="stream-row">
+                            <input type="text" name="stream_name" value="{{ s.name }}" placeholder="Name" required>
+                            <input type="text" name="stream_url" value="{{ s.url }}" placeholder="rtmp://192.168.x.x/..." required>
+                            <input type="hidden" name="stream_enabled_flag" value="{{ '1' if s.enabled else '0' }}">
+                            <label class="stream-row-toggle">
+                                <input type="checkbox" {% if s.enabled %}checked{% endif %} onchange="this.previousElementSibling.value = this.checked ? '1' : '0'">
+                                On
+                            </label>
+                            <button type="button" class="btn-delete" onclick="this.closest('.stream-row').remove()" title="Remove camera"><i class="fa-solid fa-trash-can"></i></button>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <button type="button" class="btn-add-camera" onclick="addStreamRow()"><i class="fa-solid fa-plus"></i> Add Camera</button>
+                    <button type="submit" class="btn-save" style="margin-top: 14px;"><i class="fa-solid fa-arrows-rotate"></i> Save Cameras</button>
+                </form>
+            </div>
+        </details>
+
+        <details class="collapse-card">
+            <summary>
                 <span><i class="fa-solid fa-sliders"></i> System Settings</span>
                 <i class="fa-solid fa-chevron-down chevron"></i>
             </summary>
@@ -515,6 +550,23 @@
             v12: ['n', 's', 'm', 'l', 'x'],
             v26: ['n', 's', 'm', 'l', 'x']
         };
+        function addStreamRow() {
+            const container = document.getElementById('streamRows');
+            const div = document.createElement('div');
+            div.className = 'stream-row';
+            div.innerHTML = `
+                <input type="text" name="stream_name" placeholder="Name" required>
+                <input type="text" name="stream_url" placeholder="rtmp://192.168.x.x/..." required>
+                <input type="hidden" name="stream_enabled_flag" value="1">
+                <label class="stream-row-toggle">
+                    <input type="checkbox" checked onchange="this.previousElementSibling.value = this.checked ? '1' : '0'">
+                    On
+                </label>
+                <button type="button" class="btn-delete" onclick="this.closest('.stream-row').remove()" title="Remove camera"><i class="fa-solid fa-trash-can"></i></button>
+            `;
+            container.appendChild(div);
+        }
+
         function onModelPresetChange() {
             const sel = document.getElementById('ollamaModelPreset');
             const custom = document.getElementById('ollamaModelCustom');
@@ -599,6 +651,16 @@
             }
             if (params.get('analyze_error')) {
                 showToast('⚠️ AI analysis not started: ' + params.get('analyze_error'), 6000);
+                window.history.replaceState({}, '', window.location.pathname);
+            }
+            if (params.get('stream_error')) {
+                showToast('⚠️ ' + params.get('stream_error'), 6000);
+                window.history.replaceState({}, '', window.location.pathname);
+            }
+            if (params.get('streams_saved')) {
+                showToast(params.get('restarted') === '1'
+                    ? 'Cameras saved — pipeline restarting…'
+                    : 'Cameras saved.');
                 window.history.replaceState({}, '', window.location.pathname);
             }
         })();
