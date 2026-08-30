@@ -808,6 +808,11 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
     color: var(--primary);
 }
 .event-topic-line i { margin-right: 4px; }
+.event-people-line {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+.event-people-line i { color: var(--primary); margin-right: 4px; }
 .event-ai-desc {
     font-size: 0.82rem;
     color: var(--text);

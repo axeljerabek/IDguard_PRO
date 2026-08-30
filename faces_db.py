@@ -58,6 +58,33 @@ def _unpack(blob):
     return struct.unpack(f"{n}f", blob)
 
 
+def get_faces_summary_for_video(filename):
+    """Für die Event-Karten in Recent/Archived: alle Gesichter DIESES
+    Videos, benannte Personen (mit der konkreten Gesichts-ID aus diesem
+    Video, nicht dem allgemeinen Titelbild der Person) getrennt von der
+    reinen Anzahl noch unbenannter Erkennungen."""
+    try:
+        conn = _connect()
+        named = conn.execute("""
+            SELECT p.id, p.name, MIN(f.id) as face_id
+            FROM faces f JOIN people p ON p.id = f.person_id
+            WHERE f.filename = ? AND f.rejected = 0
+            GROUP BY p.id, p.name
+        """, (filename,)).fetchall()
+        unnamed_count = conn.execute("""
+            SELECT COUNT(*) FROM faces
+            WHERE filename = ? AND rejected = 0 AND person_id IS NULL
+        """, (filename,)).fetchone()[0]
+        conn.close()
+        return {
+            "people": [{"id": r[0], "name": r[1], "face_id": r[2]} for r in named],
+            "unnamed_count": unnamed_count
+        }
+    except Exception as e:
+        print(f"⚠️ Konnte Gesichts-Zusammenfassung für Video {filename} nicht laden: {e}")
+        return {"people": [], "unnamed_count": 0}
+
+
 def get_face(face_id):
     """Ein einzelnes Gesicht per ID nachschlagen — z.B. um dessen Bild-Datei
     auszuliefern, ohne dass der Aufrufer die interne DB-Verbindung anfassen muss."""

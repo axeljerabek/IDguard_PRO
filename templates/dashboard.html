@@ -1205,6 +1205,16 @@
                         topicList.map(t => `${escapeHtml(t.topic)}${t.score != null ? ` (${Math.round(t.score)}%)` : ''}`).join(', ')
                       }</span>`
                     : '';
+                const peopleParts = [];
+                if (ev.people_in_video && ev.people_in_video.length) {
+                    peopleParts.push(ev.people_in_video.map(p => escapeHtml(p.name)).join(', '));
+                }
+                if (ev.unrecognized_face_count) {
+                    peopleParts.push(`${ev.unrecognized_face_count} unrecognized face${ev.unrecognized_face_count === 1 ? '' : 's'}`);
+                }
+                const peopleLine = peopleParts.length
+                    ? `<span class="event-people-line"><i class="fa-solid fa-user"></i> ${peopleParts.join(' + ')}</span>`
+                    : '';
                 const analyzeUrl = (isArchived ? '/analyze/archive/' : '/analyze/') + fn;
                 const showAnalyzeBtn = (ev.filmstrip_count || 0) > 0 && !ev.ai_pending;
                 const analyzeBtn = showAnalyzeBtn
@@ -1257,6 +1267,7 @@
                             </span>
                             ${triggerLine}
                             ${topicLine}
+                            ${peopleLine}
                             ${aiLine}
                             ${transcriptLine}
                         </div>

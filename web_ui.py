@@ -199,6 +199,12 @@ def _event_from_file(f):
                 audio_trigger_conf = tmeta.get('audio_confidence')
             except Exception:
                 pass
+        faces_summary = {'people': [], 'unnamed_count': 0}
+        if faces_db is not None:
+            try:
+                faces_summary = faces_db.get_faces_summary_for_video(os.path.basename(f))
+            except Exception:
+                pass
         return {
             'filename': os.path.basename(f),
             'datetime': datetime.fromtimestamp(mtime).strftime('%d.%m.%Y %H:%M'),
@@ -215,7 +221,9 @@ def _event_from_file(f):
             'trigger_confidence': trigger_conf,
             'trigger_class': trigger_cls,
             'audio_trigger_label': audio_trigger_label,
-            'audio_trigger_confidence': audio_trigger_conf
+            'audio_trigger_confidence': audio_trigger_conf,
+            'people_in_video': faces_summary['people'],
+            'unrecognized_face_count': faces_summary['unnamed_count']
         }
     except OSError:
         return None
