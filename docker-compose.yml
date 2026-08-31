@@ -1,8 +1,15 @@
 # IDguard PRO - docker-compose.yml
 #
-# Zwei Services aus demselben Image (nur unterschiedliches command:) — die
-# Aufnahme-Pipeline und das Web-Dashboard sind schon im Code als zwei
-# getrennte, unabhängig lauffähige Prozesse angelegt.
+# EIN Service, nicht zwei. Das war ursprünglich als zwei getrennte Container
+# aufgeteilt (Pipeline + Dashboard) — das ist falsch und wurde korrigiert:
+# web_ui.py startet/stoppt recorder_pipeline.py über start_detached.sh /
+# stop.sh als eigenen KINDPROZESS (nicht über eine Netzwerk-Schnittstelle
+# o.ä.) — das funktioniert nur, wenn beide im selben Prozess-Namespace
+# laufen. Mit zwei getrennten Containern sieht web_ui.py die Pipeline gar
+# nicht: der Start/Stop-Button im Dashboard geht ins Leere, und die
+# Pipeline lief in ihrem eigenen Container stattdessen unkontrolliert von
+# Anfang an durch, ohne echte Kamera-Konfiguration mitzubekommen, die man
+# erst später über das Dashboard einträgt.
 #
 # WICHTIG: braucht das NVIDIA Container Toolkit auf dem Host
 # (https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
@@ -16,63 +23,43 @@
 # Axel schon eine eigene, separate Ollama-Instanz mit vielen Modellen habt,
 # einfach OLLAMA_URL in den Dashboard-Settings drauf zeigen lassen.
 
-x-gpu: &gpu-config
-  deploy:
-    resources:
-      reservations:
-        devices:
-          - driver: nvidia
-            count: all
-            capabilities: [gpu, utility, video]
-            # gpu+compute: für YOLO/CLAP-Inferenz
-            # utility: für nvidia-smi (Hardware-Status im Dashboard)
-            # video: für NVENC/NVDEC
-  # Fallback für ältere/eigenständige docker-compose-Installationen, falls
-  # obige Reservierung bei euch nicht greift (auskommentiert lassen, bis
-  # ihr das braucht):
-  # runtime: nvidia
-  # environment:
-  #   - NVIDIA_VISIBLE_DEVICES=all
-  #   - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
-
 services:
-  idguard-pipeline:
+  idguard:
     build: .
     image: idguard-pro:latest
-    container_name: idguard-pipeline
-    command: ["python3", "recorder_pipeline.py"]
-    restart: unless-stopped
-    network_mode: host   # lokale RTMP-Kameras im Heimnetz — kein Port-Mapping-Gefrickel
-    <<: *gpu-config
-    volumes:
-      - ./config.py:/app/config.py
-      - ./pipeline_settings.json:/app/pipeline_settings.json
-      - ./stream_overrides.json:/app/stream_overrides.json
-      - ./streams.json:/app/streams.json
-      - ./alerts:/app/alerts
-      - ./logs:/app/logs
-      - ./search_index.db:/app/search_index.db
-      - model-cache:/root/.cache/huggingface       # CLAP/sentence-transformers, einmalig heruntergeladen
-      - ultralytics-cache:/root/.config/Ultralytics # YOLO-Modell-Konfiguration
-      - ./yolo26x.pt:/app/yolo26x.pt                # an eure YOLO_VERSION/MODEL_SIZE-Wahl anpassen
-
-  idguard-web:
-    build: .
-    image: idguard-pro:latest
-    container_name: idguard-web
+    container_name: idguard
     command: ["python3", "web_ui.py"]
     restart: unless-stopped
-    network_mode: host   # Dashboard unter http://<host>:19473
-    <<: *gpu-config       # nur für die nvidia-smi-Statusanzeige, keine eigene Inferenz
+    network_mode: host   # lokale RTMP-Kameras im Heimnetz + Dashboard unter http://<host>:19473
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, utility, video]
+              # gpu+compute: für YOLO/CLAP/Whisper/InsightFace-Inferenz
+              # utility: für nvidia-smi (Hardware-Status im Dashboard)
+              # video: für NVENC/NVDEC
+    # Fallback für ältere/eigenständige docker-compose-Installationen, falls
+    # obige Reservierung bei euch nicht greift (auskommentiert lassen, bis
+    # ihr das braucht):
+    # runtime: nvidia
+    # environment:
+    #   - NVIDIA_VISIBLE_DEVICES=all
+    #   - NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
     volumes:
       - ./config.py:/app/config.py
       - ./pipeline_settings.json:/app/pipeline_settings.json
       - ./stream_overrides.json:/app/stream_overrides.json
       - ./streams.json:/app/streams.json
+      - ./search_index.db:/app/search_index.db
+      - ./faces.db:/app/faces.db
       - ./alerts:/app/alerts
       - ./logs:/app/logs
-      - ./search_index.db:/app/search_index.db
-      - model-cache:/root/.cache/huggingface
+      - model-cache:/root/.cache/huggingface       # CLAP/sentence-transformers/Whisper/InsightFace, einmalig heruntergeladen
+      - ultralytics-cache:/root/.config/Ultralytics # YOLO-Modell-Konfiguration
+      - ./yolo26x.pt:/app/yolo26x.pt                # an eure YOLO_VERSION/MODEL_SIZE-Wahl anpassen
 
 volumes:
   model-cache:
