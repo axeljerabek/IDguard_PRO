@@ -85,6 +85,44 @@ def get_faces_summary_for_video(filename):
         return {"people": [], "unnamed_count": 0}
 
 
+def update_base_dir(filename, new_base_dir):
+    """Beim Archivieren aufrufen. Die Crop-Bilder wandern physisch mit (sie
+    liegen im selben .thumbs/<basename>/-Ordner, der beim Archivieren
+    komplett verschoben wird) — aber ohne diesen Aufruf würde /face_crop/<id>
+    weiterhin den ALTEN Pfad (ALERTS_DIR) versuchen und ins Leere laufen,
+    weil die Datei dort nicht mehr liegt. Spiegelt search_index.py's
+    update_location() für denselben Anwendungsfall."""
+    try:
+        conn = _connect()
+        conn.execute("UPDATE faces SET base_dir = ? WHERE filename = ?", (new_base_dir, filename))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"⚠️ Konnte base_dir für Gesichter von {filename} nicht aktualisieren: {e}")
+
+
+def remove_faces_for_video(filename):
+    """Beim endgültigen Löschen eines Videos aufrufen. Sonst blieben
+    verwaiste Gesichts-Datensätze (mit Verweis auf inzwischen gelöschte
+    Crop-Bilder) für immer in der Datenbank — u.U. sogar sichtbar im
+    unzugeordneten Cluster-Pool, für ein Video, das gar nicht mehr
+    existiert. Betroffene Personen-Centroide werden danach neu berechnet,
+    falls eines der gelöschten Gesichter einer Person zugeordnet war."""
+    try:
+        conn = _connect()
+        rows = conn.execute(
+            "SELECT DISTINCT person_id FROM faces WHERE filename = ? AND person_id IS NOT NULL", (filename,)
+        ).fetchall()
+        affected_people = [r[0] for r in rows]
+        conn.execute("DELETE FROM faces WHERE filename = ?", (filename,))
+        conn.commit()
+        conn.close()
+        for person_id in affected_people:
+            _recompute_centroid(person_id)
+    except Exception as e:
+        print(f"⚠️ Konnte Gesichter für {filename} nicht löschen: {e}")
+
+
 def get_face(face_id):
     """Ein einzelnes Gesicht per ID nachschlagen — z.B. um dessen Bild-Datei
     auszuliefern, ohne dass der Aufrufer die interne DB-Verbindung anfassen muss."""

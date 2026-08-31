@@ -992,11 +992,12 @@ def save_streams():
     # NICHT positions-/index-basiert — bleibt so auch nach dynamischem
     # Hinzufügen/Entfernen von Zeilen im JS korrekt korreliert.
     enabled_flags = request.form.getlist('stream_enabled_flag')
+    audio_enabled_flags = request.form.getlist('stream_audio_enabled_flag')
 
     new_streams = []
     seen_names = set()
     error = None
-    for name, url, flag in zip(names, urls, enabled_flags):
+    for name, url, flag, audio_flag in zip(names, urls, enabled_flags, audio_enabled_flags):
         name = name.strip()
         url = url.strip()
         if not name or not url:
@@ -1009,6 +1010,7 @@ def save_streams():
             "name": name,
             "url": url,
             "enabled": flag == '1',
+            "audio_enabled": audio_flag == '1',
             "type": "VIDEO"
         })
 
@@ -1062,6 +1064,8 @@ def delete_video(filename: str):
         _remove_matching_thumbnail(file_path)
         if search_index is not None:
             search_index.remove_event(filename)
+        if faces_db is not None:
+            faces_db.remove_faces_for_video(filename)
     _event_cache.clear()
     return redirect(url_for('dashboard'))
 
@@ -1100,6 +1104,8 @@ def archive_video(filename: str):
                 print(f"Fehler beim Archivieren des Filmstrips: {e}")
         if search_index is not None:
             search_index.update_location(filename, ARCHIVE_DIR)
+        if faces_db is not None:
+            faces_db.update_base_dir(filename, ARCHIVE_DIR)
     _event_cache.clear()
     return redirect(url_for('dashboard'))
 
@@ -1116,6 +1122,8 @@ def delete_archived_video(filename: str):
         _remove_matching_thumbnail(file_path)
         if search_index is not None:
             search_index.remove_event(filename)
+        if faces_db is not None:
+            faces_db.remove_faces_for_video(filename)
     _event_cache.clear()
     return redirect(url_for('dashboard'))
 
