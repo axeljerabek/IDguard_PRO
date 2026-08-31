@@ -58,8 +58,10 @@ body {
 }
 
 .container {
-    max-width: 1800px;
+    width: 100%;
+    padding: 0 24px;
     margin: 0 auto;
+    box-sizing: border-box;
 }
 
 h1 {
@@ -76,7 +78,7 @@ h1 i { color: var(--primary); }
 
 .grid {
     display: grid;
-    grid-template-columns: 0.8fr 1.2fr;
+    grid-template-columns: 1fr 1fr;
     gap: var(--gap);
     align-items: start;
 }
@@ -307,7 +309,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 
 .streams-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
     gap: 12px;
 }
 .stream-container {
@@ -723,6 +725,18 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
     flex-shrink: 0;
 }
 .search-bar button:hover { background: var(--primary); color: #fff; }
+.btn-select-all {
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    padding: 6px 12px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    margin-bottom: 12px;
+}
+.btn-select-all:hover { color: var(--primary); border-color: var(--primary); }
 #searchClearBtn { background: transparent; color: var(--text-muted); padding: 6px 10px; }
 #searchStatus {
     font-size: 0.85rem;
