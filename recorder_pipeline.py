@@ -105,6 +105,10 @@ class CameraAgent(multiprocessing.Process):
         self.name = stream_info["name"]
         self.url = stream_info.get("url", "")
         self.enabled = stream_info.get("enabled", False)
+        # Default True — bestehende streams.json-Einträge von vor diesem
+        # Feature haben das Feld noch nicht, sollen sich aber nicht plötzlich
+        # stumm schalten.
+        self.audio_enabled = stream_info.get("audio_enabled", True)
         # Vom Master anhand der tatsächlich verbauten GPU bestimmt (siehe
         # detect_gpu_profile) — nicht pro Worker neu geraten.
         self.half_precision_allowed = half_precision
@@ -244,13 +248,15 @@ class CameraAgent(multiprocessing.Process):
         # und Kategorien-Änderung live, ohne Pipeline-Neustart. Lädt das
         # eigentliche Modell erst lazy beim ersten Aktivieren.
         audio_trigger = None
-        if AudioTrigger is not None:
+        if AudioTrigger is not None and self.audio_enabled:
             try:
                 audio_trigger = AudioTrigger(self.logger, self.name)
                 audio_trigger.start(lambda: _load_settings_dict())
             except Exception as e:
                 self.logger.warning(f"⚠️ [{self.name}] Audio-Trigger konnte nicht gestartet werden: {e}")
                 audio_trigger = None
+        elif AudioTrigger is not None and not self.audio_enabled:
+            self.logger.info(f"🔇 [{self.name}] Audio-Erkennung für diese Kamera deaktiviert.")
 
         # Fix 5: Gemeinsamer Pre-Roll Puffer für Video und Audio, jetzt primär
         # nach Timestamp statt nach geschätzter Item-Anzahl getrimmt. Die alte
@@ -341,6 +347,8 @@ class CameraAgent(multiprocessing.Process):
         video_frame_count = 0
         recording_start_time = 0
         last_pts = -1
+        audio_samples_written = 0
+        audio_first_frame_time = None
 
         # Filmstrip (Hover-Scrub-Vorschau + AI-taugliche Großbilder): pro
         # Recording neu gesetzt, siehe RECORDING-Start weiter unten.
@@ -353,14 +361,17 @@ class CameraAgent(multiprocessing.Process):
         filmstrip_next_time = 0
 
         def close_writer():
-            nonlocal out_container, out_video, out_audio, resampler, video_frame_count, last_pts
+            nonlocal out_container, out_video, out_audio, resampler, video_frame_count, last_pts, audio_samples_written, audio_first_frame_time
             if out_container:
                 try:
-                    # Flush Resampler zuerst
+                    # Flush Resampler zuerst — explizite, fortlaufende PTS statt
+                    # None, damit am Dateiende keine Unstetigkeit zur sonst
+                    # überall expliziten Audio-PTS-Vergabe entsteht.
                     if out_audio and resampler:
                         try:
                             for rf in resampler.resample(None):
-                                rf.pts = None
+                                rf.pts = audio_samples_written
+                                audio_samples_written += rf.samples
                                 for packet in out_audio.encode(rf):
                                     out_container.mux(packet)
                         except Exception as e:
@@ -384,6 +395,8 @@ class CameraAgent(multiprocessing.Process):
                     resampler = None
                     video_frame_count = 0
                     last_pts = -1
+                    audio_samples_written = 0
+                    audio_first_frame_time = None
                     av_buffer.clear()
 
         def encode_video_frame(img_bgr, ts=None):
@@ -477,8 +490,8 @@ class CameraAgent(multiprocessing.Process):
             except Exception:
                 pass
 
-        def encode_audio_frame(a_frame):
-            nonlocal resampler
+        def encode_audio_frame(a_frame, ts=None):
+            nonlocal resampler, audio_samples_written, audio_first_frame_time
             if not out_container or not out_audio:
                 return
             try:
@@ -489,9 +502,32 @@ class CameraAgent(multiprocessing.Process):
                         rate=out_audio.rate
                     )
 
+                t = ts if ts is not None else time.time()
+                if audio_first_frame_time is None:
+                    audio_first_frame_time = t
+                    audio_samples_written = 0
+
                 resampled_frames = resampler.resample(a_frame)
                 for rf in resampled_frames:
-                    rf.pts = None
+                    # Bug-Fix: reiner Sample-Zähler (altes Verhalten: rf.pts = None,
+                    # PyAV zählt einfach Samples hoch) merkt einen Netz-Hänger gar
+                    # nicht — die Lücke verschwindet lautlos, Audio läuft ab da an
+                    # dauerhaft vor dem (korrekt Wall-Clock-basierten) Video her.
+                    # Hier: normal weiterzählen, aber bei einer Diskrepanz zur
+                    # echten Wall-Clock-Zeit > 0.5s eine Stille-Lücke einfügen, die
+                    # die Diskrepanz wieder ausgleicht. Bewusst NICHT pro Frame die
+                    # volle Wall-Clock-PTS neu berechnen (wie beim Video) — bei
+                    # tausenden kleinen Audio-Frames pro Aufnahme würde sich sonst
+                    # Rundungsfehler aufsummieren; die reine Gap-Korrektur ist
+                    # präziser für den Normalfall und korrigiert trotzdem den
+                    # eigentlichen Bug (Hänger).
+                    expected_elapsed = audio_samples_written / out_audio.rate
+                    actual_elapsed = t - audio_first_frame_time
+                    if actual_elapsed - expected_elapsed > 0.5:
+                        gap_samples = int((actual_elapsed - expected_elapsed) * out_audio.rate)
+                        audio_samples_written += gap_samples
+                    rf.pts = audio_samples_written
+                    audio_samples_written += rf.samples
                     for packet in out_audio.encode(rf):
                         out_container.mux(packet)
             except Exception as e:
@@ -501,7 +537,7 @@ class CameraAgent(multiprocessing.Process):
             if item_type == "video":
                 encode_video_frame(data, ts)
             elif item_type == "audio":
-                encode_audio_frame(data)
+                encode_audio_frame(data, ts)
 
         # NVDEC-Hardware-Decode vorbereiten (Punkt "GPU voll nutzen" — bisher
         # lag utilization.decoder konstant bei 0%). Das HWAccel-Objekt selbst
@@ -764,7 +800,14 @@ class CameraAgent(multiprocessing.Process):
                                     if target_detected:
                                         state = "RECORDING"
                                         _write_state(self.name, "RECORDING")
-                                        self.logger.info("🚨 [DETECTED] Target object returned! Resuming recording.")
+                                        vision_hit = bool(results and len(results[0].boxes) > 0)
+                                        sources = []
+                                        if vision_hit:
+                                            sources.append("visual detection")
+                                        if audio_triggered_now:
+                                            sources.append(f"audio ('{audio_label}')" if audio_label else "audio")
+                                        source_desc = " + ".join(sources) if sources else "detection"
+                                        self.logger.info(f"🚨 [DETECTED] Target returned ({source_desc})! Resuming recording.")
                                         encode_video_frame(img_bgr, now)
                                         capture_filmstrip(img_bgr, results)
                                     else:
@@ -794,7 +837,7 @@ class CameraAgent(multiprocessing.Process):
                                 av_buffer.append(("audio", a_frame, now))
                                 trim_buffer()
                                 if state in ["RECORDING", "POST_ROLL"]:
-                                    encode_audio_frame(a_frame)
+                                    encode_audio_frame(a_frame, now)
 
                                 # Audio-Trigger füttern: NUR ein billiger Buffer-Append,
                                 # die eigentliche (langsame) Klassifikation läuft komplett

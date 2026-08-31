@@ -19,6 +19,7 @@ import sys
 import json
 import glob
 import shutil
+import time
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(DIR)
@@ -67,6 +68,31 @@ def _fix_antelopev2_nesting(model_pack):
             shutil.move(os.path.join(nested, f), os.path.join(model_dir, f))
         os.rmdir(nested)
 
+# Ein echtes InsightFace-Modell-Pack ist immer deutlich größer als das —
+# alles darunter deutet auf einen abgebrochenen/korrupten Download hin
+# (Netzwerk-Aussetzer mitten im Download, o.ä.), nicht auf ein vollständiges
+# Pack. Bewusst konservativ (das kleinste Pack, buffalo_s, hat trotzdem
+# mehrere hundert MB).
+MODEL_DIR_MIN_BYTES = 10_000_000
+
+MAX_LOAD_ATTEMPTS = 3
+RETRY_DELAY_SEC = 3
+
+
+def _model_dir_size(model_pack):
+    home = os.path.expanduser("~/.insightface/models")
+    model_dir = os.path.join(home, model_pack)
+    if not os.path.isdir(model_dir):
+        return 0
+    total = 0
+    for root, _, files in os.walk(model_dir):
+        for fname in files:
+            try:
+                total += os.path.getsize(os.path.join(root, fname))
+            except OSError:
+                pass
+    return total
+
 
 def _get_app():
     global _app, _app_load_failed
@@ -74,32 +100,44 @@ def _get_app():
         return _app
     if _app_load_failed:
         return None
-    try:
-        from insightface.app import FaceAnalysis
-        _app = FaceAnalysis(name=FACE_MODEL_PACK, providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
-        _app.prepare(ctx_id=0, det_size=(640, 640))
-        # Falls das GPU-Provider fehlschlägt, hätte InsightFace selbst schon
-        # eine Exception geworfen (kein stiller Fallback) — daher hier kein
-        # try/except pro Provider nötig, InsightFace probiert die Liste
-        # selbst der Reihe nach durch.
-        return _app
-    except AssertionError:
-        # Der bekannte antelopev2-Verschachtelungsbug — einmal automatisch
-        # fixen und den Ladeversuch genau einmal wiederholen.
+
+    last_error = None
+    for attempt in range(1, MAX_LOAD_ATTEMPTS + 1):
         try:
+            # Proaktiv statt reaktiv: den bekannten antelopev2-Verschachtelungs-
+            # Bug schon VOR jedem Ladeversuch glätten (kein-op für andere Packs
+            # und für bereits geglättete Ordner), statt erst nach einem
+            # fehlgeschlagenen Versuch draufzukommen.
             _fix_antelopev2_nesting(FACE_MODEL_PACK)
             from insightface.app import FaceAnalysis
-            _app = FaceAnalysis(name=FACE_MODEL_PACK, providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
-            _app.prepare(ctx_id=0, det_size=(640, 640))
+            app = FaceAnalysis(name=FACE_MODEL_PACK, providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
+            app.prepare(ctx_id=0, det_size=(640, 640))
+            _app = app
+            if attempt > 1:
+                print(f"✅ Gesichtserkennungs-Modell '{FACE_MODEL_PACK}' beim {attempt}. Versuch erfolgreich geladen.")
             return _app
         except Exception as e:
-            print(f"⚠️ Gesichtserkennungs-Modell '{FACE_MODEL_PACK}' konnte auch nach Verschachtelungs-Fix nicht geladen werden: {e}")
-            _app_load_failed = True
-            return None
-    except Exception as e:
-        print(f"⚠️ Gesichtserkennungs-Modell '{FACE_MODEL_PACK}' konnte nicht geladen werden (pip install insightface onnxruntime nötig?): {e}")
-        _app_load_failed = True
-        return None
+            last_error = e
+            print(f"⚠️ Ladeversuch {attempt}/{MAX_LOAD_ATTEMPTS} für '{FACE_MODEL_PACK}' fehlgeschlagen: {e}")
+            size = _model_dir_size(FACE_MODEL_PACK)
+            if size < MODEL_DIR_MIN_BYTES:
+                # Sieht nach abgebrochenem/korruptem Download aus (z.B. Netz-
+                # Aussetzer mittendrin) — kompletten Ordner löschen, damit
+                # InsightFace beim nächsten Versuch wirklich frisch neu
+                # herunterlädt, statt an denselben kaputten Dateien hängen
+                # zu bleiben (die sonst bei JEDEM künftigen Start denselben
+                # Fehler wiederholt hätten, nie von selbst geheilt).
+                home = os.path.expanduser("~/.insightface/models")
+                model_dir = os.path.join(home, FACE_MODEL_PACK)
+                if os.path.isdir(model_dir):
+                    print(f"🗑️ Modell-Ordner {model_dir} sieht unvollständig aus ({size} Bytes) — lösche für Neu-Download.")
+                    shutil.rmtree(model_dir, ignore_errors=True)
+            if attempt < MAX_LOAD_ATTEMPTS:
+                time.sleep(RETRY_DELAY_SEC)
+
+    print(f"❌ Gesichtserkennungs-Modell '{FACE_MODEL_PACK}' konnte nach {MAX_LOAD_ATTEMPTS} Versuchen nicht geladen werden — Feature bleibt inaktiv: {last_error}")
+    _app_load_failed = True
+    return None
 
 
 def recognize(video_basename, base_dir):

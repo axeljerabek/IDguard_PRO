@@ -94,7 +94,10 @@
                     Saving restarts the recording pipeline automatically so new cameras start being watched
                     right away. The live preview for a brand-new camera specifically needs the dashboard
                     itself (<code>web_ui.py</code>) restarted too — everything else (recording, detection)
-                    works immediately.
+                    works immediately. Each camera has two independent toggles: <strong>Video</strong>
+                    (object detection + recording) and <i class="fa-solid fa-microphone"></i>
+                    (this camera's microphone feeds the audio trigger, if enabled globally in Settings
+                    above — turning it off here only affects this one camera).
                 </p>
                 <form action="/save_streams" method="POST" id="streamsForm">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -106,7 +109,12 @@
                             <input type="hidden" name="stream_enabled_flag" value="{{ '1' if s.enabled else '0' }}">
                             <label class="stream-row-toggle">
                                 <input type="checkbox" {% if s.enabled %}checked{% endif %} onchange="this.previousElementSibling.value = this.checked ? '1' : '0'">
-                                On
+                                Video
+                            </label>
+                            <input type="hidden" name="stream_audio_enabled_flag" value="{{ '1' if s.get('audio_enabled', True) else '0' }}">
+                            <label class="stream-row-toggle">
+                                <input type="checkbox" {% if s.get('audio_enabled', True) %}checked{% endif %} onchange="this.previousElementSibling.value = this.checked ? '1' : '0'">
+                                <i class="fa-solid fa-microphone"></i>
                             </label>
                             <button type="button" class="btn-delete" onclick="this.closest('.stream-row').remove()" title="Remove camera"><i class="fa-solid fa-trash-can"></i></button>
                         </div>
@@ -704,7 +712,12 @@
                 <input type="hidden" name="stream_enabled_flag" value="1">
                 <label class="stream-row-toggle">
                     <input type="checkbox" checked onchange="this.previousElementSibling.value = this.checked ? '1' : '0'">
-                    On
+                    Video
+                </label>
+                <input type="hidden" name="stream_audio_enabled_flag" value="1">
+                <label class="stream-row-toggle">
+                    <input type="checkbox" checked onchange="this.previousElementSibling.value = this.checked ? '1' : '0'">
+                    <i class="fa-solid fa-microphone"></i>
                 </label>
                 <button type="button" class="btn-delete" onclick="this.closest('.stream-row').remove()" title="Remove camera"><i class="fa-solid fa-trash-can"></i></button>
             `;
@@ -1205,15 +1218,14 @@
                         topicList.map(t => `${escapeHtml(t.topic)}${t.score != null ? ` (${Math.round(t.score)}%)` : ''}`).join(', ')
                       }</span>`
                     : '';
-                const peopleParts = [];
-                if (ev.people_in_video && ev.people_in_video.length) {
-                    peopleParts.push(ev.people_in_video.map(p => escapeHtml(p.name)).join(', '));
-                }
-                if (ev.unrecognized_face_count) {
-                    peopleParts.push(`${ev.unrecognized_face_count} unrecognized face${ev.unrecognized_face_count === 1 ? '' : 's'}`);
-                }
-                const peopleLine = peopleParts.length
-                    ? `<span class="event-people-line"><i class="fa-solid fa-user"></i> ${peopleParts.join(' + ')}</span>`
+                const peopleBadges = (ev.people_in_video || []).map(p =>
+                    `<span class="event-person-badge"><img src="/face_crop/${p.face_id}" class="event-person-avatar" alt="" loading="lazy"> ${escapeHtml(p.name)}</span>`
+                ).join('');
+                const unrecBadge = ev.unrecognized_face_count
+                    ? `<span class="event-person-badge event-person-unknown"><i class="fa-solid fa-user-secret"></i> ${ev.unrecognized_face_count} unrecognized</span>`
+                    : '';
+                const peopleLine = (peopleBadges || unrecBadge)
+                    ? `<span class="event-people-line">${peopleBadges}${unrecBadge}</span>`
                     : '';
                 const analyzeUrl = (isArchived ? '/analyze/archive/' : '/analyze/') + fn;
                 const showAnalyzeBtn = (ev.filmstrip_count || 0) > 0 && !ev.ai_pending;

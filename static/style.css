@@ -809,10 +809,36 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
 }
 .event-topic-line i { margin-right: 4px; }
 .event-people-line {
-    font-size: 0.78rem;
-    color: var(--text-muted);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
 }
-.event-people-line i { color: var(--primary); margin-right: 4px; }
+.event-person-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--card-bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 10px 2px 2px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text);
+}
+.event-person-avatar {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid var(--border);
+}
+.event-person-unknown {
+    color: var(--text-muted);
+    font-weight: 400;
+    padding-left: 10px;
+}
+.event-person-unknown i { color: var(--text-muted); }
 .event-ai-desc {
     font-size: 0.82rem;
     color: var(--text);
@@ -861,7 +887,7 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
 
 .people-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
     gap: 14px;
 }
 .person-card {
@@ -873,8 +899,8 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
     text-align: center;
 }
 .person-face {
-    width: 72px;
-    height: 72px;
+    width: 140px;
+    height: 140px;
     border-radius: 50%;
     object-fit: cover;
     cursor: pointer;
@@ -925,27 +951,27 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
 }
 .face-thumb-wrap {
     position: relative;
-    width: 64px;
-    height: 64px;
+    width: 128px;
+    height: 128px;
 }
 .face-thumb {
-    width: 64px;
-    height: 64px;
+    width: 128px;
+    height: 128px;
     border-radius: var(--radius-sm);
     object-fit: cover;
     border: 1px solid var(--border);
 }
 .face-thumb-remove {
     position: absolute;
-    top: -6px;
-    right: -6px;
-    width: 20px;
-    height: 20px;
+    top: -8px;
+    right: -8px;
+    width: 26px;
+    height: 26px;
     border-radius: 50%;
     background: var(--danger);
     color: #fff;
     border: none;
-    font-size: 0.65rem;
+    font-size: 0.8rem;
     cursor: pointer;
     display: flex;
     align-items: center;
