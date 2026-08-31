@@ -58,7 +58,7 @@ body {
 }
 
 .container {
-    max-width: 1440px;
+    max-width: 1800px;
     margin: 0 auto;
 }
 
@@ -76,7 +76,7 @@ h1 i { color: var(--primary); }
 
 .grid {
     display: grid;
-    grid-template-columns: 1.05fr 0.95fr;
+    grid-template-columns: 0.8fr 1.2fr;
     gap: var(--gap);
     align-items: start;
 }
@@ -305,25 +305,28 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
     font-weight: 500;
 }
 
+.streams-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+}
 .stream-container {
-    margin-bottom: 15px;
     background: var(--card-bg-inset);
-    padding: 12px;
+    padding: 10px;
     border-radius: var(--radius-md);
     border: 1px solid var(--border);
 }
-.stream-container:last-child { margin-bottom: 0; }
 
 .stream-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 12px;
-    gap: 10px;
+    margin-bottom: 10px;
+    gap: 8px;
 }
-.stream-header span { font-weight: 500; font-size: 1rem; }
+.stream-header span { font-weight: 500; font-size: 0.88rem; }
 .stream-name-wrap { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.stream-last-seen { font-size: 0.75rem; font-weight: 400 !important; color: var(--text-muted); font-family: var(--font-mono); }
+.stream-last-seen { font-size: 0.7rem; font-weight: 400 !important; color: var(--text-muted); font-family: var(--font-mono); }
 
 .stream-thumb {
     width: 100%;
@@ -727,11 +730,10 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
     margin-bottom: 10px;
 }
 .event-list {
-    max-height: 420px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 14px;
+    align-items: start;
 }
 .event-item {
     background: var(--card-bg-inset);
@@ -740,22 +742,26 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
     padding: 10px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
     cursor: pointer;
     transition: border-color 0.15s;
 }
 .event-item:hover { border-color: var(--primary); }
 .event-body {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 10px;
+    flex-direction: column;
+    gap: 7px;
     min-width: 0;
+}
+.event-actions {
+    display: flex;
+    gap: 4px;
+    justify-content: flex-end;
+    margin-top: 2px;
 }
 .event-thumb {
     position: relative;
     width: 100%;
-    max-width: 480px;
     aspect-ratio: 16/9;
     flex-shrink: 0;
     border-radius: var(--radius-sm);
@@ -830,6 +836,19 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
 }
 #bulkExportBtn:hover { background: var(--primary-hover); }
 #bulkExportBtn:disabled { opacity: 0.6; cursor: default; }
+#bulkArchiveBtn {
+    background: transparent;
+    color: var(--success);
+    border: 1px solid var(--success);
+    border-radius: 999px;
+    padding: 8px 16px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+#bulkArchiveBtn:hover { background: var(--success-soft); }
+#bulkArchiveBtn:disabled { opacity: 0.6; cursor: default; }
 .bulk-clear-btn {
     background: transparent;
     color: var(--text-muted);
@@ -916,7 +935,32 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
     display: block;
 }
 .event-ai-desc i { color: var(--primary); margin-right: 4px; }
-.event-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+.event-transcript-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    align-self: flex-start;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 3px 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+.event-transcript-badge:hover { color: var(--primary); border-color: var(--primary); }
+.event-transcript-badge i { color: var(--primary); }
+.transcript-lightbox-text {
+    color: var(--text);
+    font-size: 0.92rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    max-height: 55vh;
+    overflow-y: auto;
+}
+
 .btn-archive {
     background: transparent;
     color: var(--primary);
