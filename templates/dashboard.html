@@ -25,14 +25,8 @@
                 </span>
             </div>
             <div class="pipeline-bar-actions">
-                <form action="/start" method="POST">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <button type="submit" class="btn-ghost btn-ghost-success"><i class="fa-solid fa-play"></i> Start</button>
-                </form>
-                <form action="/stop" method="POST">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <button type="submit" class="btn-ghost btn-ghost-danger"><i class="fa-solid fa-stop"></i> Stop</button>
-                </form>
+                <button type="button" class="btn-ghost btn-ghost-success" onclick="startPipeline(this)"><i class="fa-solid fa-play"></i> Start</button>
+                <button type="button" class="btn-ghost btn-ghost-danger" onclick="stopPipeline(this)"><i class="fa-solid fa-stop"></i> Stop</button>
             </div>
         </div>
 
@@ -40,7 +34,7 @@
         <div class="grid">
             <div class="card">
                 <h2><i class="fa-solid fa-video"></i> Camera Streams</h2>
-                <div class="streams-grid">
+                <div class="streams-grid" id="streamsGrid">
                     {% for stream in streams %}
                     <div class="stream-container">
                         <div class="stream-header">
@@ -48,13 +42,10 @@
                                 <span style="font-weight: 500;">{{ stream }}</span>
                                 <span class="stream-last-seen" id="lastseen-{{ stream }}"></span>
                             </span>
-                            <form action="/toggle/{{ stream }}" method="POST" style="margin: 0;">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                <label class="switch">
-                                    <input type="checkbox" onchange="this.form.submit()" {% if overrides.get(stream, 'ON') == 'ON' %}checked{% endif %}>
-                                    <span class="slider"></span>
-                                </label>
-                            </form>
+                            <label class="switch">
+                                <input type="checkbox" onchange="toggleStreamPause('{{ stream }}', this)" {% if overrides.get(stream, 'ON') == 'ON' %}checked{% endif %}>
+                                <span class="slider"></span>
+                            </label>
                         </div>
                         <div class="thumb-wrap">
                             <img id="thumb-{{ stream }}" class="stream-thumb" src="/thumbnail/{{ stream }}" alt="{{ stream }} Thumbnail" onclick="openLiveView('{{ stream }}')" style="opacity:0;" onload="this.style.opacity=1" onerror="this.style.opacity=0">
@@ -101,7 +92,7 @@
                     (this camera's microphone feeds the audio trigger, if enabled globally in Settings
                     above — turning it off here only affects this one camera).
                 </p>
-                <form action="/save_streams" method="POST" id="streamsForm">
+                <form action="/save_streams" method="POST" id="streamsForm" onsubmit="handleStreamsSubmit(event); return false;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <div id="streamRows">
                         {% for s in streams_full %}
@@ -134,7 +125,7 @@
                 <i class="fa-solid fa-chevron-down chevron"></i>
             </summary>
             <div class="collapse-body">
-                <form action="/save_settings" method="POST" id="settingsForm">
+                <form action="/save_settings" method="POST" id="settingsForm" onsubmit="handleSettingsSubmit(event); return false;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
                     <div class="settings-section">
@@ -829,37 +820,116 @@
             toast._hideTimer = setTimeout(() => toast.classList.remove('show'), duration);
         }
 
-        (function checkSavedToast() {
-            const params = new URLSearchParams(window.location.search);
-            if (params.get('saved')) {
-                showToast(params.get('restarted') === '1'
-                    ? 'Settings saved — pipeline restarting…'
-                    : 'Settings saved.');
-                window.history.replaceState({}, '', window.location.pathname);
+        function startPipeline(btn) {
+            btn.disabled = true;
+            const badge = document.getElementById('pipeline-status');
+            if (badge) { badge.className = 'status-badge status-restarting'; badge.innerHTML = '<span class="rec-dot"></span>Starting…'; }
+            _postForm('/start', {}).then(res => {
+                btn.disabled = false;
+                if (res.ok) showToast('Pipeline starting…');
+                else showToast('⚠️ Could not start pipeline.', 6000);
+            });
+        }
+
+        function stopPipeline(btn) {
+            btn.disabled = true;
+            const badge = document.getElementById('pipeline-status');
+            if (badge) { badge.className = 'status-badge status-restarting'; badge.innerHTML = '<span class="rec-dot"></span>Stopping…'; }
+            _postForm('/stop', {}).then(res => {
+                btn.disabled = false;
+                if (res.ok) showToast('Pipeline stopped.');
+                else showToast('⚠️ Could not stop pipeline.', 6000);
+            });
+        }
+
+        function toggleStreamPause(name, checkbox) {
+            _postForm('/toggle/' + name, {}).then(res => {
+                if (!res.ok) {
+                    // Fehlgeschlagen -> Checkbox visuell zurücksetzen, damit die UI nicht lügt
+                    checkbox.checked = !checkbox.checked;
+                    showToast('⚠️ Could not toggle ' + name, 6000);
+                }
+            });
+        }
+
+        function applyTheme(theme) {
+            const link = document.querySelector('link[rel="stylesheet"][href*="style"]');
+            if (!link) return;
+            const targetFile = theme === 'light' ? 'style-light.css' : 'style.css';
+            if (!link.href.endsWith(targetFile)) {
+                link.href = link.href.replace(/style(-light)?\.css(\?.*)?$/, targetFile);
             }
-            if (params.get('analyze_error')) {
-                showToast('⚠️ AI analysis not started: ' + params.get('analyze_error'), 6000);
-                window.history.replaceState({}, '', window.location.pathname);
-            }
-            if (params.get('stream_error')) {
-                showToast('⚠️ ' + params.get('stream_error'), 6000);
-                window.history.replaceState({}, '', window.location.pathname);
-            }
-            if (params.get('streams_saved')) {
-                showToast(params.get('restarted') === '1'
-                    ? 'Cameras saved — pipeline restarting…'
-                    : 'Cameras saved.');
-                window.history.replaceState({}, '', window.location.pathname);
-            }
-            if (params.get('exported')) {
-                showToast('✅ Exported to "' + params.get('exported') + '"');
-                window.history.replaceState({}, '', window.location.pathname);
-            }
-            if (params.get('export_error')) {
-                showToast('⚠️ Export failed: ' + params.get('export_error'), 6000);
-                window.history.replaceState({}, '', window.location.pathname);
-            }
-        })();
+        }
+
+        function renderStreamsGrid(streamsData) {
+            const grid = document.getElementById('streamsGrid');
+            if (!grid) return;
+            grid.innerHTML = streamsData.map(s => `
+                <div class="stream-container">
+                    <div class="stream-header">
+                        <span class="stream-name-wrap">
+                            <span style="font-weight: 500;">${escapeHtml(s.name)}</span>
+                            <span class="stream-last-seen" id="lastseen-${s.name}"></span>
+                        </span>
+                        <label class="switch">
+                            <input type="checkbox" onchange="toggleStreamPause('${s.name}', this)" ${s.override_on ? 'checked' : ''}>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="thumb-wrap">
+                        <img id="thumb-${s.name}" class="stream-thumb" src="/thumbnail/${s.name}" alt="${escapeHtml(s.name)} Thumbnail" onclick="openLiveView('${s.name}')" style="opacity:0;" onload="this.style.opacity=1" onerror="this.style.opacity=0">
+                        ${s.override_on ? '<span class="thumb-live-dot" title="Active"></span>' : ''}
+                        <span class="thumb-rec-badge" id="rec-${s.name}" style="display:none;"><span class="rec-dot"></span>REC</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function handleStreamsSubmit(event) {
+            event.preventDefault();
+            const form = document.getElementById('streamsForm');
+            const formData = new FormData(form);
+            const btn = form.querySelector('button[type="submit"]');
+            if (btn) btn.disabled = true;
+            fetch('/save_streams', { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(res => {
+                    if (btn) btn.disabled = false;
+                    if (res.ok) {
+                        showToast(res.restarted ? 'Cameras saved — pipeline restarting…' : 'Cameras saved.');
+                        renderStreamsGrid(res.streams || []);
+                    } else {
+                        showToast('⚠️ ' + (res.error || 'Failed to save cameras.'), 6000);
+                    }
+                })
+                .catch(() => {
+                    if (btn) btn.disabled = false;
+                    showToast('⚠️ Failed to save cameras.', 6000);
+                });
+        }
+
+        function handleSettingsSubmit(event) {
+            event.preventDefault();
+            const form = document.getElementById('settingsForm');
+            const formData = new FormData(form);
+            const btn = document.getElementById('applyBtn');
+            if (btn) btn.disabled = true;
+            fetch('/save_settings', { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(res => {
+                    if (btn) btn.disabled = false;
+                    if (res.ok) {
+                        showToast(res.restarted ? 'Settings saved — pipeline restarting…' : 'Settings saved.');
+                        if (res.theme) applyTheme(res.theme);
+                    } else {
+                        showToast('⚠️ Failed to save settings.', 6000);
+                    }
+                })
+                .catch(() => {
+                    if (btn) btn.disabled = false;
+                    showToast('⚠️ Failed to save settings.', 6000);
+                });
+        }
 
         document.addEventListener('click', function(event) {
             const multiselect = document.querySelector('.multiselect');

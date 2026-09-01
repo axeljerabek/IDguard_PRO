@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, Response, abort, send_file
+from flask import Flask, render_template, request, Response, abort, send_file
 import os
 import sys
 import glob
@@ -923,7 +923,7 @@ def start_pipeline():
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL
     )
-    return redirect(url_for('dashboard'))
+    return json.dumps({'ok': True})
 
 @app.route('/stop', methods=['POST'])
 @requires_auth
@@ -933,7 +933,7 @@ def stop_pipeline():
         ['/bin/bash', os.path.join(PROJECT_ROOT, 'stop.sh')],
         cwd=PROJECT_ROOT
     )
-    return redirect(url_for('dashboard'))
+    return json.dumps({'ok': True})
 
 @app.route('/toggle/<name>', methods=['POST'])
 @requires_auth
@@ -942,7 +942,7 @@ def toggle_stream(name):
     overrides = load_overrides()
     overrides[name] = 'ON' if overrides.get(name, 'OFF') == 'OFF' else 'OFF'
     save_overrides(overrides)
-    return redirect(url_for('dashboard'))
+    return json.dumps({'ok': True, 'state': overrides[name]})
 
 def _clamp(value, lo, hi):
     return max(lo, min(hi, value))
@@ -1070,7 +1070,7 @@ def save_pipeline_settings():
         threading.Thread(target=_restart_pipeline_background, daemon=True).start()
         restarted = True
 
-    return redirect(url_for('dashboard', saved=1, restarted=int(restarted)))
+    return json.dumps({'ok': True, 'restarted': restarted, 'theme': settings['THEME']})
 
 @app.route('/save_streams', methods=['POST'])
 @requires_auth
@@ -1105,15 +1105,15 @@ def save_streams():
         })
 
     if error:
-        return redirect(url_for('dashboard', stream_error=error))
+        return json.dumps({'ok': False, 'error': error})
     if not new_streams:
-        return redirect(url_for('dashboard', stream_error="At least one camera with a name and URL is required."))
+        return json.dumps({'ok': False, 'error': 'At least one camera with a name and URL is required.'})
 
     try:
         with open(STREAMS_F, 'w') as f:
             json.dump(new_streams, f, indent=2)
     except Exception as e:
-        return redirect(url_for('dashboard', stream_error=f"Could not save: {e}"))
+        return json.dumps({'ok': False, 'error': f'Could not save: {e}'})
 
     # Kamera-Liste ist immer pipeline-relevant (neue/entfernte CameraAgent-Prozesse) —
     # anders als die meisten Settings in save_settings() gibt es hier keinen
@@ -1123,7 +1123,12 @@ def save_streams():
         threading.Thread(target=_restart_pipeline_background, daemon=True).start()
         restarted = True
 
-    return redirect(url_for('dashboard', streams_saved=1, restarted=int(restarted)))
+    overrides = load_overrides()
+    display_streams = [
+        {'name': s['name'], 'override_on': overrides.get(s['name'], 'ON') == 'ON'}
+        for s in new_streams
+    ]
+    return json.dumps({'ok': True, 'restarted': restarted, 'streams': display_streams})
 
 def _remove_matching_thumbnail(video_path):
     """Löscht Trigger-Screenshot, Filmstrip-Ordner und AI-Metadaten/-Sidecar zu einem Video."""
