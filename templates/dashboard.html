@@ -79,6 +79,7 @@
                 </div>
                 <div id="searchStatus" style="display:none;"></div>
                 <button type="button" class="btn-select-all" onclick="selectAllEvents('recent')"><i class="fa-solid fa-square-check"></i> Select all</button>
+                <a class="btn-select-all" href="/api/export_metadata?format=csv" download title="Download metadata (filenames, triggers, topics, people, descriptions, transcripts) for every recording as CSV"><i class="fa-solid fa-file-csv"></i> Export all metadata (CSV)</a>
                 <div class="event-list" id="recent-event-list"></div>
             </div>
         </div>
@@ -1529,6 +1530,14 @@
             clearSelection();
         }
 
+        function exportSelectedMetadata() {
+            const filenames = Array.from(selectedEvents.keys());
+            if (!filenames.length) return;
+            // Reiner GET-Download — der Browser übernimmt das Speichern anhand
+            // von Content-Disposition, kein fetch()/Blob-Umweg nötig.
+            window.location.href = '/api/export_metadata?format=csv&filenames=' + encodeURIComponent(filenames.join(','));
+        }
+
         // Suche: solange aktiv, überschreibt der normale 3s-Poll die
         // Recent-Liste NICHT — sonst würde jedes Poll die Suchergebnisse
         // wieder durch die normale Liste ersetzen.
@@ -1952,6 +1961,7 @@
         <span id="bulkSelectedCount"></span>
         <button type="button" id="bulkArchiveBtn" onclick="archiveSelectedEvents()"><i class="fa-solid fa-box-archive"></i> Archive Selected</button>
         <button type="button" id="bulkExportBtn" onclick="exportSelectedEvents()"><i class="fa-solid fa-file-export"></i> Export Selected</button>
+        <button type="button" id="bulkMetadataBtn" onclick="exportSelectedMetadata()"><i class="fa-solid fa-file-csv"></i> Export metadata (CSV)</button>
         <button type="button" class="bulk-clear-btn" onclick="clearSelection()">Clear selection</button>
     </div>
 </body>

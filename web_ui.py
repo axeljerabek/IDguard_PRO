@@ -2,6 +2,8 @@ from flask import Flask, render_template, request, redirect, url_for, Response, 
 import os
 import sys
 import glob
+import csv
+import io
 import subprocess
 import shutil
 import json
@@ -232,6 +234,55 @@ def _build_event_list(directory, limit=MAX_EVENTS):
     """Baut die Event-Liste (Dateiname, Datum, Größe) für ein gegebenes Verzeichnis."""
     files = sorted(glob.glob(os.path.join(directory, '*.mp4')), key=os.path.getmtime, reverse=True)[:limit]
     return [e for e in (_event_from_file(f) for f in files) if e]
+
+def _build_full_event_list(directory):
+    """Wie _build_event_list, aber ohne MAX_EVENTS-Obergrenze — fürs
+    Export gedacht, wo wirklich der komplette Bestand gebraucht wird,
+    nicht nur die für die Dashboard-Ansicht ohnehin gedeckelten neuesten."""
+    files = sorted(glob.glob(os.path.join(directory, '*.mp4')), key=os.path.getmtime, reverse=True)
+    return [e for e in (_event_from_file(f) for f in files) if e]
+
+@app.route('/api/export_metadata')
+@requires_auth
+def api_export_metadata():
+    fmt = request.args.get('format', 'csv')
+    only_filenames = request.args.get('filenames')
+    filter_set = set(only_filenames.split(',')) if only_filenames else None
+
+    recent = _build_full_event_list(ALERTS_DIR)
+    for e in recent:
+        e['archived'] = False
+    archived = _build_full_event_list(ARCHIVE_DIR)
+    for e in archived:
+        e['archived'] = True
+    events = recent + archived
+    if filter_set is not None:
+        events = [e for e in events if e['filename'] in filter_set]
+    # Neueste zuerst, über beide Quellen hinweg einheitlich sortiert
+    events.sort(key=lambda e: e['datetime'], reverse=True)
+
+    if fmt == 'json':
+        resp = Response(json.dumps(events, indent=2, ensure_ascii=False), mimetype='application/json')
+        resp.headers['Content-Disposition'] = 'attachment; filename=idguard_export.json'
+        return resp
+
+    output = io.StringIO()
+    fieldnames = ['filename', 'archived', 'datetime', 'size', 'trigger_class', 'trigger_confidence',
+                  'audio_trigger_label', 'audio_trigger_confidence', 'detected_topics', 'people',
+                  'unrecognized_face_count', 'ai_description', 'transcript']
+    writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction='ignore')
+    writer.writeheader()
+    for e in events:
+        row = dict(e)
+        row['detected_topics'] = '; '.join(
+            f"{t.get('topic')} ({t.get('score')}%)" if t.get('score') is not None else str(t.get('topic'))
+            for t in (e.get('detected_topics') or [])
+        )
+        row['people'] = ', '.join(p.get('name', '') for p in (e.get('people_in_video') or []))
+        writer.writerow(row)
+    resp = Response(output.getvalue(), mimetype='text/csv')
+    resp.headers['Content-Disposition'] = 'attachment; filename=idguard_export.csv'
+    return resp
 
 def _get_disk_status():
     try:
