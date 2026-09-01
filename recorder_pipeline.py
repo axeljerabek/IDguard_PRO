@@ -389,7 +389,6 @@ class CameraAgent(multiprocessing.Process):
         last_pts = -1
         audio_samples_written = 0
         audio_first_frame_time = None
-        _debug_audio_calls = 0  # TEMPORÄR — für die Diagnose, danach wieder raus
 
         # Filmstrip (Hover-Scrub-Vorschau + AI-taugliche Großbilder): pro
         # Recording neu gesetzt, siehe RECORDING-Start weiter unten.
@@ -546,7 +545,7 @@ class CameraAgent(multiprocessing.Process):
                 pass
 
         def encode_audio_frame(a_frame, ts=None):
-            nonlocal resampler, audio_samples_written, audio_first_frame_time, _debug_audio_calls
+            nonlocal resampler, audio_samples_written, audio_first_frame_time
             if not out_container or not out_audio:
                 return
             try:
@@ -562,6 +561,10 @@ class CameraAgent(multiprocessing.Process):
                     audio_first_frame_time = t
                     audio_samples_written = 0
 
+                # Gap-Erkennung: einmal pro Aufruf, mit dem Zählerstand VOR
+                # diesem Aufruf — ein echter Netz-/Kamera-Hänger bleibt so
+                # weiterhin als sichtbare Lücke erhalten, normale Resampler-
+                # Puffer-Schwankungen lösen nicht mehr fälschlich aus.
                 expected_elapsed = audio_samples_written / out_audio.rate
                 actual_elapsed = t - audio_first_frame_time
                 if actual_elapsed - expected_elapsed > 3.0:
@@ -570,16 +573,22 @@ class CameraAgent(multiprocessing.Process):
 
                 resampled_frames = resampler.resample(a_frame)
                 for rf in resampled_frames:
-                    if _debug_audio_calls < 20:
-                        self.logger.info(
-                            f"🔍 AUDIO-DEBUG #{_debug_audio_calls}: t={t:.4f} first_t={audio_first_frame_time:.4f} "
-                            f"actual_elapsed={actual_elapsed:.4f} expected_elapsed={expected_elapsed:.4f} "
-                            f"out_audio.rate={out_audio.rate} rf.rate={rf.rate} rf.samples={rf.samples} "
-                            f"rf.time_base={rf.time_base} out_audio.time_base={out_audio.time_base} "
-                            f"a_frame.rate={a_frame.rate} a_frame.samples={a_frame.samples} "
-                            f"samples_written_before={audio_samples_written}"
-                        )
-                        _debug_audio_calls += 1
+                    # DER eigentliche Root-Cause-Bug hinter der wild falschen
+                    # Spieldauer (Axel fand's per ffprobe + Debug-Log: eine
+                    # Aufnahme meldete 6:56:20 statt echter ~9 Minuten). Per
+                    # Debug-Ausgabe bestätigt: das vom Resampler gelieferte
+                    # Frame trägt selbst eine Zeitbasis von 1/1000 (offenbar
+                    # vom Decoder des eingehenden RTMP-Streams geerbt), auch
+                    # wenn out_audio.time_base korrekt auf 1/rate steht. rf.pts
+                    # wird zwar korrekt in SAMPLES hochgezählt, aber mit
+                    # rf.time_base=1/1000 interpretiert der Muxer 1024 Samples
+                    # als 1024 MILLISEKUNDEN (1.024s) statt als 1024/48000s
+                    # (~21ms) — exakt der beobachtete Faktor ~48. Reproduziert
+                    # und mit echtem PyAV-Encoding verifiziert. Fix: rf.time_base
+                    # explizit setzen, bevor rf.pts zugewiesen wird — dann
+                    # bedeutet ein PTS von 1024 tatsächlich 1024 Samples bei
+                    # der echten Rate, nicht 1024 Millisekunden.
+                    rf.time_base = Fraction(1, out_audio.rate)
                     rf.pts = audio_samples_written
                     audio_samples_written += rf.samples
                     for packet in out_audio.encode(rf):
