@@ -809,13 +809,6 @@
         }
         updateCategorySummary();
 
-        document.getElementById('settingsForm').addEventListener('submit', function() {
-            const btn = document.getElementById('applyBtn');
-            btn.disabled = true;
-            document.getElementById('applyBtnText').innerText = 'Applying…';
-            btn.querySelector('i').className = 'fa-solid fa-spinner fa-spin';
-        });
-
         // Toast-Notification statt stillem Reload
         function showToast(msg, duration = 4000) {
             let toast = document.getElementById('toast');
@@ -925,11 +918,22 @@
             const form = document.getElementById('settingsForm');
             const formData = new FormData(form);
             const btn = document.getElementById('applyBtn');
+            const btnText = document.getElementById('applyBtnText');
+            const btnIcon = btn ? btn.querySelector('i') : null;
             if (btn) btn.disabled = true;
+            if (btnText) btnText.innerText = 'Applying…';
+            if (btnIcon) btnIcon.className = 'fa-solid fa-spinner fa-spin';
+
+            const resetButton = () => {
+                if (btn) btn.disabled = false;
+                if (btnText) btnText.innerText = 'Apply Settings';
+                if (btnIcon) btnIcon.className = 'fa-solid fa-arrows-rotate';
+            };
+
             fetch('/save_settings', { method: 'POST', body: formData })
                 .then(r => r.json())
                 .then(res => {
-                    if (btn) btn.disabled = false;
+                    resetButton();
                     if (res.ok) {
                         showToast(res.restarted ? 'Settings saved — pipeline restarting…' : 'Settings saved.');
                         if (res.theme) applyTheme(res.theme);
@@ -938,7 +942,7 @@
                     }
                 })
                 .catch(() => {
-                    if (btn) btn.disabled = false;
+                    resetButton();
                     showToast('⚠️ Failed to save settings.', 6000);
                 });
         }
@@ -1077,6 +1081,17 @@
                     currentClusters = data.clusters || {};
                     renderPeopleGrid();
                     renderClustersGrid();
+                    const personSel = document.getElementById('filterPerson');
+                    if (personSel) {
+                        const previousValue = personSel.value;
+                        personSel.innerHTML = '<option value="">All people</option>';
+                        currentPeople.forEach(p => {
+                            const opt = document.createElement('option');
+                            opt.value = p.name; opt.textContent = p.name;
+                            personSel.appendChild(opt);
+                        });
+                        personSel.value = previousValue;
+                    }
                 })
                 .catch(() => {
                     document.getElementById('peopleGrid').innerHTML = '<p class="settings-hint">Failed to load.</p>';
@@ -1987,17 +2002,14 @@
                 opt.value = topic; opt.textContent = topic;
                 topicSel.appendChild(opt);
             });
-            fetch('/api/people_data').then(r => r.json()).then(data => {
-                currentPeople = data.people || [];
-                currentClusters = data.clusters || {};
-                peopleLoaded = true;
-                const personSel = document.getElementById('filterPerson');
-                currentPeople.forEach(p => {
-                    const opt = document.createElement('option');
-                    opt.value = p.name; opt.textContent = p.name;
-                    personSel.appendChild(opt);
-                });
-            }).catch(() => {});
+            // Personen-Dropdown wird von loadPeopleData() selbst mitbefüllt (siehe
+            // dort) — dieselbe Funktion, die auch die People-Karte rendert, statt
+            // einer zweiten, eigenen Fetch-Logik, die genau deswegen zuvor aus dem
+            // Tritt geraten konnte: sie setzte peopleLoaded=true, ohne die Karte
+            // selbst zu rendern — öffnete man die Karte danach, blieb "Loading…"
+            // für immer stehen, weil der eigentliche Ladepfad durch das Flag
+            // blockiert war.
+            loadPeopleData();
         })();
 
         let filterActive = false;
