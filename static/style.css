@@ -988,6 +988,24 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
     overflow-y: auto;
 }
 
+.face-zoom-content {
+    max-width: 90vw;
+    max-height: 90vh;
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+}
+.face-zoom-content img {
+    max-width: 90vw;
+    max-height: 90vh;
+    display: block;
+    border-radius: var(--radius-md);
+    object-fit: contain;
+}
+.event-person-avatar, .cluster-preview-thumb, .face-thumb, .person-face {
+    cursor: zoom-in;
+}
+
 .btn-archive {
     background: transparent;
     color: var(--primary);

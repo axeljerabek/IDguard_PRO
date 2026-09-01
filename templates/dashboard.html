@@ -707,6 +707,14 @@
         </div>
     </div>
 
+    <!-- Zoom-Lightbox für Gesichter — nur das Bild groß, egal wo im Dashboard geklickt wurde -->
+    <div id="faceZoomLightbox" class="lightbox" onclick="closeFaceZoom(event)">
+        <div class="lightbox-content face-zoom-content" onclick="event.stopPropagation()">
+            <span class="close-btn" onclick="closeFaceZoom(event)"><i class="fa-solid fa-xmark"></i></span>
+            <img id="faceZoomImage" src="" alt="">
+        </div>
+    </div>
+
     <script>
         const CSRF_TOKEN = "{{ csrf_token }}";
         const INITIAL_RECENT = {{ recent_events | tojson }};
@@ -997,7 +1005,7 @@
             }
             container.innerHTML = currentPeople.map(p => `
                 <div class="person-card" data-person-id="${p.id}" onclick="openPersonLightbox(${p.id})">
-                    <img src="/face_crop/${p.representative_face_id}" class="person-face" alt="${escapeHtml(p.name)}">
+                    <img src="/face_crop/${p.representative_face_id}" class="person-face" alt="${escapeHtml(p.name)}" onclick="event.stopPropagation(); zoomFace('/face_crop/${p.representative_face_id}')">
                     <div class="person-name">${escapeHtml(p.name)}</div>
                     <div class="person-count">${p.face_count} face${p.face_count === 1 ? '' : 's'}</div>
                 </div>
@@ -1017,7 +1025,7 @@
                 // alle Gesichter eines Clusters auf einmal zu zeigen war genau
                 // das Usability-Problem, das diese Überarbeitung lösen soll.
                 const preview = faces.slice(0, 3).map(f =>
-                    `<img src="/face_crop/${f.id}" class="cluster-preview-thumb" alt="">`
+                    `<img src="/face_crop/${f.id}" class="cluster-preview-thumb" alt="" onclick="event.stopPropagation(); zoomFace('/face_crop/${f.id}')">`
                 ).join('');
                 return `
                     <div class="cluster-summary-card" onclick="openClusterLightbox('${cid}')">
@@ -1075,7 +1083,7 @@
                     if (!facesEl) return;
                     facesEl.innerHTML = faces.map(f => `
                         <div class="face-thumb-wrap">
-                            <img src="/face_crop/${f.id}" class="face-thumb" title="${escapeHtml(f.filename)}">
+                            <img src="/face_crop/${f.id}" class="face-thumb" title="${escapeHtml(f.filename)}" onclick="zoomFace('/face_crop/${f.id}')">
                             <input type="checkbox" class="face-select-checkbox" onclick="toggleFaceSelection(${f.id}, this)" title="Select">
                             <button type="button" class="face-thumb-remove" onclick="unassignFace(${f.id}, ${personId})" title="Remove from this person"><i class="fa-solid fa-xmark"></i></button>
                         </div>
@@ -1096,7 +1104,7 @@
             const peopleOptions = currentPeople.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
             const faceThumbs = faces.map(f => `
                 <div class="face-thumb-wrap">
-                    <img src="/face_crop/${f.id}" class="face-thumb" title="${escapeHtml(f.filename)}">
+                    <img src="/face_crop/${f.id}" class="face-thumb" title="${escapeHtml(f.filename)}" onclick="zoomFace('/face_crop/${f.id}')">
                     <input type="checkbox" class="face-select-checkbox" onclick="toggleFaceSelection(${f.id}, this)" title="Select">
                     <button type="button" class="face-thumb-remove" onclick="rejectFace(${f.id}, '${cid}')" title="Not a face"><i class="fa-solid fa-xmark"></i></button>
                 </div>
@@ -1209,6 +1217,14 @@
         }
         function closeTranscriptLightbox() {
             document.getElementById('transcriptLightbox').classList.remove('active');
+        }
+
+        function zoomFace(url) {
+            document.getElementById('faceZoomImage').src = url;
+            document.getElementById('faceZoomLightbox').classList.add('active');
+        }
+        function closeFaceZoom() {
+            document.getElementById('faceZoomLightbox').classList.remove('active');
         }
 
         function _postForm(url, fields) {
@@ -1602,7 +1618,7 @@
                       }</span>`
                     : '';
                 const peopleBadges = (ev.people_in_video || []).map(p =>
-                    `<span class="event-person-badge"><img src="/face_crop/${p.face_id}" class="event-person-avatar" alt="" loading="lazy"> ${escapeHtml(p.name)}</span>`
+                    `<span class="event-person-badge"><img src="/face_crop/${p.face_id}" class="event-person-avatar" alt="" loading="lazy" onclick="event.stopPropagation(); zoomFace('/face_crop/${p.face_id}')"> ${escapeHtml(p.name)}</span>`
                 ).join('');
                 const unrecBadge = ev.unrecognized_face_count
                     ? `<span class="event-person-badge event-person-unknown"><i class="fa-solid fa-user-secret"></i> ${ev.unrecognized_face_count} unrecognized</span>`
