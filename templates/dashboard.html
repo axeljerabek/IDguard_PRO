@@ -1618,14 +1618,56 @@
         // archiviertes handelt (unterschiedliche Export-URL). Übersteht den
         // 3s-Poll aus demselben Grund wie expandedDescriptions oben.
         const selectedEvents = new Map();
-        function toggleEventSelection(fn, isArchived, checkbox) {
+        let _lastSelectedCheckbox = null; // Anker fürs Shift-Klick-Bereichsauswählen
+        function toggleEventSelection(checkbox, event) {
+            const fn = checkbox.dataset.filename;
+            const isArchived = checkbox.dataset.archived === 'true';
+            const container = checkbox.closest('.event-list');
+
+            if (event && event.shiftKey && _lastSelectedCheckbox
+                && container && container.contains(_lastSelectedCheckbox) && _lastSelectedCheckbox !== checkbox) {
+                // Bereich zwischen letzter Auswahl und dieser Checkbox markieren,
+                // wie in Datei-Explorern üblich — nur innerhalb derselben Liste
+                // (Recent und Archiv bleiben getrennte Bereiche).
+                const all = Array.from(container.querySelectorAll('.event-select-checkbox'));
+                const startIdx = all.indexOf(_lastSelectedCheckbox);
+                const endIdx = all.indexOf(checkbox);
+                if (startIdx !== -1 && endIdx !== -1) {
+                    const [from, to] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
+                    for (let i = from; i <= to; i++) {
+                        const cb = all[i];
+                        cb.checked = true;
+                        selectedEvents.set(cb.dataset.filename, cb.dataset.archived === 'true');
+                        cb.closest('.event-item').classList.add('event-item-selected');
+                    }
+                    updateBulkActionBar();
+                    return;
+                }
+            }
+
             if (checkbox.checked) selectedEvents.set(fn, isArchived);
             else selectedEvents.delete(fn);
             checkbox.closest('.event-item').classList.toggle('event-item-selected', checkbox.checked);
+            _lastSelectedCheckbox = checkbox;
             updateBulkActionBar();
+        }
+        function handleCardClick(event, fn, isArchived) {
+            // Ctrl/Cmd- oder Shift-Klick irgendwo auf die Karte wählt sie aus
+            // (bzw. markiert einen Bereich), statt das Video zu öffnen — wie in
+            // Datei-Explorern gewohnt, ohne dass man exakt die kleine Checkbox
+            // treffen muss.
+            if (event.ctrlKey || event.metaKey || event.shiftKey) {
+                const checkbox = event.currentTarget.querySelector('.event-select-checkbox');
+                if (!checkbox) return;
+                checkbox.checked = event.shiftKey ? true : !checkbox.checked;
+                toggleEventSelection(checkbox, event);
+                return;
+            }
+            openLightbox(fn, isArchived);
         }
         function clearSelection() {
             selectedEvents.clear();
+            _lastSelectedCheckbox = null;
             document.querySelectorAll('.event-select-checkbox').forEach(cb => cb.checked = false);
             document.querySelectorAll('.event-item-selected').forEach(el => el.classList.remove('event-item-selected'));
             updateBulkActionBar();
@@ -1889,9 +1931,9 @@
                     ? `<span class="event-transcript-badge" onclick="event.stopPropagation(); openTranscriptLightbox('${fn}')" title="View full transcript"><i class="fa-solid fa-closed-captioning"></i> Transcript</span>`
                     : '';
                 const isSelected = selectedEvents.has(fn);
-                html += `<div class="event-item${alt ? ' event-item-alt' : ''}${isSelected ? ' event-item-selected' : ''}" data-filename="${escapeHtml(fn)}" onclick="openLightbox('${fn}', ${isArchived})">
+                html += `<div class="event-item${alt ? ' event-item-alt' : ''}${isSelected ? ' event-item-selected' : ''}" data-filename="${escapeHtml(fn)}" onclick="handleCardClick(event, '${fn}', ${isArchived})">
                     <div class="event-thumb" data-default-src="${defaultSrc}" data-fs-base="${fsBase}" data-fs-count="${ev.filmstrip_count || 0}" data-fs-order="${(ev.filmstrip_order || []).join(',')}">${thumbHtml}${confBadge}
-                        <input type="checkbox" class="event-select-checkbox" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleEventSelection('${fn}', ${isArchived}, this)" title="Select for bulk actions">
+                        <input type="checkbox" class="event-select-checkbox" data-filename="${escapeHtml(fn)}" data-archived="${isArchived}" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleEventSelection(this, event)" title="Select for bulk actions (Ctrl/Shift+click a card to select ranges)">
                     </div>
                     ${filmstripPreview}
                     <div class="event-body">
