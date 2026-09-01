@@ -389,6 +389,7 @@ class CameraAgent(multiprocessing.Process):
         last_pts = -1
         audio_samples_written = 0
         audio_first_frame_time = None
+        _debug_audio_calls = 0  # TEMPORÄR — für die Diagnose, danach wieder raus
 
         # Filmstrip (Hover-Scrub-Vorschau + AI-taugliche Großbilder): pro
         # Recording neu gesetzt, siehe RECORDING-Start weiter unten.
@@ -545,7 +546,7 @@ class CameraAgent(multiprocessing.Process):
                 pass
 
         def encode_audio_frame(a_frame, ts=None):
-            nonlocal resampler, audio_samples_written, audio_first_frame_time
+            nonlocal resampler, audio_samples_written, audio_first_frame_time, _debug_audio_calls
             if not out_container or not out_audio:
                 return
             try:
@@ -561,25 +562,24 @@ class CameraAgent(multiprocessing.Process):
                     audio_first_frame_time = t
                     audio_samples_written = 0
 
+                expected_elapsed = audio_samples_written / out_audio.rate
+                actual_elapsed = t - audio_first_frame_time
+                if actual_elapsed - expected_elapsed > 3.0:
+                    gap_samples = int((actual_elapsed - expected_elapsed) * out_audio.rate)
+                    audio_samples_written += gap_samples
+
                 resampled_frames = resampler.resample(a_frame)
                 for rf in resampled_frames:
-                    # Bug-Fix: reiner Sample-Zähler (altes Verhalten: rf.pts = None,
-                    # PyAV zählt einfach Samples hoch) merkt einen Netz-Hänger gar
-                    # nicht — die Lücke verschwindet lautlos, Audio läuft ab da an
-                    # dauerhaft vor dem (korrekt Wall-Clock-basierten) Video her.
-                    # Hier: normal weiterzählen, aber bei einer Diskrepanz zur
-                    # echten Wall-Clock-Zeit > 0.5s eine Stille-Lücke einfügen, die
-                    # die Diskrepanz wieder ausgleicht. Bewusst NICHT pro Frame die
-                    # volle Wall-Clock-PTS neu berechnen (wie beim Video) — bei
-                    # tausenden kleinen Audio-Frames pro Aufnahme würde sich sonst
-                    # Rundungsfehler aufsummieren; die reine Gap-Korrektur ist
-                    # präziser für den Normalfall und korrigiert trotzdem den
-                    # eigentlichen Bug (Hänger).
-                    expected_elapsed = audio_samples_written / out_audio.rate
-                    actual_elapsed = t - audio_first_frame_time
-                    if actual_elapsed - expected_elapsed > 0.5:
-                        gap_samples = int((actual_elapsed - expected_elapsed) * out_audio.rate)
-                        audio_samples_written += gap_samples
+                    if _debug_audio_calls < 20:
+                        self.logger.info(
+                            f"🔍 AUDIO-DEBUG #{_debug_audio_calls}: t={t:.4f} first_t={audio_first_frame_time:.4f} "
+                            f"actual_elapsed={actual_elapsed:.4f} expected_elapsed={expected_elapsed:.4f} "
+                            f"out_audio.rate={out_audio.rate} rf.rate={rf.rate} rf.samples={rf.samples} "
+                            f"rf.time_base={rf.time_base} out_audio.time_base={out_audio.time_base} "
+                            f"a_frame.rate={a_frame.rate} a_frame.samples={a_frame.samples} "
+                            f"samples_written_before={audio_samples_written}"
+                        )
+                        _debug_audio_calls += 1
                     rf.pts = audio_samples_written
                     audio_samples_written += rf.samples
                     for packet in out_audio.encode(rf):
@@ -826,6 +826,24 @@ class CameraAgent(multiprocessing.Process):
                                                 out_audio = out_container.add_stream('aac')
                                                 out_audio.rate = audio_in_stream.rate if audio_in_stream.rate else 44100
                                                 out_audio.layout = audio_in_stream.layout.name if audio_in_stream.layout else 'stereo'
+                                                # DER Root-Cause-Bug hinter der wild falschen Spieldauer
+                                                # (169MB-Datei meldete 6:56:20, Axel fand's per ffprobe):
+                                                # ohne explizite Zeitbasis nimmt PyAV/der Muxer für den
+                                                # Audio-Stream einen Standardwert (empirisch bestätigt:
+                                                # 1/1000, nicht 1/rate) — jedes rf.pts wird zwar KORREKT
+                                                # in Samples hochgezählt (encode_audio_frame), aber beim
+                                                # Schreiben als "pts * falsche_zeitbasis" interpretiert.
+                                                # Bei 1024 Samples/Frame und rate=48000 macht das aus
+                                                # ~21ms echter Paketlänge fälschlich 1024/1000 = 1.024s —
+                                                # exakt der Faktor ~48, der bei jeder Messung auftauchte.
+                                                # Video hatte diesen Bug nie, weil dort schon immer
+                                                # explizit `out_video.time_base = Fraction(1, TARGET_FPS)`
+                                                # gesetzt wurde (siehe zwei Zeilen oben) — bei Audio fehlte
+                                                # das exakte Gegenstück komplett. Meine vorherigen PTS-
+                                                # Gap-Korrektur-Fixes waren zwar für sich genommen korrekt,
+                                                # konnten das aber nie beheben, weil das Problem gar nicht
+                                                # in der Gap-Logik lag.
+                                                out_audio.time_base = Fraction(1, out_audio.rate)
 
                                             for item_type, data, item_ts in av_buffer:
                                                 write_buffered_item(item_type, data, item_ts)
