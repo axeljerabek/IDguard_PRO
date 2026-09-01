@@ -1397,6 +1397,36 @@ input:checked + .slider:before { transform: translateX(21px); background: #fffff
     line-height: 1.55;
     white-space: pre-wrap;
 }
+.lightbox-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+}
+.lightbox-meta:empty { display: none; margin-top: 0; }
+.lightbox-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+}
+.lightbox-actions button {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--card-bg-inset);
+    color: var(--text);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.lightbox-actions .lightbox-btn-archive:hover { border-color: var(--primary); color: var(--primary); }
+.lightbox-actions .lightbox-btn-export:hover { border-color: var(--success); color: var(--success); }
+.lightbox-actions .lightbox-btn-delete:hover { border-color: var(--danger); color: var(--danger); }
 .player-controls button {
     background: var(--card-bg-inset);
     border: 1px solid var(--border);

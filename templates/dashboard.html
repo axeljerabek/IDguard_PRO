@@ -714,6 +714,12 @@
                 <summary><i class="fa-solid fa-wand-magic-sparkles"></i> AI Description</summary>
                 <p id="lightboxAiDescText"></p>
             </details>
+            <div id="lightboxMeta" class="lightbox-meta"></div>
+            <div class="lightbox-actions" id="lightboxActions">
+                <button type="button" class="lightbox-btn-archive" id="lightboxArchiveBtn" onclick="archiveEvent(currentLightboxFilename)"><i class="fa-solid fa-box-archive"></i> Archive</button>
+                <button type="button" class="lightbox-btn-export" id="lightboxExportBtn" onclick="exportEvent(currentLightboxFilename, currentLightboxArchived)"><i class="fa-solid fa-file-export"></i> Export</button>
+                <button type="button" class="lightbox-btn-delete" id="lightboxDeleteBtn" onclick="deleteEvent(currentLightboxFilename, currentLightboxArchived)"><i class="fa-solid fa-trash-can"></i> Delete</button>
+            </div>
         </div>
     </div>
 
@@ -1444,20 +1450,21 @@
             });
         }
 
-        function archiveEvent(fn, btn) {
+        function archiveEvent(fn) {
             _postForm('/archive/' + fn, {}).then(res => {
                 if (res.ok) {
-                    const card = btn.closest('.event-item');
+                    const card = document.querySelector(`.event-item[data-filename="${CSS.escape(fn)}"]`);
                     if (card) card.remove();
                     _decrementCountBadge('event-count');
                     showToast('Archived — will appear under Archived shortly.');
+                    if (currentLightboxFilename === fn) closeLightbox();
                 } else {
                     showToast('⚠️ Archive failed: ' + (res.error || 'unknown error'), 6000);
                 }
             });
         }
 
-        async function deleteEvent(fn, isArchived, btn) {
+        async function deleteEvent(fn, isArchived) {
             const ok = await showConfirm(isArchived
                 ? 'Permanently delete this video? This cannot be undone.'
                 : 'Delete this video? This cannot be undone.');
@@ -1465,10 +1472,11 @@
             const url = (isArchived ? '/delete_archived/' : '/delete/') + fn;
             _postForm(url, {}).then(res => {
                 if (res.ok) {
-                    const card = btn.closest('.event-item');
+                    const card = document.querySelector(`.event-item[data-filename="${CSS.escape(fn)}"]`);
                     if (card) card.remove();
                     _decrementCountBadge(isArchived ? 'archive-count' : 'event-count');
                     showToast('Deleted.');
+                    if (currentLightboxFilename === fn) closeLightbox();
                 } else {
                     showToast('⚠️ Delete failed: ' + (res.error || 'unknown error'), 6000);
                 }
@@ -1917,9 +1925,9 @@
                     ? `<button type="button" class="btn-export" title="Export to configured folder" onclick="event.stopPropagation(); exportEvent('${fn}', ${isArchived})"><i class="fa-solid fa-file-export"></i></button>`
                     : '';
                 const actions = (isArchived
-                    ? `<button type="button" class="btn-delete" title="Permanently delete video" onclick="event.stopPropagation(); deleteEvent('${fn}', true, this)"><i class="fa-solid fa-trash-can"></i></button>`
-                    : `<button type="button" class="btn-archive" title="Archive video" onclick="event.stopPropagation(); archiveEvent('${fn}', this)"><i class="fa-solid fa-box-archive"></i></button>
-                       <button type="button" class="btn-delete" title="Delete video" onclick="event.stopPropagation(); deleteEvent('${fn}', false, this)"><i class="fa-solid fa-trash-can"></i></button>`) + analyzeBtn + exportBtn;
+                    ? `<button type="button" class="btn-delete" title="Permanently delete video" onclick="event.stopPropagation(); deleteEvent('${fn}', true)"><i class="fa-solid fa-trash-can"></i></button>`
+                    : `<button type="button" class="btn-archive" title="Archive video" onclick="event.stopPropagation(); archiveEvent('${fn}')"><i class="fa-solid fa-box-archive"></i></button>
+                       <button type="button" class="btn-delete" title="Delete video" onclick="event.stopPropagation(); deleteEvent('${fn}', false)"><i class="fa-solid fa-trash-can"></i></button>`) + analyzeBtn + exportBtn;
                 let aiLine = '';
                 if (ev.ai_pending) {
                     aiLine = `<span class="event-ai-desc event-ai-pending"><i class="fa-solid fa-spinner fa-spin"></i> Analyzing...</span>`;
@@ -2231,6 +2239,8 @@
               statusText = document.getElementById('status-text'),
               loader = document.getElementById('loader'),
               downloadLink = document.getElementById('downloadLink');
+        let currentLightboxFilename = null;
+        let currentLightboxArchived = false;
 
         function openLightbox(filename, archived) {
             loader.style.display = 'block';
@@ -2240,6 +2250,8 @@
             videoPlayer.load();
             downloadLink.href = src;
             downloadLink.setAttribute('download', filename);
+            currentLightboxFilename = filename;
+            currentLightboxArchived = archived;
 
             const ev = eventDataMap[filename];
             const descBox = document.getElementById('lightboxAiDesc');
@@ -2250,6 +2262,13 @@
             } else {
                 descBox.style.display = 'none';
             }
+            renderLightboxMetadata(ev);
+
+            document.getElementById('lightboxArchiveBtn').style.display = archived ? 'none' : 'inline-flex';
+            document.getElementById('lightboxDeleteBtn').innerHTML = archived
+                ? '<i class="fa-solid fa-trash-can"></i> Delete permanently'
+                : '<i class="fa-solid fa-trash-can"></i> Delete';
+            document.getElementById('lightboxExportBtn').style.display = EXPORT_ENABLED ? 'inline-flex' : 'none';
 
             videoPlayer.onloadeddata = () => {
                 loader.style.display = 'none';
@@ -2265,11 +2284,38 @@
             lightbox.classList.add('active');
         }
 
+        function renderLightboxMetadata(ev) {
+            const box = document.getElementById('lightboxMeta');
+            if (!ev) { box.innerHTML = ''; return; }
+
+            const topicList = (ev.detected_topics && ev.detected_topics.length)
+                ? ev.detected_topics
+                : (ev.top_topic ? [{topic: ev.top_topic, score: ev.top_topic_confidence}] : []);
+            const topicLine = topicList.length
+                ? `<span class="event-topic-line"><i class="fa-solid fa-tag"></i> ${
+                    topicList.map(t => `${escapeHtml(t.topic)}${t.score != null ? ` (${Math.round(t.score)}%)` : ''}`).join(', ')
+                  }</span>`
+                : '';
+            const peopleBadges = (ev.people_in_video || []).map(p =>
+                `<span class="event-person-badge"><img src="/face_crop/${p.face_id}" class="event-person-avatar" alt="" loading="lazy" onclick="zoomFace('/face_crop/${p.face_id}')"> ${escapeHtml(p.name)}</span>`
+            ).join('');
+            const unrecBadge = ev.unrecognized_face_count
+                ? `<span class="event-person-badge event-person-unknown"><i class="fa-solid fa-user-secret"></i> ${ev.unrecognized_face_count} unrecognized</span>`
+                : '';
+            const peopleLine = (peopleBadges || unrecBadge)
+                ? `<span class="event-people-line">${peopleBadges}${unrecBadge}</span>`
+                : '';
+
+            box.innerHTML = topicLine + peopleLine;
+        }
+
         function closeLightbox(e) {
             videoPlayer.pause();
             videoSource.src = '';
             videoPlayer.load();
             lightbox.classList.remove('active');
+            currentLightboxFilename = null;
+            currentLightboxArchived = false;
         }
 
         function setSpeed(rate, btn) {
