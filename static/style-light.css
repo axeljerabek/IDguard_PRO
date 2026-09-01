@@ -319,8 +319,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
     gap: 8px;
 }
 .stream-header span { font-weight: 500; font-size: 0.88rem; }
-.stream-name-wrap { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.stream-last-seen { font-size: 0.7rem; font-weight: 400 !important; color: var(--text-muted); font-family: var(--font-mono); }
+.stream-name-wrap { display: flex; flex-direction: row; align-items: baseline; gap: 7px; min-width: 0; overflow: hidden; }
+.stream-last-seen { font-size: 0.7rem; font-weight: 400 !important; color: var(--text-muted); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .stream-thumb {
     width: 100%;
