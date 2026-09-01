@@ -1026,6 +1026,28 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
     border-radius: var(--radius-md);
     object-fit: contain;
 }
+.confirm-modal-content {
+    max-width: 380px;
+    text-align: center;
+    padding: 28px 24px 22px;
+}
+.confirm-modal-icon {
+    font-size: 1.8rem;
+    color: var(--warning);
+    margin-bottom: 12px;
+}
+#confirmModalText {
+    color: var(--text);
+    font-size: 0.95rem;
+    line-height: 1.5;
+    margin: 0 0 20px 0;
+}
+.confirm-modal-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+}
+.confirm-modal-actions button { flex: 1; justify-content: center; }
 .event-person-avatar, .cluster-preview-thumb, .face-thumb, .person-face {
     cursor: zoom-in;
 }

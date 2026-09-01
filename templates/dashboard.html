@@ -76,13 +76,13 @@
                 <button type="button" id="searchClearBtn" onclick="clearSearch()" style="display:none;" title="Clear search"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="filter-bar">
-                <select id="filterCamera" onchange="applyFilters()"><option value="">All cameras</option></select>
-                <select id="filterPerson" onchange="applyFilters()"><option value="">All people</option></select>
-                <select id="filterTopic" onchange="applyFilters()"><option value="">All topics</option></select>
-                <button type="button" id="filterClearBtn" onclick="clearFilters()" style="display:none;" title="Clear filters"><i class="fa-solid fa-xmark"></i> Clear filters</button>
+                <select class="filter-camera" onchange="applyFilters(this)"><option value="">All cameras</option></select>
+                <select class="filter-person" onchange="applyFilters(this)"><option value="">All people</option></select>
+                <select class="filter-topic" onchange="applyFilters(this)"><option value="">All topics</option></select>
+                <button type="button" class="btn-select-all filter-clear-btn" onclick="clearFilters()" style="display:none;" title="Clear filters"><i class="fa-solid fa-xmark"></i> Clear filters</button>
             </div>
             <div id="searchStatus" style="display:none;"></div>
-            <div id="filterStatus" style="display:none;"></div>
+            <div class="filter-status" style="display:none;"></div>
             <button type="button" class="btn-select-all" onclick="selectAllEvents('recent')"><i class="fa-solid fa-square-check"></i> Select all</button>
             <a class="btn-select-all" href="/api/export_metadata?format=csv" download title="Download metadata (filenames, triggers, topics, people, descriptions, transcripts) for every recording as CSV"><i class="fa-solid fa-file-csv"></i> Export all metadata (CSV)</a>
             <div class="event-list" id="recent-event-list"></div>
@@ -677,6 +677,13 @@
                 <i class="fa-solid fa-chevron-down chevron"></i>
             </summary>
             <div class="collapse-body">
+                <div class="filter-bar">
+                    <select class="filter-camera" onchange="applyFilters(this)"><option value="">All cameras</option></select>
+                    <select class="filter-person" onchange="applyFilters(this)"><option value="">All people</option></select>
+                    <select class="filter-topic" onchange="applyFilters(this)"><option value="">All topics</option></select>
+                    <button type="button" class="btn-select-all filter-clear-btn" onclick="clearFilters()" style="display:none;" title="Clear filters"><i class="fa-solid fa-xmark"></i> Clear filters</button>
+                </div>
+                <div class="filter-status" style="display:none;"></div>
                 <button type="button" class="btn-select-all" onclick="selectAllEvents('archived')"><i class="fa-solid fa-square-check"></i> Select all</button>
                 <div class="event-list" id="archived-event-list"></div>
             </div>
@@ -740,6 +747,19 @@
         <div class="lightbox-content face-zoom-content" onclick="event.stopPropagation()">
             <span class="close-btn" onclick="closeFaceZoom(event)"><i class="fa-solid fa-xmark"></i></span>
             <img id="faceZoomImage" src="" alt="">
+        </div>
+    </div>
+
+    <!-- Wiederverwendbares Bestätigungsmodal — ersetzt das native, hässliche
+         window.confirm() für alle "bist du sicher"-Momente im Dashboard. -->
+    <div id="confirmModal" class="lightbox" onclick="if (event.target === this) _resolveConfirm(false)">
+        <div class="lightbox-content confirm-modal-content" onclick="event.stopPropagation()">
+            <div class="confirm-modal-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+            <p id="confirmModalText"></p>
+            <div class="confirm-modal-actions">
+                <button type="button" class="btn-select-all" onclick="_resolveConfirm(false)">Cancel</button>
+                <button type="button" id="confirmModalOkBtn" class="btn-delete-outline" onclick="_resolveConfirm(true)">Delete</button>
+            </div>
         </div>
     </div>
 
@@ -1377,6 +1397,20 @@
             document.getElementById('faceZoomLightbox').classList.remove('active');
         }
 
+        let _confirmResolve = null;
+        function showConfirm(message, okLabel = 'Delete') {
+            return new Promise(resolve => {
+                _confirmResolve = resolve;
+                document.getElementById('confirmModalText').textContent = message;
+                document.getElementById('confirmModalOkBtn').textContent = okLabel;
+                document.getElementById('confirmModal').classList.add('active');
+            });
+        }
+        function _resolveConfirm(result) {
+            document.getElementById('confirmModal').classList.remove('active');
+            if (_confirmResolve) { _confirmResolve(result); _confirmResolve = null; }
+        }
+
         function _postForm(url, fields) {
             const body = new URLSearchParams();
             body.append('csrf_token', CSRF_TOKEN);
@@ -1423,8 +1457,11 @@
             });
         }
 
-        function deleteEvent(fn, isArchived, btn) {
-            if (!confirm(isArchived ? 'Are you sure you want to permanently delete this video?' : 'Are you sure you want to delete this video?')) return;
+        async function deleteEvent(fn, isArchived, btn) {
+            const ok = await showConfirm(isArchived
+                ? 'Permanently delete this video? This cannot be undone.'
+                : 'Delete this video? This cannot be undone.');
+            if (!ok) return;
             const url = (isArchived ? '/delete_archived/' : '/delete/') + fn;
             _postForm(url, {}).then(res => {
                 if (res.ok) {
@@ -1500,8 +1537,9 @@
             });
         }
 
-        function deletePerson(personId) {
-            if (!confirm('Un-name this person? Their faces stay and become unassigned again — nothing is deleted.')) return;
+        async function deletePerson(personId) {
+            const ok = await showConfirm('Un-name this person? Their faces stay and become unassigned again — nothing is deleted.', 'Un-name');
+            if (!ok) return;
             _postForm('/api/delete_person', { person_id: personId }).then(res => {
                 if (res.ok) {
                     if (lightboxContext && lightboxContext.type === 'person' && lightboxContext.id === personId) closePeopleLightbox();
@@ -1618,6 +1656,35 @@
             const hasNonArchived = Array.from(selectedEvents.values()).some(isArchived => !isArchived);
             document.getElementById('bulkArchiveBtn').style.display = hasNonArchived ? 'inline-flex' : 'none';
         }
+        async function deleteSelectedEvents() {
+            const items = Array.from(selectedEvents.entries());
+            if (!items.length) return;
+            const ok = await showConfirm(
+                `Permanently delete ${items.length} recording${items.length === 1 ? '' : 's'}? This cannot be undone.`,
+                'Delete ' + items.length
+            );
+            if (!ok) return;
+            const btn = document.getElementById('bulkDeleteBtn');
+            btn.disabled = true;
+            const filenames = items.map(([fn]) => fn);
+            const archivedFlags = items.map(([, isArchived]) => isArchived ? 'true' : 'false');
+            _postForm('/api/delete_events_bulk', { filenames, archived: archivedFlags }).then(res => {
+                btn.disabled = false;
+                if (!res.ok) {
+                    showToast('⚠️ ' + (res.error || 'Delete failed.'), 6000);
+                    return;
+                }
+                items.forEach(([fn]) => {
+                    const card = document.querySelector(`.event-item[data-filename="${CSS.escape(fn)}"]`);
+                    if (card) card.remove();
+                });
+                showToast((res.failed && res.failed.length)
+                    ? `Deleted ${res.deleted}, ${res.failed.length} failed.`
+                    : `Deleted ${res.deleted} recording${res.deleted === 1 ? '' : 's'}.`, 6000);
+                clearSelection();
+            });
+        }
+
         async function archiveSelectedEvents() {
             const items = Array.from(selectedEvents.entries()).filter(([fn, isArchived]) => !isArchived);
             if (!items.length) return;
@@ -1822,7 +1889,7 @@
                     ? `<span class="event-transcript-badge" onclick="event.stopPropagation(); openTranscriptLightbox('${fn}')" title="View full transcript"><i class="fa-solid fa-closed-captioning"></i> Transcript</span>`
                     : '';
                 const isSelected = selectedEvents.has(fn);
-                html += `<div class="event-item${alt ? ' event-item-alt' : ''}${isSelected ? ' event-item-selected' : ''}" onclick="openLightbox('${fn}', ${isArchived})">
+                html += `<div class="event-item${alt ? ' event-item-alt' : ''}${isSelected ? ' event-item-selected' : ''}" data-filename="${escapeHtml(fn)}" onclick="openLightbox('${fn}', ${isArchived})">
                     <div class="event-thumb" data-default-src="${defaultSrc}" data-fs-base="${fsBase}" data-fs-count="${ev.filmstrip_count || 0}" data-fs-order="${(ev.filmstrip_order || []).join(',')}">${thumbHtml}${confBadge}
                         <input type="checkbox" class="event-select-checkbox" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleEventSelection('${fn}', ${isArchived}, this)" title="Select for bulk actions">
                     </div>
@@ -2039,17 +2106,19 @@
         // auf das ohnehin träge geladene People-Grid zu warten) einmalig beim
         // Laden angestoßen, auch wenn die People-Karte noch gar nicht geöffnet ist.
         (function populateFilterDropdowns() {
-            const cameraSel = document.getElementById('filterCamera');
-            CAMERA_NAMES.forEach(name => {
-                const opt = document.createElement('option');
-                opt.value = name; opt.textContent = name;
-                cameraSel.appendChild(opt);
+            document.querySelectorAll('.filter-camera').forEach(cameraSel => {
+                CAMERA_NAMES.forEach(name => {
+                    const opt = document.createElement('option');
+                    opt.value = name; opt.textContent = name;
+                    cameraSel.appendChild(opt);
+                });
             });
-            const topicSel = document.getElementById('filterTopic');
-            AI_TOPICS_LIST.forEach(topic => {
-                const opt = document.createElement('option');
-                opt.value = topic; opt.textContent = topic;
-                topicSel.appendChild(opt);
+            document.querySelectorAll('.filter-topic').forEach(topicSel => {
+                AI_TOPICS_LIST.forEach(topic => {
+                    const opt = document.createElement('option');
+                    opt.value = topic; opt.textContent = topic;
+                    topicSel.appendChild(opt);
+                });
             });
             // Personen-Dropdown wird von loadPeopleData() selbst mitbefüllt (siehe
             // dort) — dieselbe Funktion, die auch die People-Karte rendert, statt
@@ -2062,18 +2131,27 @@
         })();
 
         let filterActive = false;
-        function applyFilters() {
-            const camera = document.getElementById('filterCamera').value;
-            const person = document.getElementById('filterPerson').value;
-            const topic = document.getElementById('filterTopic').value;
+        function applyFilters(triggerEl) {
+            // Recent- und Archiv-Filterleiste zeigen IMMER denselben aktiven
+            // Filter — bei Änderung an einer die andere auf denselben Wert
+            // mitziehen, statt zwei unabhängige, potenziell widersprüchliche
+            // Filterzustände zu erlauben.
+            if (triggerEl) {
+                const cls = ['filter-camera', 'filter-person', 'filter-topic'].find(c => triggerEl.classList.contains(c));
+                if (cls) document.querySelectorAll('.' + cls).forEach(el => { el.value = triggerEl.value; });
+            }
+            const camera = document.querySelector('.filter-camera').value;
+            const person = document.querySelector('.filter-person').value;
+            const topic = document.querySelector('.filter-topic').value;
             if (!camera && !person && !topic) {
                 clearFilters();
                 return;
             }
             if (searchActive) clearSearch();
-            const statusEl = document.getElementById('filterStatus');
-            statusEl.style.display = 'block';
-            statusEl.textContent = 'Filtering…';
+            document.querySelectorAll('.filter-status').forEach(el => {
+                el.style.display = 'block';
+                el.textContent = 'Filtering…';
+            });
             const params = new URLSearchParams();
             if (camera) params.set('camera', camera);
             if (person) params.set('person', person);
@@ -2082,24 +2160,25 @@
                 .then(r => r.json())
                 .then(data => {
                     filterActive = true;
-                    document.getElementById('filterClearBtn').style.display = 'inline-flex';
+                    document.querySelectorAll('.filter-clear-btn').forEach(el => { el.style.display = 'inline-flex'; });
                     const recent = data.recent || [];
                     const archived = data.archived || [];
-                    statusEl.textContent = `${recent.length + archived.length} result${(recent.length + archived.length) === 1 ? '' : 's'} (${recent.length} recent, ${archived.length} archived)`;
+                    const msg = `${recent.length + archived.length} result${(recent.length + archived.length) === 1 ? '' : 's'} (${recent.length} recent, ${archived.length} archived)`;
+                    document.querySelectorAll('.filter-status').forEach(el => { el.textContent = msg; });
                     document.getElementById('recent-event-list').innerHTML = renderEvents(recent, false);
                     document.getElementById('event-count').innerText = recent.length;
                     document.getElementById('archived-event-list').innerHTML = renderEvents(archived, true);
                     document.getElementById('archive-count').innerText = archived.length;
                 })
-                .catch(() => { statusEl.textContent = 'Filter failed.'; });
+                .catch(() => {
+                    document.querySelectorAll('.filter-status').forEach(el => { el.textContent = 'Filter failed.'; });
+                });
         }
         function clearFilters() {
             filterActive = false;
-            document.getElementById('filterCamera').value = '';
-            document.getElementById('filterPerson').value = '';
-            document.getElementById('filterTopic').value = '';
-            document.getElementById('filterStatus').style.display = 'none';
-            document.getElementById('filterClearBtn').style.display = 'none';
+            document.querySelectorAll('.filter-camera, .filter-person, .filter-topic').forEach(el => { el.value = ''; });
+            document.querySelectorAll('.filter-status').forEach(el => { el.style.display = 'none'; });
+            document.querySelectorAll('.filter-clear-btn').forEach(el => { el.style.display = 'none'; });
             updateSystemStatus();
         }
 
@@ -2178,6 +2257,7 @@
         <button type="button" id="bulkArchiveBtn" onclick="archiveSelectedEvents()"><i class="fa-solid fa-box-archive"></i> Archive Selected</button>
         <button type="button" id="bulkExportBtn" onclick="exportSelectedEvents()"><i class="fa-solid fa-file-export"></i> Export Selected</button>
         <button type="button" id="bulkMetadataBtn" onclick="exportSelectedMetadata()"><i class="fa-solid fa-file-csv"></i> Export metadata (CSV)</button>
+        <button type="button" id="bulkDeleteBtn" onclick="deleteSelectedEvents()"><i class="fa-solid fa-trash-can"></i> Delete Selected</button>
         <button type="button" class="bulk-clear-btn" onclick="clearSelection()">Clear selection</button>
     </div>
 </body>

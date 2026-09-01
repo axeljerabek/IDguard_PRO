@@ -1298,6 +1298,38 @@ def delete_archived_video(filename: str):
     _event_cache.clear()
     return json.dumps({'ok': True})
 
+@app.route('/api/delete_events_bulk', methods=['POST'])
+@requires_auth
+def api_delete_events_bulk():
+    _verify_csrf()
+    filenames = request.form.getlist('filenames')
+    archived_flags = request.form.getlist('archived')
+    if not filenames or len(filenames) != len(archived_flags):
+        return json.dumps({'ok': False, 'error': 'Invalid selection.'})
+
+    deleted = 0
+    failed = []
+    for filename, archived_str in zip(filenames, archived_flags):
+        directory = ARCHIVE_DIR if archived_str == 'true' else ALERTS_DIR
+        file_path = os.path.abspath(os.path.join(directory, filename))
+        if not (file_path.startswith(os.path.abspath(directory)) and os.path.exists(file_path)):
+            failed.append(filename)
+            continue
+        try:
+            os.remove(file_path)
+        except Exception:
+            failed.append(filename)
+            continue
+        _remove_matching_thumbnail(file_path)
+        if search_index is not None:
+            search_index.remove_event(filename)
+        if faces_db is not None:
+            faces_db.remove_faces_for_video(filename)
+        deleted += 1
+
+    _event_cache.clear()
+    return json.dumps({'ok': True, 'deleted': deleted, 'failed': failed})
+
 @app.route('/thumb/<filename>')
 @requires_auth
 def serve_thumbnail_image(filename):
