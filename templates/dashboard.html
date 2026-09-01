@@ -68,7 +68,14 @@
                     <button type="button" onclick="runSearch()">Search</button>
                     <button type="button" id="searchClearBtn" onclick="clearSearch()" style="display:none;" title="Clear search"><i class="fa-solid fa-xmark"></i></button>
                 </div>
+                <div class="filter-bar">
+                    <select id="filterCamera" onchange="applyFilters()"><option value="">All cameras</option></select>
+                    <select id="filterPerson" onchange="applyFilters()"><option value="">All people</option></select>
+                    <select id="filterTopic" onchange="applyFilters()"><option value="">All topics</option></select>
+                    <button type="button" id="filterClearBtn" onclick="clearFilters()" style="display:none;" title="Clear filters"><i class="fa-solid fa-xmark"></i> Clear filters</button>
+                </div>
                 <div id="searchStatus" style="display:none;"></div>
+                <div id="filterStatus" style="display:none;"></div>
                 <button type="button" class="btn-select-all" onclick="selectAllEvents('recent')"><i class="fa-solid fa-square-check"></i> Select all</button>
                 <a class="btn-select-all" href="/api/export_metadata?format=csv" download title="Download metadata (filenames, triggers, topics, people, descriptions, transcripts) for every recording as CSV"><i class="fa-solid fa-file-csv"></i> Export all metadata (CSV)</a>
                 <div class="event-list" id="recent-event-list"></div>
@@ -714,6 +721,8 @@
         const CSRF_TOKEN = "{{ csrf_token }}";
         const INITIAL_RECENT = {{ recent_events | tojson }};
         const INITIAL_ARCHIVED = {{ archived_events | tojson }};
+        const CAMERA_NAMES = {{ streams | tojson }};
+        const AI_TOPICS_LIST = {{ settings.get('AI_TOPICS', []) | tojson }};
         const THUMBNAIL_INTERVAL_MS = {{ thumbnail_interval_ms }};
         const DEFAULT_TITLE = document.title;
         const EXPORT_ENABLED = {{ 'true' if settings.get('EXPORT_DIR') else 'false' }};
@@ -1615,6 +1624,7 @@
         function runSearch() {
             const q = document.getElementById('searchInput').value.trim();
             if (!q) return;
+            if (filterActive) clearFilters();
             const statusEl = document.getElementById('searchStatus');
             statusEl.style.display = 'block';
             statusEl.textContent = 'Searching...';
@@ -1918,12 +1928,12 @@
                             }
                         }
                     }
-                    if (data.recent_events && !searchActive) {
+                    if (data.recent_events && !searchActive && !filterActive) {
                         const merged = data.recent_events.concat(extraEvents.recent);
                         document.getElementById('recent-event-list').innerHTML = renderEvents(merged, false) + moreButtonHtml('recent');
                         document.getElementById('event-count').innerText = merged.length;
                     }
-                    if (data.archived_events) {
+                    if (data.archived_events && !filterActive) {
                         const merged = data.archived_events.concat(extraEvents.archived);
                         document.getElementById('archived-event-list').innerHTML = renderEvents(merged, true) + moreButtonHtml('archived');
                         document.getElementById('archive-count').innerText = merged.length;
@@ -1956,6 +1966,78 @@
         document.getElementById('recent-event-list').innerHTML = renderEvents(INITIAL_RECENT, false);
         document.getElementById('archived-event-list').innerHTML = renderEvents(INITIAL_ARCHIVED, true);
         updateSystemStatus();
+
+        // Filter-Leiste: Kamera/Thema stehen sofort fest (aus Settings/Streams),
+        // Personen kommen erst mit dem People-Fetch — daher hier eigens (statt
+        // auf das ohnehin träge geladene People-Grid zu warten) einmalig beim
+        // Laden angestoßen, auch wenn die People-Karte noch gar nicht geöffnet ist.
+        (function populateFilterDropdowns() {
+            const cameraSel = document.getElementById('filterCamera');
+            CAMERA_NAMES.forEach(name => {
+                const opt = document.createElement('option');
+                opt.value = name; opt.textContent = name;
+                cameraSel.appendChild(opt);
+            });
+            const topicSel = document.getElementById('filterTopic');
+            AI_TOPICS_LIST.forEach(topic => {
+                const opt = document.createElement('option');
+                opt.value = topic; opt.textContent = topic;
+                topicSel.appendChild(opt);
+            });
+            fetch('/api/people_data').then(r => r.json()).then(data => {
+                currentPeople = data.people || [];
+                currentClusters = data.clusters || {};
+                peopleLoaded = true;
+                const personSel = document.getElementById('filterPerson');
+                currentPeople.forEach(p => {
+                    const opt = document.createElement('option');
+                    opt.value = p.name; opt.textContent = p.name;
+                    personSel.appendChild(opt);
+                });
+            }).catch(() => {});
+        })();
+
+        let filterActive = false;
+        function applyFilters() {
+            const camera = document.getElementById('filterCamera').value;
+            const person = document.getElementById('filterPerson').value;
+            const topic = document.getElementById('filterTopic').value;
+            if (!camera && !person && !topic) {
+                clearFilters();
+                return;
+            }
+            if (searchActive) clearSearch();
+            const statusEl = document.getElementById('filterStatus');
+            statusEl.style.display = 'block';
+            statusEl.textContent = 'Filtering…';
+            const params = new URLSearchParams();
+            if (camera) params.set('camera', camera);
+            if (person) params.set('person', person);
+            if (topic) params.set('topic', topic);
+            fetch('/api/filter_events?' + params.toString())
+                .then(r => r.json())
+                .then(data => {
+                    filterActive = true;
+                    document.getElementById('filterClearBtn').style.display = 'inline-flex';
+                    const recent = data.recent || [];
+                    const archived = data.archived || [];
+                    statusEl.textContent = `${recent.length + archived.length} result${(recent.length + archived.length) === 1 ? '' : 's'} (${recent.length} recent, ${archived.length} archived)`;
+                    document.getElementById('recent-event-list').innerHTML = renderEvents(recent, false);
+                    document.getElementById('event-count').innerText = recent.length;
+                    document.getElementById('archived-event-list').innerHTML = renderEvents(archived, true);
+                    document.getElementById('archive-count').innerText = archived.length;
+                })
+                .catch(() => { statusEl.textContent = 'Filter failed.'; });
+        }
+        function clearFilters() {
+            filterActive = false;
+            document.getElementById('filterCamera').value = '';
+            document.getElementById('filterPerson').value = '';
+            document.getElementById('filterTopic').value = '';
+            document.getElementById('filterStatus').style.display = 'none';
+            document.getElementById('filterClearBtn').style.display = 'none';
+            updateSystemStatus();
+        }
 
         const lightbox = document.getElementById('lightbox'),
               videoPlayer = document.getElementById('videoPlayer'),

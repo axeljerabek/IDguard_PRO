@@ -242,6 +242,40 @@ def _build_full_event_list(directory):
     files = sorted(glob.glob(os.path.join(directory, '*.mp4')), key=os.path.getmtime, reverse=True)
     return [e for e in (_event_from_file(f) for f in files) if e]
 
+def _camera_name_from_filename(filename):
+    """Kameraname aus dem Dateinamen extrahieren: <Kamera>_EVENT_<Zeitstempel>.mp4
+    (siehe recorder_pipeline.py, video_file_path). Exakter Split statt
+    Prefix-Vergleich, damit z.B. 'Bed' nicht fälschlich 'Bedroom' matcht."""
+    return filename.split('_EVENT_')[0] if '_EVENT_' in filename else filename
+
+@app.route('/api/filter_events')
+@requires_auth
+def api_filter_events():
+    """Durchsucht den KOMPLETTEN Bestand (nicht nur die im Dashboard geladenen/
+    paginierten Events) nach Kamera/Person/Thema — im Unterschied zu einem rein
+    clientseitigen Filter über die schon geladenen Events, der bei Kameras/
+    Personen/Themen aus älterer, noch nicht nachgeladener Historie sonst
+    unvollständige Ergebnisse liefern würde."""
+    camera = request.args.get('camera', '').strip()
+    person = request.args.get('person', '').strip()
+    topic = request.args.get('topic', '').strip()
+
+    if not camera and not person and not topic:
+        return json.dumps({'recent': [], 'archived': []})
+
+    def matches(e):
+        if camera and _camera_name_from_filename(e['filename']) != camera:
+            return False
+        if person and not any(p.get('name') == person for p in (e.get('people_in_video') or [])):
+            return False
+        if topic and not any(t.get('topic') == topic for t in (e.get('detected_topics') or [])):
+            return False
+        return True
+
+    recent = [e for e in _build_full_event_list(ALERTS_DIR) if matches(e)]
+    archived = [e for e in _build_full_event_list(ARCHIVE_DIR) if matches(e)]
+    return json.dumps({'recent': recent, 'archived': archived})
+
 @app.route('/api/export_metadata')
 @requires_auth
 def api_export_metadata():

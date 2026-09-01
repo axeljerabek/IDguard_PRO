@@ -724,6 +724,31 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
     flex-shrink: 0;
 }
 .search-bar button:hover { background: var(--primary); color: #fff; }
+.filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 12px;
+}
+.filter-bar select {
+    background: var(--card-bg-inset);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: var(--radius-sm);
+    padding: 7px 10px;
+    font-size: 0.85rem;
+}
+#filterClearBtn {
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    padding: 7px 12px;
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+#filterClearBtn:hover { color: var(--primary); border-color: var(--primary); }
 .btn-select-all {
     background: transparent;
     color: var(--text-muted);
