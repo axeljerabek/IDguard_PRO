@@ -43,22 +43,33 @@ OLLAMA_URL = os.environ.get("OLLAMA_URL", _settings.get("OLLAMA_URL", "http://lo
 OLLAMA_MODEL = os.environ.get("OLLAMA_VISION_MODEL", _settings.get("OLLAMA_VISION_MODEL", "llava:latest"))
 
 
-def _describe_ollama_error(e):
-    """str(HTTPError) liefert nur 'HTTP Error 404: Not Found' — ohne den
-    eigentlich hilfreichen Grund. Ollama schickt bei einem fehlenden Modell
-    z.B. {"error": "model 'llava:latest' not found, try pulling it first"}
-    im Response-Body mit; das hier holt genau diesen Text heraus, falls
-    vorhanden, statt den Nutzer mit der nichtssagenden Kurzfassung allein
-    zu lassen."""
+def _describe_ollama_error_detailed(e):
+    """Liest den HTTPError-Body GENAU EINMAL (ein Response-Body-Stream lässt
+    sich nur einmal lesen) und liefert (ist_kontext_overflow, lesbare_
+    Fehlerbeschreibung) zurück. Ollamas Fehlerformat variiert: bei einem
+    fehlenden Modell ist "error" ein einfacher String, bei einem
+    gesprengten Kontextfenster ein verschachteltes Objekt mit eigenem
+    "type"-Feld ("exceed_context_size_error") — beide Formen hier
+    abgedeckt, statt nur die eine anzunehmen."""
     if isinstance(e, urllib.error.HTTPError):
         try:
             body = json.loads(e.read().decode("utf-8"))
-            detail = body.get("error")
-            if detail:
-                return f"{e} — {detail}"
+            err = body.get("error")
+            if isinstance(err, dict):
+                is_overflow = err.get("type") == "exceed_context_size_error"
+                detail = err.get("message") or str(err)
+                return is_overflow, f"{e} — {detail}"
+            elif err:
+                return False, f"{e} — {err}"
         except Exception:
             pass
-    return str(e)
+    return False, str(e)
+
+
+def _describe_ollama_error(e):
+    """Abwärtskompatibler Wrapper für Aufrufer, die nur den Text brauchen,
+    nicht das Kontext-Overflow-Flag."""
+    return _describe_ollama_error_detailed(e)[1]
 
 
 MAX_FRAMES = int(os.environ.get("AI_ANALYZE_MAX_FRAMES", _settings.get("AI_ANALYZE_MAX_FRAMES", 12)))
@@ -146,26 +157,58 @@ def _classify_topics(images_b64, topics):
         "object mapping each category name exactly as given to its number, "
         "nothing else, no explanation, no markdown."
     )
-    payload = json.dumps({
-        "model": OLLAMA_MODEL,
-        "prompt": prompt,
-        "images": images_b64,
-        "format": "json",
-        "stream": False
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        f"{OLLAMA_URL}/api/generate", data=payload,
-        headers={"Content-Type": "application/json"}
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-        raw = result.get("response", "").strip()
-        parsed = json.loads(raw)
-        if not isinstance(parsed, dict):
-            raise ValueError(f"Erwartete ein JSON-Objekt, bekam: {type(parsed)}")
-    except Exception as e:
-        print(f"⚠️ Themen-Klassifikation fehlgeschlagen: {_describe_ollama_error(e)}")
+    # Eigene, leichte Overflow-Behandlung: der Themen-Prompt kommt ZUSÄTZLICH
+    # zu den Bildern der schon erfolgreichen Beschreibung obendrauf — bei
+    # vielen Themen kann das allein reichen, um erneut über die
+    # Kontextgrenze zu rutschen, auch wenn die Beschreibung selbst gerade
+    # noch durchgegangen ist.
+    images = list(images_b64)
+    parsed = None
+    while images:
+        payload = json.dumps({
+            "model": OLLAMA_MODEL,
+            "prompt": prompt,
+            "images": images,
+            "format": "json",
+            "stream": False
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"{OLLAMA_URL}/api/generate", data=payload,
+            headers={"Content-Type": "application/json"}
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=180) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+            raw = result.get("response", "").strip()
+            if not raw:
+                # Leere Antwort bei "format": "json" — in der Praxis oft ein
+                # WEITERES Symptom desselben Kontext-Overflows (das Modell
+                # bricht die strukturierte Ausgabe einfach ab), auch wenn
+                # Ollama hier KEINEN sauberen 400er mit Fehlerdetails liefert
+                # wie beim Haupt-Beschreibungs-Request. Genau der Fall, der
+                # tatsächlich beobachtet wurde ("Expecting value: line 1
+                # column 1"). Bewusst als Overflow behandelt (weniger Bilder,
+                # erneut versuchen), da eine leere Response hier praktisch
+                # nie etwas anderes bedeutet.
+                raise ValueError("empty response from Ollama (likely context overflow)")
+            parsed = json.loads(raw)
+            if not isinstance(parsed, dict):
+                raise ValueError(f"Erwartete ein JSON-Objekt, bekam: {type(parsed)}")
+            break
+        except Exception as e:
+            is_overflow, detail = _describe_ollama_error_detailed(e)
+            if not is_overflow and isinstance(e, ValueError) and "context overflow" in str(e):
+                is_overflow = True
+                detail = str(e)
+            if is_overflow and len(images) > 1:
+                new_count = max(1, len(images) // 2)
+                print(f"⚠️ Themen-Klassifikation: Kontext gesprengt ({len(images)} Bilder) — versuche erneut mit {new_count} Bild(ern).")
+                images = images[:new_count]
+                continue
+            print(f"⚠️ Themen-Klassifikation fehlgeschlagen: {detail}")
+            return {}
+
+    if parsed is None:
         return {}
 
     scores = {}
@@ -186,6 +229,17 @@ def _classify_topics(images_b64, topics):
     return scores
 
 
+def _encode_images(files):
+    images_b64 = []
+    for f in files:
+        try:
+            with open(f, "rb") as fh:
+                images_b64.append(base64.b64encode(fh.read()).decode("utf-8"))
+        except Exception:
+            pass
+    return images_b64
+
+
 def _analyze_inner(video_basename, base_dir):
     frame_dir = os.path.join(base_dir, ".thumbs", video_basename, "large")
     if not os.path.isdir(frame_dir):
@@ -196,33 +250,57 @@ def _analyze_inner(video_basename, base_dir):
     if not files:
         return
 
+    # Retry mit halbierter Bildzahl bei einem erkannten Kontext-Overflow
+    # (Ollama meldet "exceed_context_size_error", wenn zu viele/große Bilder
+    # das Kontextfenster des Modells sprengen) — statt die Analyse komplett
+    # aufzugeben. Andere Fehler (Modell fehlt, Verbindung weg) werden NICHT
+    # wiederholt, das würde nur denselben Fehler reproduzieren.
+    description = None
     images_b64 = []
-    for f in files:
+    last_error = None
+    while files:
+        images_b64 = _encode_images(files)
+        if not images_b64:
+            return
+        payload = json.dumps({
+            "model": OLLAMA_MODEL,
+            "prompt": PROMPT,
+            "images": images_b64,
+            "stream": False
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"{OLLAMA_URL}/api/generate", data=payload,
+            headers={"Content-Type": "application/json"}
+        )
         try:
-            with open(f, "rb") as fh:
-                images_b64.append(base64.b64encode(fh.read()).decode("utf-8"))
-        except Exception:
-            pass
-    if not images_b64:
-        return
+            with urllib.request.urlopen(req, timeout=180) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+            description = result.get("response", "").strip()
+            if not description and len(files) > 1:
+                # Leere Antwort ohne Fehler — in der Praxis oft dasselbe
+                # Symptom wie ein expliziter Kontext-Overflow (das Modell
+                # bricht die Ausgabe einfach ab), nur dass Ollama hier
+                # gar keinen Fehler meldet. Wird bewusst genauso behandelt
+                # wie ein erkannter Overflow.
+                new_count = max(1, len(files) // 2)
+                print(f"⚠️ Ollama lieferte eine leere Antwort ({len(files)} Bilder, {video_basename}) — versuche erneut mit {new_count} Bild(ern).")
+                files = files[:new_count]
+                description = None
+                continue
+            break
+        except Exception as e:
+            is_overflow, detail = _describe_ollama_error_detailed(e)
+            last_error = detail
+            if is_overflow and len(files) > 1:
+                new_count = max(1, len(files) // 2)
+                print(f"⚠️ Ollama-Kontext gesprengt ({len(files)} Bilder, {video_basename}) — versuche erneut mit {new_count} Bild(ern).")
+                files = files[:new_count]
+                continue
+            print(f"❌ Ollama-Analyse fehlgeschlagen für {video_basename}: {detail}")
+            return
 
-    payload = json.dumps({
-        "model": OLLAMA_MODEL,
-        "prompt": PROMPT,
-        "images": images_b64,
-        "stream": False
-    }).encode("utf-8")
-
-    req = urllib.request.Request(
-        f"{OLLAMA_URL}/api/generate", data=payload,
-        headers={"Content-Type": "application/json"}
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-        description = result.get("response", "").strip()
-    except Exception as e:
-        print(f"❌ Ollama-Analyse fehlgeschlagen für {video_basename}: {_describe_ollama_error(e)}")
+    if description is None:
+        print(f"❌ Ollama-Analyse fehlgeschlagen für {video_basename}: {last_error}")
         return
 
     if not description:
@@ -233,6 +311,8 @@ def _analyze_inner(video_basename, base_dir):
     top_topic, top_topic_score = None, None
     detected_topics = []  # alle Themen über der Schwelle, absteigend sortiert
     if AI_TOPICS_ENABLED and AI_TOPICS:
+        # Dieselbe (ggf. schon reduzierte) Bildmenge wiederverwenden, statt
+        # unabhängig nochmal denselben Kontext-Overflow zu riskieren.
         topics_result = _classify_topics(images_b64, AI_TOPICS)
         qualifying = {t: s for t, s in topics_result.items() if s >= AI_TOPICS_THRESHOLD}
         if qualifying:
