@@ -15,6 +15,7 @@ Aufruf: python3 cluster_faces.py [--eps 0.4] [--min-samples 2]
 """
 import sys
 import os
+import json
 import argparse
 import numpy as np
 from sklearn.cluster import DBSCAN
@@ -23,18 +24,40 @@ DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(DIR)
 import faces_db
 
+try:
+    from config import SETTINGS_F
+except ImportError:
+    SETTINGS_F = "pipeline_settings.json"
+
+
+def _load_settings():
+    try:
+        with open(SETTINGS_F) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+_settings = _load_settings()
+
 # eps ist eine Cosine-DISTANZ (1 - Ähnlichkeit), kein Winkel — 0.4 heißt
 # "mindestens 60% Cosine-Ähnlichkeit, um als dieselbe Person zu gelten".
-# Das ist ein Startwert, kein für alle Gesichter/Beleuchtungen validierter
-# Wert; je nach eurer Kamera-Bildqualität ggf. anpassen.
-DEFAULT_EPS = 0.4
-DEFAULT_MIN_SAMPLES = 2
+# Über Settings → Face Recognition einstellbar, je nach Kamera-Bildqualität
+# ggf. anpassen (siehe Axels Rückmeldung: zu viele verschiedene Cluster für
+# dieselbe echte Person -> eps erhöhen und/oder KNOWN_PERSON_THRESHOLD senken).
+DEFAULT_EPS = float(_settings.get("FACE_CLUSTER_EPS", 0.4))
+DEFAULT_MIN_SAMPLES = int(_settings.get("FACE_CLUSTER_MIN_SAMPLES", 2))
 
 # Ab dieser Cosine-Ähnlichkeit gilt ein unzugeordnetes Gesicht als "eindeutig
 # dieselbe Person" wie ein bereits bekannter Centroid — bewusst strenger als
 # der DBSCAN-eps-Wert, da eine automatische Zuordnung zu einem NAMEN eine
 # höhere Sicherheit verdient als eine reine Cluster-Vorschlag-Gruppierung.
-KNOWN_PERSON_THRESHOLD = 0.5
+# DERSELBE Settings-Wert wie in face_recognize.py (dort als
+# KNOWN_PERSON_THRESHOLD genutzt) — bewusst EINE gemeinsame Einstellung
+# statt zwei unabhängig hart codierter Werte, die sonst leicht auseinander-
+# laufen (war bis eben genau so ein Bug: zwei getrennte, identisch
+# hart codierte Konstanten in zwei Dateien).
+KNOWN_PERSON_THRESHOLD = float(_settings.get("FACE_KNOWN_PERSON_THRESHOLD", 0.5))
 
 
 def match_against_known_people(embedding, centroids):

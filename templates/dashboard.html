@@ -46,12 +46,15 @@
                                 <span class="stream-last-seen" id="lastseen-{{ stream }}"></span>
                             </span>
                             <label class="switch">
-                                <input type="checkbox" onchange="toggleStreamPause('{{ stream }}', this)" {% if overrides.get(stream, 'ON') == 'ON' %}checked{% endif %}>
+                                <input type="checkbox" onchange="toggleStreamPause('{{ stream }}', this)" {% if overrides.get(stream, 'ON') == 'ON' %}checked{% endif %} title="Show/hide this camera's live preview here in the dashboard — does NOT affect recording. Recording is controlled separately in Settings → Cameras.">
                                 <span class="slider"></span>
                             </label>
                         </div>
                         <div class="thumb-wrap">
-                            <img id="thumb-{{ stream }}" class="stream-thumb" src="/thumbnail/{{ stream }}" alt="{{ stream }} Thumbnail" onclick="openLiveView('{{ stream }}')" style="opacity:0;" onload="this.style.opacity=1" onerror="this.style.opacity=0">
+                            <img id="thumb-{{ stream }}" class="stream-thumb" src="/thumbnail/{{ stream }}" alt="{{ stream }} Thumbnail" onclick="if (STREAM_OVERRIDES['{{ stream }}'] === 'ON') openLiveView('{{ stream }}')" style="opacity:0;" onload="this.style.opacity=1" onerror="this.style.opacity=0">
+                            <div class="thumb-paused" id="paused-{{ stream }}" style="display:{{ 'none' if overrides.get(stream, 'ON') == 'ON' else 'flex' }};">
+                                <i class="fa-solid fa-eye-slash"></i> Preview hidden
+                            </div>
                             {% if overrides.get(stream, 'ON') == 'ON' %}<span class="thumb-live-dot" title="Active"></span>{% endif %}
                             <span class="thumb-rec-badge" id="rec-{{ stream }}" style="display:none;"><span class="rec-dot"></span>REC</span>
                         </div>
@@ -413,6 +416,26 @@
                                     <input type="range" min="0.1" max="0.95" step="0.05" name="FACE_MIN_CONFIDENCE" value="{{ settings.get('FACE_MIN_CONFIDENCE', 0.5) }}" oninput="document.getElementById('faceconf_val').innerText = Math.round(this.value * 100) + '%'">
                                     <span id="faceconf_val" class="range-val">{{ (settings.get('FACE_MIN_CONFIDENCE', 0.5) * 100)|int }}%</span>
                                 </div>
+                            </div>
+                            <div class="settings-group">
+                                <label>Known-person match threshold</label>
+                                <div class="range-wrap">
+                                    <input type="range" min="0.1" max="0.95" step="0.05" name="FACE_KNOWN_PERSON_THRESHOLD" value="{{ settings.get('FACE_KNOWN_PERSON_THRESHOLD', 0.5) }}" oninput="document.getElementById('faceknown_val').innerText = Math.round(this.value * 100) + '%'">
+                                    <span id="faceknown_val" class="range-val">{{ (settings.get('FACE_KNOWN_PERSON_THRESHOLD', 0.5) * 100)|int }}%</span>
+                                </div>
+                                <p class="settings-hint" style="margin-top:4px;">How closely a new face must match an already-named person to be auto-assigned. Lower it if the same real person keeps showing up as separate unnamed groups.</p>
+                            </div>
+                            <div class="settings-group">
+                                <label>Cluster grouping looseness</label>
+                                <div class="range-wrap">
+                                    <input type="range" min="0.1" max="0.9" step="0.05" name="FACE_CLUSTER_EPS" value="{{ settings.get('FACE_CLUSTER_EPS', 0.4) }}" oninput="document.getElementById('facecluster_val').innerText = this.value">
+                                    <span id="facecluster_val" class="range-val">{{ settings.get('FACE_CLUSTER_EPS', 0.4) }}</span>
+                                </div>
+                                <p class="settings-hint" style="margin-top:4px;">How willing "Re-cluster unlabeled faces" is to group different-looking crops together as one unnamed person. Lower = stricter/more groups, higher = looser/fewer groups.</p>
+                            </div>
+                            <div class="settings-group">
+                                <label>Min. faces per unlabeled group</label>
+                                <input type="number" min="2" max="10" step="1" name="FACE_CLUSTER_MIN_SAMPLES" value="{{ settings.get('FACE_CLUSTER_MIN_SAMPLES', 2) }}">
                             </div>
                         </div>
                     </div>
@@ -848,11 +871,31 @@
         }
 
         function toggleStreamPause(name, checkbox) {
+            const newState = checkbox.checked ? 'ON' : 'OFF';
             _postForm('/toggle/' + name, {}).then(res => {
                 if (!res.ok) {
                     // Fehlgeschlagen -> Checkbox visuell zurücksetzen, damit die UI nicht lügt
                     checkbox.checked = !checkbox.checked;
                     showToast('⚠️ Could not toggle ' + name, 6000);
+                    return;
+                }
+                STREAM_OVERRIDES[name] = newState;
+                const img = document.getElementById('thumb-' + name);
+                const paused = document.getElementById('paused-' + name);
+                const liveDot = img ? img.parentElement.querySelector('.thumb-live-dot') : null;
+                if (newState === 'ON') {
+                    if (paused) paused.style.display = 'none';
+                    if (img) img.src = '/thumbnail/' + name + '?t=' + new Date().getTime();
+                    if (!liveDot && img && img.parentElement) {
+                        const dot = document.createElement('span');
+                        dot.className = 'thumb-live-dot';
+                        dot.title = 'Active';
+                        img.parentElement.appendChild(dot);
+                    }
+                } else {
+                    if (paused) paused.style.display = 'flex';
+                    if (img) img.style.opacity = 0;
+                    if (liveDot) liveDot.remove();
                 }
             });
         }
@@ -869,7 +912,9 @@
         function renderStreamsGrid(streamsData) {
             const grid = document.getElementById('streamsGrid');
             if (!grid) return;
-            grid.innerHTML = streamsData.map(s => `
+            grid.innerHTML = streamsData.map(s => {
+                STREAM_OVERRIDES[s.name] = s.override_on ? 'ON' : 'OFF';
+                return `
                 <div class="stream-container">
                     <div class="stream-header">
                         <span class="stream-name-wrap">
@@ -877,17 +922,21 @@
                             <span class="stream-last-seen" id="lastseen-${s.name}"></span>
                         </span>
                         <label class="switch">
-                            <input type="checkbox" onchange="toggleStreamPause('${s.name}', this)" ${s.override_on ? 'checked' : ''}>
+                            <input type="checkbox" onchange="toggleStreamPause('${s.name}', this)" ${s.override_on ? 'checked' : ''} title="Show/hide this camera's live preview here in the dashboard — does NOT affect recording. Recording is controlled separately in Settings → Cameras.">
                             <span class="slider"></span>
                         </label>
                     </div>
                     <div class="thumb-wrap">
-                        <img id="thumb-${s.name}" class="stream-thumb" src="/thumbnail/${s.name}" alt="${escapeHtml(s.name)} Thumbnail" onclick="openLiveView('${s.name}')" style="opacity:0;" onload="this.style.opacity=1" onerror="this.style.opacity=0">
+                        <img id="thumb-${s.name}" class="stream-thumb" src="/thumbnail/${s.name}" alt="${escapeHtml(s.name)} Thumbnail" onclick="if (STREAM_OVERRIDES['${s.name}'] === 'ON') openLiveView('${s.name}')" style="opacity:0;" onload="this.style.opacity=1" onerror="this.style.opacity=0">
+                        <div class="thumb-paused" id="paused-${s.name}" style="display:${s.override_on ? 'none' : 'flex'};">
+                            <i class="fa-solid fa-eye-slash"></i> Preview hidden
+                        </div>
                         ${s.override_on ? '<span class="thumb-live-dot" title="Active"></span>' : ''}
                         <span class="thumb-rec-badge" id="rec-${s.name}" style="display:none;"><span class="rec-dot"></span>REC</span>
                     </div>
                 </div>
-            `).join('');
+            `;
+            }).join('');
         }
 
         function handleStreamsSubmit(event) {

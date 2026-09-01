@@ -15,11 +15,22 @@ Jeder der beiden Schritte prüft selbst, ob sein Feature überhaupt aktiviert
 ist (AI_ANALYSIS_ENABLED / TRANSCRIPTION_ENABLED) — hier wird bewusst immer
 versucht, beide aufzurufen, kein Grund für Sonderfälle.
 
+WARUM EIN PROZESSÜBERGREIFENDES LOCK: jede Kamera läuft als eigener
+CameraAgent-Prozess und stößt postprocess.py bei Aufnahmeende komplett
+unabhängig von den anderen Kameras an (fire-and-forget subprocess.Popen in
+recorder_pipeline.py). Enden zwei Aufnahmen unterschiedlicher Kameras
+zeitnah, würden ohne dieses Lock zwei postprocess.py-Instanzen gleichzeitig
+YOLO/InsightFace/Whisper/CLAP-Modelle auf dieselbe GPU laden und um
+Speicher/Rechenzeit konkurrieren. fcntl.flock() blockt automatisch, bis die
+GPU frei ist — das ergibt implizit eine serielle Warteschlange, ohne dass
+wir selbst eine bauen müssen.
+
 Aufruf (von recorder_pipeline.py per subprocess.Popen, fire-and-forget):
     python3 postprocess.py <video_basename> <base_dir>
 """
 import sys
 import os
+import fcntl
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(DIR)
@@ -28,11 +39,58 @@ import ai_analyze
 import transcribe_audio
 import face_recognize
 
+GPU_LOCK_PATH = os.path.join(DIR, '.postprocess.lock')
+
+
+def acquire_gpu_lock():
+    """Blockt, bis keine andere postprocess.py-Instanz mehr die GPU
+    belegt. Gibt das offene File-Objekt zurück — muss am Ende mit
+    release_gpu_lock() wieder freigegeben werden."""
+    lock_fd = open(GPU_LOCK_PATH, 'w')
+    fcntl.flock(lock_fd, fcntl.LOCK_EX)
+    return lock_fd
+
+
+def release_gpu_lock(lock_fd):
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    finally:
+        lock_fd.close()
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Usage: postprocess.py <video_basename> <base_dir>")
         sys.exit(1)
     video_basename, base_dir = sys.argv[1], sys.argv[2]
-    ai_analyze.analyze(video_basename, base_dir)
-    transcribe_audio.transcribe(video_basename, base_dir)
-    face_recognize.recognize(video_basename, base_dir)
+
+    # Der übergebene base_dir kann inzwischen veraltet sein: postprocess.py
+    # läuft als Fire-and-Forget-Hintergrundprozess, und bis dieser Prozess
+    # tatsächlich läuft (Python-Start, Modell-Imports — kann mehrere
+    # Sekunden dauern), könnte das Video schon archiviert worden sein. Ohne
+    # diese Neuauflösung würde jeder der drei Schritte unten den Ordner an
+    # der ALTEN Stelle einfach nicht mehr finden und still (kein Fehler,
+    # kein Crash) überspringen — genau das beobachtete Muster "keine
+    # automatische Analyse, manueller Klick funktioniert aber" (der
+    # manuelle Klick passiert ja erst, nachdem man sich die Liste
+    # angesehen hat, meist mit genug Abstand, dass ein Archivieren
+    # dazwischen weniger wahrscheinlich ist).
+    video_filename = video_basename + '.mp4'
+    if not os.path.exists(os.path.join(base_dir, video_filename)):
+        archive_dir = os.path.join(base_dir, 'archive')
+        if os.path.exists(os.path.join(archive_dir, video_filename)):
+            print(f"ℹ️ {video_filename} wurde inzwischen archiviert — verwende den neuen Pfad für die Nachbearbeitung.")
+            base_dir = archive_dir
+        else:
+            print(f"⚠️ {video_filename} weder unter {base_dir} noch im Archiv gefunden — wurde es zwischenzeitlich gelöscht? Nachbearbeitung übersprungen.")
+            sys.exit(0)
+
+    print(f"⏳ Warte ggf. auf GPU-Freigabe für {video_basename}...")
+    lock_fd = acquire_gpu_lock()
+    print(f"🔒 GPU-Lock erhalten, starte Nachbearbeitung für {video_basename}.")
+    try:
+        ai_analyze.analyze(video_basename, base_dir)
+        transcribe_audio.transcribe(video_basename, base_dir)
+        face_recognize.recognize(video_basename, base_dir)
+    finally:
+        release_gpu_lock(lock_fd)

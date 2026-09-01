@@ -45,7 +45,7 @@ _settings = _load_settings()
 FACE_RECOGNITION_ENABLED = bool(_settings.get("FACE_RECOGNITION_ENABLED", False))
 FACE_MODEL_PACK = _settings.get("FACE_MODEL_PACK", "buffalo_s")
 FACE_MIN_CONFIDENCE = float(_settings.get("FACE_MIN_CONFIDENCE", 0.5))
-KNOWN_PERSON_THRESHOLD = 0.5  # dasselbe Maß wie in cluster_faces.py — bewusst konsistent gehalten
+KNOWN_PERSON_THRESHOLD = float(_settings.get("FACE_KNOWN_PERSON_THRESHOLD", 0.5))
 
 _app = None
 _app_load_failed = False

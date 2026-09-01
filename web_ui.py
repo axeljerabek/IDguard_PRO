@@ -1067,6 +1067,18 @@ def save_pipeline_settings():
         face_min_confidence = float(request.form.get('FACE_MIN_CONFIDENCE', 0.5))
     except (TypeError, ValueError):
         face_min_confidence = 0.5
+    try:
+        face_known_threshold = float(request.form.get('FACE_KNOWN_PERSON_THRESHOLD', 0.5))
+    except (TypeError, ValueError):
+        face_known_threshold = 0.5
+    try:
+        face_cluster_eps = float(request.form.get('FACE_CLUSTER_EPS', 0.4))
+    except (TypeError, ValueError):
+        face_cluster_eps = 0.4
+    try:
+        face_cluster_min_samples = int(request.form.get('FACE_CLUSTER_MIN_SAMPLES', 2))
+    except (TypeError, ValueError):
+        face_cluster_min_samples = 2
     ai_topics = [
         line.strip() for line in request.form.get('AI_TOPICS', '').splitlines()
         if line.strip()
@@ -1105,7 +1117,10 @@ def save_pipeline_settings():
         "TRANSCRIPTION_LANGUAGE": request.form.get('TRANSCRIPTION_LANGUAGE', '').strip(),
         "FACE_RECOGNITION_ENABLED": request.form.get('FACE_RECOGNITION_ENABLED') == 'on',
         "FACE_MODEL_PACK": request.form.get('FACE_MODEL_PACK', 'buffalo_s') if request.form.get('FACE_MODEL_PACK') in ('buffalo_s', 'buffalo_m', 'buffalo_l', 'antelopev2') else 'buffalo_s',
-        "FACE_MIN_CONFIDENCE": round(_clamp(face_min_confidence, 0.1, 0.95), 2)
+        "FACE_MIN_CONFIDENCE": round(_clamp(face_min_confidence, 0.1, 0.95), 2),
+        "FACE_KNOWN_PERSON_THRESHOLD": round(_clamp(face_known_threshold, 0.1, 0.95), 2),
+        "FACE_CLUSTER_EPS": round(_clamp(face_cluster_eps, 0.1, 0.9), 2),
+        "FACE_CLUSTER_MIN_SAMPLES": _clamp(face_cluster_min_samples, 2, 10)
     }
 
     with open(SETTINGS_F, 'w') as f:
