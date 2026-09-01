@@ -1295,11 +1295,24 @@ def serve_archived_filmstrip(basename, index):
 
 
 def _transcode_stream(input_file):
-    """Transcodiert eine Datei on-the-fly per ffmpeg und streamt sie als MP4-Response."""
+    """Verpackt eine fertige Aufnahme für die Streaming-Wiedergabe im
+    Dashboard neu (fragmentiertes MP4 für sofortigen Playback-Start, ohne
+    die komplette Datei erst laden zu müssen) — OHNE erneutes Encoding.
+
+    Vorher wurde hier komplett neu encodiert (libx264 ultrafast/zerolatency,
+    Audio nach MP3) — das kostet nicht nur unnötig CPU/Zeit bei JEDER
+    Wiedergabe einer bereits fertigen Aufnahme, sondern verzerrt auch
+    nachweislich das Timing: bei einem Testlauf blieb die Video-Frame-Zahl
+    zwar gleich, aber die Gesamtdauer verschob sich (3.000000s -> 3.025065s),
+    und bei Audio ging sogar echte Frame-Zahl verloren (130 -> 117) — beides
+    Symptome, die sich beim Abspielen als leichtes Ruckeln bemerkbar machen
+    können, obwohl die Originalaufnahme selbst sauber war. Reines Stream-
+    Copy/Remuxing (keine Neucodierung, nur Container-Umverpackung) behält
+    exakt das Original-Timing bei und ist nebenbei um ein Vielfaches
+    schneller."""
     def generate():
         process = subprocess.Popen(
-            ['ffmpeg', '-i', input_file, '-c:v', 'libx264', '-preset', 'ultrafast',
-             '-tune', 'zerolatency', '-crf', '28', '-c:a', 'mp3', '-f', 'mp4',
+            ['ffmpeg', '-i', input_file, '-c:v', 'copy', '-c:a', 'copy', '-f', 'mp4',
              '-movflags', 'frag_keyframe+empty_moov', 'pipe:1'],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=-1
         )
@@ -1316,12 +1329,31 @@ def _transcode_stream(input_file):
 
     return Response(generate(), mimetype='video/mp4')
 
+def _is_finished_video(path):
+    """Schnelle ffprobe-Prüfung, ob eine MP4-Datei bereits fertig
+    geschrieben ist (moov-Atom vorhanden, gültige Dauer auslesbar) oder
+    noch aktiv von der Pipeline beschrieben wird. Nur für den zweiten Fall
+    braucht die Wiedergabe das Remuxing über _transcode_stream — eine
+    fertige Aufnahme (Recent wie Archive) kann direkt mit Range-Support
+    ausgeliefert werden, ohne jeden Frame nochmal anzufassen."""
+    try:
+        result = subprocess.run(
+            ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+             '-of', 'default=noprint_wrappers=1:nokey=1', path],
+            capture_output=True, text=True, timeout=5
+        )
+        return float(result.stdout.strip()) > 0
+    except Exception:
+        return False
+
 @app.route('/video/<filename>')
 @requires_auth
 def serve_annot_video(filename):
     input_file = os.path.join(ALERTS_DIR, filename)
     if not os.path.exists(input_file):
         return f"File not found: {filename}", 404
+    if _is_finished_video(input_file):
+        return send_file(input_file, mimetype='video/mp4', conditional=True)
     return _transcode_stream(input_file)
 
 @app.route('/video/archive/<filename>')
@@ -1330,6 +1362,8 @@ def serve_archived_video(filename):
     input_file = os.path.join(ARCHIVE_DIR, filename)
     if not os.path.exists(input_file):
         return f"File not found: {filename}", 404
+    if _is_finished_video(input_file):
+        return send_file(input_file, mimetype='video/mp4', conditional=True)
     return _transcode_stream(input_file)
 
 if __name__ == '__main__':

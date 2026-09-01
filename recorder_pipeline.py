@@ -445,13 +445,27 @@ class CameraAgent(multiprocessing.Process):
                 return
             try:
                 t = ts if ts is not None else time.time()
-                # Bug-Fix: PTS aus echter Wall-Clock-Zeit relativ zum Recording-Start
-                # statt reinem Zähler. Ein Zähler nimmt konstante TARGET_FPS an —
-                # stockt die Quelle mal kurz (Netz-Hänger), fehlt diese Zeitlücke im
-                # Video komplett, und alles danach wird gestaucht/zu schnell
-                # abgespielt. Echte Zeitstempel bilden reale Aussetzer korrekt ab.
                 elapsed = max(0.0, t - recording_start_time)
-                pts = int(elapsed * TARGET_FPS)
+                # Zwei Ziele gleichzeitig, die sich mit EINER reinen Wall-Clock-
+                # PTS-Berechnung gegenseitig im Weg standen:
+                # 1) Ein echter Stall (Netz-Hänger) muss im Video als Lücke
+                #    sichtbar bleiben, nicht einfach verschluckt werden.
+                # 2) Normales, kleines Verarbeitungs-Jitter (YOLO-Inferenz,
+                #    Filmstrip-I/O, GPU-Konkurrenz zwischen mehreren Kamera-
+                #    Prozessen) darf NICHT zu ungleichmäßigem PTS führen — das
+                #    erzeugt sichtbares Ruckeln, obwohl die Quelle sauber
+                #    30fps liefert.
+                # Lösung, analog zum Audio-PTS-Gap-Fix: normal einen reinen
+                # Frame-Zähler hochzählen (glatt, jitter-unempfindlich), nur
+                # bei einer ECHTEN Abweichung (>0.5s zwischen erwarteter
+                # Zähler-Position und tatsächlicher Wall-Clock-Zeit) auf die
+                # Wall-Clock-Zeit springen, damit der Stall sichtbar bleibt.
+                expected_pts = video_frame_count
+                wall_clock_pts = int(elapsed * TARGET_FPS)
+                if wall_clock_pts - expected_pts > TARGET_FPS * 0.5:
+                    pts = wall_clock_pts
+                else:
+                    pts = expected_pts
                 if pts <= last_pts:
                     pts = last_pts + 1
                 last_pts = pts
