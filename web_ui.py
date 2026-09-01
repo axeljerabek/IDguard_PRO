@@ -411,19 +411,42 @@ def get_detailed_system_status():
     except Exception:
         pass
 
-    # Worker-Prozesse ermitteln (inklusive des robusten CPU-Zeit-Filters)
+    # Worker-Prozesse ermitteln. Seit der Umstellung auf multiprocessing
+    # 'spawn' (siehe recorder_pipeline.py — nötig, um den "Cannot
+    # re-initialize CUDA in forked subprocess"-Fehler zu vermeiden) zeigen
+    # Kindprozesse in der Kommandozeile NICHT mehr "recorder_pipeline.py"
+    # oder "forkserver" — spawn-Kinder starten über einen generischen
+    # Bootstrap ("--multiprocessing-fork"), der weder den Skriptnamen noch
+    # die alte fork-Markierung enthält (bestätigt an einem echten
+    # reproduzierten Prozessbaum). Robuster als reines String-Matching auf
+    # die Kommandozeile: die tatsächlichen Kindprozesse des Master-Prozesses
+    # über psutil ermitteln, unabhängig von deren eigener Kommandozeile —
+    # das bricht nicht bei jeder Python-/Multiprocessing-Detailänderung
+    # erneut. "--multiprocessing-fork" allein wäre nicht spezifisch genug
+    # (jede Python-Multiprocessing-Anwendung auf dem System nutzt das),
+    # UND multiprocessing 'spawn' erzeugt neben den echten Worker-Kindern
+    # noch einen "resource_tracker"-Hilfsprozess, der hier explizit
+    # ausgeschlossen wird.
     enabled_streams = [s["name"] for s in STREAMS if s.get("enabled", False)]
     worker_procs = []
-    for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'memory_info', 'create_time']):
-        try:
-            cmdline = proc.info.get('cmdline')
-            if cmdline:
-                cmd_str = " ".join(cmdline)
-                if 'recorder_pipeline.py' in cmd_str and 'forkserver' in cmd_str:
-                    if proc.cpu_times().user + proc.cpu_times().system > 0.5:
-                        worker_procs.append(proc)
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            continue
+    try:
+        master_candidates = [
+            p for p in psutil.process_iter(['pid', 'cmdline'])
+            if p.info.get('cmdline')
+            and any('recorder_pipeline.py' in arg for arg in p.info['cmdline'])
+            and not any('multiprocessing' in arg for arg in p.info['cmdline'])
+        ]
+        for master in master_candidates:
+            for child in master.children(recursive=False):
+                try:
+                    child_cmdline = ' '.join(child.cmdline())
+                    if '--multiprocessing-fork' in child_cmdline and 'resource_tracker' not in child_cmdline:
+                        if child.cpu_times().user + child.cpu_times().system > 0.5:
+                            worker_procs.append(child)
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        pass
 
     worker_procs.sort(key=lambda p: p.create_time())
     processes_data = []
