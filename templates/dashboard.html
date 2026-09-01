@@ -623,6 +623,9 @@
                 <button type="button" class="btn-add-camera" onclick="reclusterFaces()" style="margin-bottom:16px;">
                     <i class="fa-solid fa-arrows-rotate"></i> Re-cluster unlabeled faces
                 </button>
+                <button type="button" class="btn-select-all" onclick="cleanupOrphanedFaces()" style="margin-bottom:16px; margin-left:8px;" title="Removes face entries whose crop image no longer exists on disk — leftover from before archiving/deleting videos kept the face database in sync">
+                    <i class="fa-solid fa-broom"></i> Clean up broken thumbnails
+                </button>
 
                 <h4 style="margin: 0 0 10px 0; font-size: 0.9rem; color: var(--text-muted);">Named people</h4>
                 <div id="peopleGrid" class="people-grid"><p class="settings-hint">Loading…</p></div>
@@ -1382,6 +1385,20 @@
             _postForm('/api/recluster_faces', {}).then(res => {
                 if (res.ok) { showToast('Re-clustering done.'); loadPeopleData(); }
                 else showToast('⚠️ Re-cluster failed: ' + (res.error || 'unknown error'), 6000);
+            });
+        }
+
+        function cleanupOrphanedFaces() {
+            showToast('Checking for broken thumbnails…');
+            _postForm('/api/cleanup_orphaned_faces', {}).then(res => {
+                if (!res.ok) {
+                    showToast('⚠️ Cleanup failed: ' + (res.error || 'unknown error'), 6000);
+                    return;
+                }
+                showToast(res.removed > 0
+                    ? `Removed ${res.removed} broken face entr${res.removed === 1 ? 'y' : 'ies'}.`
+                    : 'No broken thumbnails found.');
+                loadPeopleData();
             });
         }
 

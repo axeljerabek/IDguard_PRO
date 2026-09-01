@@ -821,6 +821,15 @@ def api_recluster_faces():
     except Exception as e:
         return json.dumps({'ok': False, 'error': str(e)})
 
+@app.route('/api/cleanup_orphaned_faces', methods=['POST'])
+@requires_auth
+def api_cleanup_orphaned_faces():
+    _verify_csrf()
+    if faces_db is None:
+        return json.dumps({'ok': False, 'error': 'Face recognition module not available.'})
+    removed = faces_db.remove_orphaned_faces()
+    return json.dumps({'ok': True, 'removed': removed})
+
 @app.route('/health')
 def health():
     """Bewusst OHNE @requires_auth: für externe Watchdogs/Monitoring gedacht.

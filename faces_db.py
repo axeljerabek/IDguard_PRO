@@ -314,6 +314,56 @@ def reject_faces(face_ids):
         print(f"⚠️ Konnte Gesichter nicht ablehnen: {e}")
 
 
+def find_orphaned_faces():
+    """Gesichter, deren Crop-Bild-Datei physisch nicht mehr existiert —
+    typischerweise Altlasten aus einer Zeit, bevor Archivieren/Löschen
+    korrekt mit der Datenbank synchron gehalten wurden (siehe
+    update_base_dir/remove_faces_for_video). Betrifft nur Datensätze von
+    VOR diesem Fix — neue Archivierungen/Löschungen halten base_dir schon
+    korrekt aktuell."""
+    try:
+        conn = _connect()
+        rows = conn.execute("SELECT id, base_dir, crop_path FROM faces WHERE rejected = 0").fetchall()
+        conn.close()
+        orphaned = []
+        for face_id, base_dir, crop_path in rows:
+            full_path = os.path.join(base_dir, crop_path)
+            if not os.path.exists(full_path):
+                orphaned.append(face_id)
+        return orphaned
+    except Exception as e:
+        print(f"⚠️ Konnte verwaiste Gesichter nicht ermitteln: {e}")
+        return []
+
+
+def remove_orphaned_faces():
+    """Entfernt Gesichter, deren Crop-Bild nicht mehr existiert, endgültig
+    aus der Datenbank — nicht nur als 'rejected' markieren wie bei
+    reject_faces(), denn es gibt hier schlicht kein Bild mehr, das man
+    sich je wieder ansehen könnte. Gibt die Anzahl der entfernten
+    Einträge zurück."""
+    orphaned_ids = find_orphaned_faces()
+    if not orphaned_ids:
+        return 0
+    try:
+        conn = _connect()
+        placeholders = ','.join('?' * len(orphaned_ids))
+        rows = conn.execute(
+            f"SELECT DISTINCT person_id FROM faces WHERE id IN ({placeholders}) AND person_id IS NOT NULL",
+            orphaned_ids
+        ).fetchall()
+        affected_people = [r[0] for r in rows]
+        conn.execute(f"DELETE FROM faces WHERE id IN ({placeholders})", orphaned_ids)
+        conn.commit()
+        conn.close()
+        for person_id in affected_people:
+            _recompute_centroid(person_id)
+        return len(orphaned_ids)
+    except Exception as e:
+        print(f"⚠️ Konnte verwaiste Gesichter nicht entfernen: {e}")
+        return 0
+
+
 def get_unassigned_faces():
     """Alle Gesichter, die weder einer Person zugeordnet noch abgelehnt
     wurden — Grundlage für den nächsten Clustering-Lauf."""
