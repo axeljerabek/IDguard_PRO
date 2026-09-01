@@ -973,6 +973,20 @@ def detect_gpu_profile(logger):
 # MAIN ORCHESTRATOR
 # ---------------------------------------------------------
 if __name__ == "__main__":
+    # KRITISCH: muss vor jeglicher Prozess-Erzeugung passieren, und vor jedem
+    # CUDA-Zugriff im Master (detect_gpu_profile() gleich unten tut genau
+    # das). Linux nutzt standardmäßig 'fork' für multiprocessing — forkt der
+    # Master aber NACHDEM er selbst schon CUDA berührt hat (torch.cuda.
+    # is_available() etc. in detect_gpu_profile), erben die Worker-Prozesse
+    # einen bereits angefassten CUDA-Kontext, der sich nicht sauber
+    # re-initialisieren lässt: "Cannot re-initialize CUDA in forked
+    # subprocess. To use CUDA with multiprocessing, you must use the
+    # 'spawn' start method" — exakt die von PyTorch selbst empfohlene
+    # Lösung, hier umgesetzt. 'spawn' startet jeden Worker als komplett
+    # frischen Python-Interpreter (kein geerbter Speicherzustand), auf
+    # Kosten eines minimal langsameren Prozessstarts.
+    multiprocessing.set_start_method('spawn', force=True)
+
     system_logger = get_stream_logger("SYSTEM")
     system_logger.info("🚀 [MASTER] Initializing Multi-Agent Pipeline...")
 
