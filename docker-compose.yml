@@ -31,6 +31,16 @@ services:
     command: ["python3", "web_ui.py"]
     restart: unless-stopped
     network_mode: host   # lokale RTMP-Kameras im Heimnetz + Dashboard unter http://<host>:19473
+    # NVIDIA_DRIVER_CAPABILITIES zusätzlich zur deploy.resources-Capabilities-
+    # Liste unten gesetzt — nicht redundant. Die neuere deploy.resources-
+    # Syntax deckt bei manchen NVIDIA-Container-Toolkit-Versionen "video"
+    # (und damit libnvidia-encode.so für NVENC) nicht zuverlässig ab, obwohl
+    # normales CUDA-Compute (gpu/utility) tadellos funktioniert — genau das
+    # beobachtete Symptom (YOLO läuft auf GPU, NVENC schlägt mit "Invalid
+    # argument" fehl). Diese Variable ist der ältere, universellere
+    # Mechanismus, den mehr Toolkit-Versionen korrekt respektieren.
+    environment:
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
     deploy:
       resources:
         reservations:
