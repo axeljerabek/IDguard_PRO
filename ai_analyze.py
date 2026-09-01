@@ -16,6 +16,7 @@ import glob
 import base64
 import time
 import urllib.request
+import urllib.error
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(DIR)
@@ -40,6 +41,26 @@ def _load_settings():
 _settings = _load_settings()
 OLLAMA_URL = os.environ.get("OLLAMA_URL", _settings.get("OLLAMA_URL", "http://localhost:11434"))
 OLLAMA_MODEL = os.environ.get("OLLAMA_VISION_MODEL", _settings.get("OLLAMA_VISION_MODEL", "llava:latest"))
+
+
+def _describe_ollama_error(e):
+    """str(HTTPError) liefert nur 'HTTP Error 404: Not Found' — ohne den
+    eigentlich hilfreichen Grund. Ollama schickt bei einem fehlenden Modell
+    z.B. {"error": "model 'llava:latest' not found, try pulling it first"}
+    im Response-Body mit; das hier holt genau diesen Text heraus, falls
+    vorhanden, statt den Nutzer mit der nichtssagenden Kurzfassung allein
+    zu lassen."""
+    if isinstance(e, urllib.error.HTTPError):
+        try:
+            body = json.loads(e.read().decode("utf-8"))
+            detail = body.get("error")
+            if detail:
+                return f"{e} — {detail}"
+        except Exception:
+            pass
+    return str(e)
+
+
 MAX_FRAMES = int(os.environ.get("AI_ANALYZE_MAX_FRAMES", _settings.get("AI_ANALYZE_MAX_FRAMES", 12)))
 AI_TOPICS_ENABLED = bool(_settings.get("AI_TOPICS_ENABLED", False))
 AI_TOPICS = [t.strip() for t in _settings.get("AI_TOPICS", []) if isinstance(t, str) and t.strip()]
@@ -144,7 +165,7 @@ def _classify_topics(images_b64, topics):
         if not isinstance(parsed, dict):
             raise ValueError(f"Erwartete ein JSON-Objekt, bekam: {type(parsed)}")
     except Exception as e:
-        print(f"⚠️ Themen-Klassifikation fehlgeschlagen: {e}")
+        print(f"⚠️ Themen-Klassifikation fehlgeschlagen: {_describe_ollama_error(e)}")
         return {}
 
     scores = {}
@@ -201,7 +222,7 @@ def _analyze_inner(video_basename, base_dir):
             result = json.loads(resp.read().decode("utf-8"))
         description = result.get("response", "").strip()
     except Exception as e:
-        print(f"❌ Ollama-Analyse fehlgeschlagen für {video_basename}: {e}")
+        print(f"❌ Ollama-Analyse fehlgeschlagen für {video_basename}: {_describe_ollama_error(e)}")
         return
 
     if not description:
