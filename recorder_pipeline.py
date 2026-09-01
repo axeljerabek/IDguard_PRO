@@ -242,6 +242,40 @@ class CameraAgent(multiprocessing.Process):
         else:
             self.logger.warning("⚠️ No valid YOLO path found; running in VISION-ONLY mode.")
 
+        # Einmaliger echter NVENC-Test beim Start dieses Kamera-Prozesses.
+        # add_stream('h264_nvenc', ...) allein ist KEIN zuverlässiger
+        # Verfügbarkeits-Check — PyAV/ffmpeg öffnen den eigentlichen Encoder
+        # (avcodec_open2) oft erst beim ERSTEN echten encode()-Aufruf, nicht
+        # schon bei add_stream(). Ohne diesen Test hier würde add_stream()
+        # klaglos durchlaufen, die Pipeline meldet fälschlich "NVENC aktiv",
+        # und der eigentliche Fehler taucht erst still mitten in der
+        # laufenden Aufnahme auf — bei JEDEM einzelnen Frame erneut, weit
+        # außerhalb des dafür vorgesehenen Fallback-try/except (genau das
+        # Muster, das im Docker-Container ohne funktionierenden NVENC-Zugriff
+        # beobachtet wurde). Gleiche Philosophie wie _load_and_selftest oben:
+        # echt testen statt nur hoffen.
+        def _probe_nvenc():
+            try:
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix='.mp4', delete=True) as tmp:
+                    probe_container = av.open(tmp.name, mode='w')
+                    probe_stream = probe_container.add_stream('h264_nvenc', rate=30)
+                    probe_stream.width = 64
+                    probe_stream.height = 64
+                    probe_stream.pix_fmt = 'yuv420p'
+                    probe_frame = av.VideoFrame(width=64, height=64, format='yuv420p')
+                    list(probe_stream.encode(probe_frame))
+                    list(probe_stream.encode(None))  # flush
+                    probe_container.close()
+                return True
+            except Exception as e:
+                self.logger.warning(f"⚠️ [{self.name}] NVENC-Test fehlgeschlagen, nutze libx264 (CPU-Encoding) für diese Kamera: {e}")
+                return False
+
+        nvenc_available = _probe_nvenc()
+        if nvenc_available:
+            self.logger.info(f"🎮 [{self.name}] NVENC-Test erfolgreich — Aufnahmen nutzen GPU-Encoding.")
+
         # Optionaler Audio-Trigger (CLAP, mehrere frei wählbare Kategorien
         # gleichzeitig). Läuft immer als Hintergrund-Thread, prüft aber selbst
         # laufend AUDIO_TRIGGER_ENABLED aus den Settings — so greift Ein/Aus
@@ -744,7 +778,7 @@ class CameraAgent(multiprocessing.Process):
                                         try:
                                             out_container = av.open(video_file_path, mode='w')
 
-                                            try:
+                                            if nvenc_available:
                                                 out_video = out_container.add_stream('h264_nvenc', rate=TARGET_FPS)
                                                 # Bewusst konservative Optionen (breite Kompatibilität über
                                                 # NVENC-Generationen von Turing bis Blackwell) — keine
@@ -755,9 +789,7 @@ class CameraAgent(multiprocessing.Process):
                                                     out_video.options = {'rc': 'vbr', 'cq': '23', 'gpu': '0', 'g': gop_size}
                                                 except Exception as opt_err:
                                                     self.logger.warning(f"⚠️ NVENC-Optionen konnten nicht gesetzt werden ({opt_err}), nutze Encoder-Defaults.")
-                                                self.logger.info(f"🎮 [{self.name}] Aufnahme läuft über NVENC (GPU-Encoding).")
-                                            except Exception as e:
-                                                self.logger.warning(f"⚠️ NVENC unavailable ({e}), falling back to libx264 (CPU-Encoding).")
+                                            else:
                                                 out_video = out_container.add_stream('libx264', rate=TARGET_FPS)
                                                 try:
                                                     out_video.options = {'preset': 'veryfast', 'crf': '23', 'g': gop_size}
