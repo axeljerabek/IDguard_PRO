@@ -257,13 +257,19 @@ class CameraAgent(multiprocessing.Process):
         def _probe_nvenc():
             try:
                 import tempfile
+                # 320x240, nicht 64x64: manche NVENC-Generationen/Treiber
+                # lehnen zu kleine Auflösungen ab (unterhalb einer nicht
+                # überall gleich dokumentierten Mindestgröße), was den Test
+                # fälschlich als "NVENC kaputt" melden würde, obwohl der
+                # Encoder bei den tatsächlichen Aufnahme-Auflösungen (720p/
+                # 1080p) einwandfrei funktionieren könnte.
                 with tempfile.NamedTemporaryFile(suffix='.mp4', delete=True) as tmp:
                     probe_container = av.open(tmp.name, mode='w')
                     probe_stream = probe_container.add_stream('h264_nvenc', rate=30)
-                    probe_stream.width = 64
-                    probe_stream.height = 64
+                    probe_stream.width = 320
+                    probe_stream.height = 240
                     probe_stream.pix_fmt = 'yuv420p'
-                    probe_frame = av.VideoFrame(width=64, height=64, format='yuv420p')
+                    probe_frame = av.VideoFrame(width=320, height=240, format='yuv420p')
                     list(probe_stream.encode(probe_frame))
                     list(probe_stream.encode(None))  # flush
                     probe_container.close()
