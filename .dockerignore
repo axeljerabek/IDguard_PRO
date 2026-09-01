@@ -2,6 +2,7 @@
 alerts/
 logs/
 search_index.db
+faces.db
 *.pt
 
 # Lokale Entwicklungsumgebung
