@@ -485,14 +485,14 @@ def _trigger_analysis(base_dir, filename):
 def analyze_video(filename: str):
     _verify_csrf()
     ok, err = _trigger_analysis(ALERTS_DIR, filename)
-    return redirect(url_for('dashboard') if ok else url_for('dashboard', analyze_error=err))
+    return json.dumps({'ok': ok, 'error': err})
 
 @app.route('/analyze/archive/<filename>', methods=['POST'])
 @requires_auth
 def analyze_archived_video(filename: str):
     _verify_csrf()
     ok, err = _trigger_analysis(ARCHIVE_DIR, filename)
-    return redirect(url_for('dashboard') if ok else url_for('dashboard', analyze_error=err))
+    return json.dumps({'ok': ok, 'error': err})
 
 def _export_folder_name(filename, topic=None):
     """Event_<Kamera>_<Zeitstempel>[ Topic_<Thema>], Dateisystem-sicher
@@ -579,11 +579,11 @@ def _export_route_handler(src_dir, filename):
     settings = load_settings()
     export_dir = (settings.get('EXPORT_DIR') or '').strip()
     if not export_dir:
-        return redirect(url_for('dashboard', export_error="No export folder configured (Settings)."))
+        return json.dumps({'ok': False, 'error': 'No export folder configured (Settings).'})
     ok, result = _run_export(src_dir, filename, export_dir)
     if ok:
-        return redirect(url_for('dashboard', exported=result))
-    return redirect(url_for('dashboard', export_error=result))
+        return json.dumps({'ok': True, 'folder': result})
+    return json.dumps({'ok': False, 'error': result})
 
 @app.route('/export/<filename>', methods=['POST'])
 @requires_auth
@@ -732,6 +732,21 @@ def api_unassign_face():
     faces_db.unassign_face(face_id)
     return json.dumps({'ok': True})
 
+@app.route('/api/unassign_faces_bulk', methods=['POST'])
+@requires_auth
+def api_unassign_faces_bulk():
+    _verify_csrf()
+    if faces_db is None:
+        return json.dumps({'ok': False, 'error': 'Face recognition module not available.'})
+    try:
+        face_ids = [int(fid) for fid in request.form.getlist('face_ids')]
+    except (TypeError, ValueError):
+        return json.dumps({'ok': False, 'error': 'Invalid face_ids.'})
+    if not face_ids:
+        return json.dumps({'ok': False, 'error': 'No face_ids provided.'})
+    faces_db.unassign_faces(face_ids)
+    return json.dumps({'ok': True, 'count': len(face_ids)})
+
 @app.route('/api/reject_face', methods=['POST'])
 @requires_auth
 def api_reject_face():
@@ -744,6 +759,21 @@ def api_reject_face():
         return json.dumps({'ok': False, 'error': 'Invalid face_id.'})
     faces_db.reject_face(face_id)
     return json.dumps({'ok': True})
+
+@app.route('/api/reject_faces_bulk', methods=['POST'])
+@requires_auth
+def api_reject_faces_bulk():
+    _verify_csrf()
+    if faces_db is None:
+        return json.dumps({'ok': False, 'error': 'Face recognition module not available.'})
+    try:
+        face_ids = [int(fid) for fid in request.form.getlist('face_ids')]
+    except (TypeError, ValueError):
+        return json.dumps({'ok': False, 'error': 'Invalid face_ids.'})
+    if not face_ids:
+        return json.dumps({'ok': False, 'error': 'No face_ids provided.'})
+    faces_db.reject_faces(face_ids)
+    return json.dumps({'ok': True, 'count': len(face_ids)})
 
 @app.route('/api/rename_person', methods=['POST'])
 @requires_auth
@@ -1060,14 +1090,15 @@ def delete_video(filename: str):
         try:
             os.remove(file_path)
         except Exception as e:
-            print(f"Fehler beim Löschen: {e}")
+            _event_cache.clear()
+            return json.dumps({'ok': False, 'error': str(e)})
         _remove_matching_thumbnail(file_path)
         if search_index is not None:
             search_index.remove_event(filename)
         if faces_db is not None:
             faces_db.remove_faces_for_video(filename)
     _event_cache.clear()
-    return redirect(url_for('dashboard'))
+    return json.dumps({'ok': True})
 
 @app.route('/archive/<filename>', methods=['POST'])
 @requires_auth
@@ -1075,39 +1106,41 @@ def archive_video(filename: str):
     _verify_csrf()
     src_path = os.path.abspath(os.path.join(ALERTS_DIR, filename))
     # Sicherheitscheck: Datei muss direkt (nicht rekursiv) im ALERTS_DIR liegen
-    if src_path.startswith(os.path.abspath(ALERTS_DIR)) and os.path.isfile(src_path) \
-            and os.path.dirname(src_path) == os.path.abspath(ALERTS_DIR):
+    if not (src_path.startswith(os.path.abspath(ALERTS_DIR)) and os.path.isfile(src_path)
+            and os.path.dirname(src_path) == os.path.abspath(ALERTS_DIR)):
+        return json.dumps({'ok': False, 'error': 'Video not found.'})
+    try:
+        shutil.move(src_path, os.path.join(ARCHIVE_DIR, os.path.basename(src_path)))
+    except Exception as e:
+        _event_cache.clear()
+        return json.dumps({'ok': False, 'error': str(e)})
+    # Passenden Trigger-Screenshot mitnehmen, damit er im Archiv weiterhin angezeigt wird
+    thumb_src = os.path.splitext(src_path)[0] + '.jpg'
+    if os.path.exists(thumb_src):
         try:
-            shutil.move(src_path, os.path.join(ARCHIVE_DIR, os.path.basename(src_path)))
+            shutil.move(thumb_src, os.path.join(ARCHIVE_DIR, os.path.basename(thumb_src)))
         except Exception as e:
-            print(f"Fehler beim Archivieren: {e}")
-        # Passenden Trigger-Screenshot mitnehmen, damit er im Archiv weiterhin angezeigt wird
-        thumb_src = os.path.splitext(src_path)[0] + '.jpg'
-        if os.path.exists(thumb_src):
+            print(f"Fehler beim Archivieren des Thumbnails: {e}")
+    # AI-Metadaten (JSON fürs Dashboard + XMP-Sidecar für Immich) mitnehmen
+    for extra in (os.path.splitext(src_path)[0] + '.ai.json', os.path.splitext(src_path)[0] + '.trigger.json', src_path + '.xmp'):
+        if os.path.exists(extra):
             try:
-                shutil.move(thumb_src, os.path.join(ARCHIVE_DIR, os.path.basename(thumb_src)))
+                shutil.move(extra, os.path.join(ARCHIVE_DIR, os.path.basename(extra)))
             except Exception as e:
-                print(f"Fehler beim Archivieren des Thumbnails: {e}")
-        # AI-Metadaten (JSON fürs Dashboard + XMP-Sidecar für Immich) mitnehmen
-        for extra in (os.path.splitext(src_path)[0] + '.ai.json', os.path.splitext(src_path)[0] + '.trigger.json', src_path + '.xmp'):
-            if os.path.exists(extra):
-                try:
-                    shutil.move(extra, os.path.join(ARCHIVE_DIR, os.path.basename(extra)))
-                except Exception as e:
-                    print(f"Fehler beim Archivieren von {extra}: {e}")
-        # Filmstrip-Ordner mitnehmen
-        fs_src = os.path.join(ALERTS_DIR, '.thumbs', os.path.splitext(os.path.basename(src_path))[0])
-        if os.path.isdir(fs_src):
-            try:
-                shutil.move(fs_src, os.path.join(ARCHIVE_DIR, '.thumbs', os.path.basename(fs_src)))
-            except Exception as e:
-                print(f"Fehler beim Archivieren des Filmstrips: {e}")
-        if search_index is not None:
-            search_index.update_location(filename, ARCHIVE_DIR)
-        if faces_db is not None:
-            faces_db.update_base_dir(filename, ARCHIVE_DIR)
+                print(f"Fehler beim Archivieren von {extra}: {e}")
+    # Filmstrip-Ordner mitnehmen
+    fs_src = os.path.join(ALERTS_DIR, '.thumbs', os.path.splitext(os.path.basename(src_path))[0])
+    if os.path.isdir(fs_src):
+        try:
+            shutil.move(fs_src, os.path.join(ARCHIVE_DIR, '.thumbs', os.path.basename(fs_src)))
+        except Exception as e:
+            print(f"Fehler beim Archivieren des Filmstrips: {e}")
+    if search_index is not None:
+        search_index.update_location(filename, ARCHIVE_DIR)
+    if faces_db is not None:
+        faces_db.update_base_dir(filename, ARCHIVE_DIR)
     _event_cache.clear()
-    return redirect(url_for('dashboard'))
+    return json.dumps({'ok': True})
 
 @app.route('/delete_archived/<filename>', methods=['POST'])
 @requires_auth
@@ -1118,14 +1151,15 @@ def delete_archived_video(filename: str):
         try:
             os.remove(file_path)
         except Exception as e:
-            print(f"Fehler beim Löschen: {e}")
+            _event_cache.clear()
+            return json.dumps({'ok': False, 'error': str(e)})
         _remove_matching_thumbnail(file_path)
         if search_index is not None:
             search_index.remove_event(filename)
         if faces_db is not None:
             faces_db.remove_faces_for_video(filename)
     _event_cache.clear()
-    return redirect(url_for('dashboard'))
+    return json.dumps({'ok': True})
 
 @app.route('/thumb/<filename>')
 @requires_auth

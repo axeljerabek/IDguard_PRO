@@ -253,6 +253,30 @@ def unassign_face(face_id):
         print(f"⚠️ Konnte Gesicht nicht lösen: {e}")
 
 
+def unassign_faces(face_ids):
+    """Bulk-Variante von unassign_face() — z.B. zum schnellen Aufräumen
+    eines großen unzugeordneten Pools. Ein DB-Write für alle IDs auf
+    einmal, Centroid-Neuberechnung pro betroffener Person nur EINMAL,
+    nicht pro einzelnem Gesicht."""
+    if not face_ids:
+        return
+    try:
+        conn = _connect()
+        placeholders = ','.join('?' * len(face_ids))
+        rows = conn.execute(
+            f"SELECT DISTINCT person_id FROM faces WHERE id IN ({placeholders}) AND person_id IS NOT NULL",
+            face_ids
+        ).fetchall()
+        affected_people = [r[0] for r in rows]
+        conn.execute(f"UPDATE faces SET person_id = NULL, cluster_id = NULL WHERE id IN ({placeholders})", face_ids)
+        conn.commit()
+        conn.close()
+        for person_id in affected_people:
+            _recompute_centroid(person_id)
+    except Exception as e:
+        print(f"⚠️ Konnte Gesichter nicht lösen: {e}")
+
+
 def reject_face(face_id):
     """Nutzer markiert: das war gar kein Gesicht (Fehlerkennung) — zählt
     nirgends mehr mit, taucht auch nicht mehr im Clustering auf."""
@@ -267,6 +291,27 @@ def reject_face(face_id):
             _recompute_centroid(old_person_id)
     except Exception as e:
         print(f"⚠️ Konnte Gesicht nicht ablehnen: {e}")
+
+
+def reject_faces(face_ids):
+    """Bulk-Variante von reject_face()."""
+    if not face_ids:
+        return
+    try:
+        conn = _connect()
+        placeholders = ','.join('?' * len(face_ids))
+        rows = conn.execute(
+            f"SELECT DISTINCT person_id FROM faces WHERE id IN ({placeholders}) AND person_id IS NOT NULL",
+            face_ids
+        ).fetchall()
+        affected_people = [r[0] for r in rows]
+        conn.execute(f"UPDATE faces SET rejected = 1, person_id = NULL, cluster_id = NULL WHERE id IN ({placeholders})", face_ids)
+        conn.commit()
+        conn.close()
+        for person_id in affected_people:
+            _recompute_centroid(person_id)
+    except Exception as e:
+        print(f"⚠️ Konnte Gesichter nicht ablehnen: {e}")
 
 
 def get_unassigned_faces():

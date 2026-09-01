@@ -78,6 +78,7 @@
                     <button type="button" id="searchClearBtn" onclick="clearSearch()" style="display:none;" title="Clear search"><i class="fa-solid fa-xmark"></i></button>
                 </div>
                 <div id="searchStatus" style="display:none;"></div>
+                <button type="button" class="btn-select-all" onclick="selectAllEvents('recent')"><i class="fa-solid fa-square-check"></i> Select all</button>
                 <div class="event-list" id="recent-event-list"></div>
             </div>
         </div>
@@ -648,6 +649,7 @@
                 <i class="fa-solid fa-chevron-down chevron"></i>
             </summary>
             <div class="collapse-body">
+                <button type="button" class="btn-select-all" onclick="selectAllEvents('archived')"><i class="fa-solid fa-square-check"></i> Select all</button>
                 <div class="event-list" id="archived-event-list"></div>
             </div>
         </details>
@@ -1032,9 +1034,14 @@
         // können, statt die Lightbox nach jedem einzelnen Klick zu schließen —
         // wichtig, wenn man mehrere Gesichter hintereinander korrigiert.
         let lightboxContext = null;
+        // Mehrfachauswahl innerhalb der aktuell offenen Lightbox (Cluster
+        // ODER Person) — wird beim Öffnen/Wechseln/Schließen zurückgesetzt,
+        // da immer nur eine Lightbox gleichzeitig offen sein kann.
+        let selectedFaces = new Set();
 
         function openPersonLightbox(personId) {
             lightboxContext = { type: 'person', id: personId };
+            selectedFaces.clear();
             document.getElementById('peopleLightbox').classList.add('active');
             renderPersonLightboxContent(personId);
         }
@@ -1051,6 +1058,11 @@
                         <button type="button" class="btn-delete-outline" onclick="deletePerson(${personId})"><i class="fa-solid fa-trash-can"></i> Un-name person</button>
                     </div>
                 </div>
+                <div class="face-select-bar">
+                    <button type="button" class="btn-select-all" onclick="selectAllFacesInLightbox()"><i class="fa-solid fa-square-check"></i> Select all</button>
+                    <span id="faceSelectCount" class="face-select-count" style="display:none;"></span>
+                    <button type="button" id="faceBulkDeleteBtn" class="btn-delete-outline" style="display:none;" onclick="deleteSelectedFaces()"><i class="fa-solid fa-trash-can"></i> Remove selected</button>
+                </div>
                 <div id="peopleLightboxFaces" class="people-lightbox-faces"><p class="settings-hint">Loading…</p></div>
             `;
             fetch('/api/person_faces/' + personId)
@@ -1064,6 +1076,7 @@
                     facesEl.innerHTML = faces.map(f => `
                         <div class="face-thumb-wrap">
                             <img src="/face_crop/${f.id}" class="face-thumb" title="${escapeHtml(f.filename)}">
+                            <input type="checkbox" class="face-select-checkbox" onclick="toggleFaceSelection(${f.id}, this)" title="Select">
                             <button type="button" class="face-thumb-remove" onclick="unassignFace(${f.id}, ${personId})" title="Remove from this person"><i class="fa-solid fa-xmark"></i></button>
                         </div>
                     `).join('') || '<p class="settings-hint">No faces left for this person.</p>';
@@ -1072,6 +1085,7 @@
 
         function openClusterLightbox(cid) {
             lightboxContext = { type: 'cluster', id: cid };
+            selectedFaces.clear();
             document.getElementById('peopleLightbox').classList.add('active');
             renderClusterLightboxContent(cid);
         }
@@ -1083,12 +1097,18 @@
             const faceThumbs = faces.map(f => `
                 <div class="face-thumb-wrap">
                     <img src="/face_crop/${f.id}" class="face-thumb" title="${escapeHtml(f.filename)}">
+                    <input type="checkbox" class="face-select-checkbox" onclick="toggleFaceSelection(${f.id}, this)" title="Select">
                     <button type="button" class="face-thumb-remove" onclick="rejectFace(${f.id}, '${cid}')" title="Not a face"><i class="fa-solid fa-xmark"></i></button>
                 </div>
             `).join('');
             body.innerHTML = `
                 <div class="people-lightbox-header">
                     <h3>Unlabeled group — ${faces.length} face${faces.length === 1 ? '' : 's'}</h3>
+                </div>
+                <div class="face-select-bar">
+                    <button type="button" class="btn-select-all" onclick="selectAllFacesInLightbox()"><i class="fa-solid fa-square-check"></i> Select all</button>
+                    <span id="faceSelectCount" class="face-select-count" style="display:none;"></span>
+                    <button type="button" id="faceBulkDeleteBtn" class="btn-delete-outline" style="display:none;" onclick="deleteSelectedFaces()"><i class="fa-solid fa-trash-can"></i> Not faces — reject selected</button>
                 </div>
                 <div class="people-lightbox-faces">${faceThumbs || '<p class="settings-hint">No faces left in this group.</p>'}</div>
                 <div class="cluster-actions" style="margin-top:18px;">
@@ -1113,6 +1133,71 @@
         function closePeopleLightbox() {
             document.getElementById('peopleLightbox').classList.remove('active');
             lightboxContext = null;
+            selectedFaces.clear();
+        }
+
+        function toggleFaceSelection(faceId, checkbox) {
+            if (checkbox.checked) selectedFaces.add(faceId);
+            else selectedFaces.delete(faceId);
+            updateFaceSelectBar();
+        }
+
+        function selectAllFacesInLightbox() {
+            const body = document.getElementById('peopleLightboxBody');
+            if (!body) return;
+            body.querySelectorAll('.face-select-checkbox:not(:checked)').forEach(cb => cb.click());
+        }
+
+        function updateFaceSelectBar() {
+            const count = selectedFaces.size;
+            const countEl = document.getElementById('faceSelectCount');
+            const btnEl = document.getElementById('faceBulkDeleteBtn');
+            if (!countEl || !btnEl) return;
+            if (count === 0) {
+                countEl.style.display = 'none';
+                btnEl.style.display = 'none';
+                return;
+            }
+            countEl.style.display = 'inline';
+            countEl.innerText = count + ' selected';
+            btnEl.style.display = 'inline-flex';
+        }
+
+        function deleteSelectedFaces() {
+            if (!lightboxContext || selectedFaces.size === 0) return;
+            const faceIds = Array.from(selectedFaces);
+            const isCluster = lightboxContext.type === 'cluster';
+            const url = isCluster ? '/api/reject_faces_bulk' : '/api/unassign_faces_bulk';
+            const cid = lightboxContext.id;
+            const personId = lightboxContext.id;
+            _postForm(url, { face_ids: faceIds }).then(res => {
+                if (!res.ok) {
+                    showToast('⚠️ ' + (res.error || 'Failed to remove selected faces.'), 6000);
+                    return;
+                }
+                showToast(`Removed ${faceIds.length} face${faceIds.length === 1 ? '' : 's'}.`);
+                selectedFaces.clear();
+                if (isCluster) {
+                    // Lokal aus dem Cluster entfernen, wie bei der Einzel-Ablehnung —
+                    // kein voller Reload nötig, Lightbox bleibt offen für weitere Korrekturen.
+                    if (currentClusters[cid]) {
+                        currentClusters[cid] = currentClusters[cid].filter(f => !faceIds.includes(f.id));
+                        if (currentClusters[cid].length === 0) delete currentClusters[cid];
+                    }
+                    renderClustersGrid();
+                    if (lightboxContext && lightboxContext.type === 'cluster' && lightboxContext.id === cid) {
+                        if (currentClusters[cid] && currentClusters[cid].length) renderClusterLightboxContent(cid);
+                        else closePeopleLightbox();
+                    }
+                } else {
+                    const p = currentPeople.find(p => p.id === personId);
+                    if (p) p.face_count = Math.max(0, p.face_count - faceIds.length);
+                    renderPeopleGrid();
+                    if (lightboxContext && lightboxContext.type === 'person' && lightboxContext.id === personId) {
+                        renderPersonLightboxContent(personId);
+                    }
+                }
+            });
         }
 
         function openTranscriptLightbox(fn) {
@@ -1134,6 +1219,57 @@
                 else body.append(key, val);
             }
             return fetch(url, { method: 'POST', body }).then(r => r.json());
+        }
+
+        function _decrementCountBadge(id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const n = parseInt(el.innerText || '0', 10);
+            if (!isNaN(n)) el.innerText = Math.max(0, n - 1);
+        }
+
+        function analyzeEvent(fn, isArchived) {
+            const url = (isArchived ? '/analyze/archive/' : '/analyze/') + fn;
+            _postForm(url, {}).then(res => {
+                if (res.ok) showToast('Analysis started…');
+                else showToast('⚠️ Analysis not started: ' + (res.error || 'unknown error'), 6000);
+            });
+        }
+
+        function exportEvent(fn, isArchived) {
+            const url = (isArchived ? '/export/archive/' : '/export/') + fn;
+            _postForm(url, {}).then(res => {
+                if (res.ok) showToast('✅ Exported to "' + res.folder + '"');
+                else showToast('⚠️ Export failed: ' + (res.error || 'unknown error'), 6000);
+            });
+        }
+
+        function archiveEvent(fn, btn) {
+            _postForm('/archive/' + fn, {}).then(res => {
+                if (res.ok) {
+                    const card = btn.closest('.event-item');
+                    if (card) card.remove();
+                    _decrementCountBadge('event-count');
+                    showToast('Archived — will appear under Archived shortly.');
+                } else {
+                    showToast('⚠️ Archive failed: ' + (res.error || 'unknown error'), 6000);
+                }
+            });
+        }
+
+        function deleteEvent(fn, isArchived, btn) {
+            if (!confirm(isArchived ? 'Are you sure you want to permanently delete this video?' : 'Are you sure you want to delete this video?')) return;
+            const url = (isArchived ? '/delete_archived/' : '/delete/') + fn;
+            _postForm(url, {}).then(res => {
+                if (res.ok) {
+                    const card = btn.closest('.event-item');
+                    if (card) card.remove();
+                    _decrementCountBadge(isArchived ? 'archive-count' : 'event-count');
+                    showToast('Deleted.');
+                } else {
+                    showToast('⚠️ Delete failed: ' + (res.error || 'unknown error'), 6000);
+                }
+            });
         }
 
         function nameCluster(cid) {
@@ -1276,6 +1412,17 @@
             document.querySelectorAll('.event-item-selected').forEach(el => el.classList.remove('event-item-selected'));
             updateBulkActionBar();
         }
+        function selectAllEvents(kind) {
+            const containerId = kind === 'archived' ? 'archived-event-list' : 'recent-event-list';
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            // .click() statt direkt checked=true setzen — feuert den echten
+            // onclick-Handler (toggleEventSelection), keine zweite,
+            // divergierende Auswahl-Logik nötig. :not(:checked) verhindert,
+            // dass bereits ausgewählte Zeilen versehentlich wieder abgewählt
+            // werden.
+            container.querySelectorAll('.event-select-checkbox:not(:checked)').forEach(cb => cb.click());
+        }
         function updateBulkActionBar() {
             const bar = document.getElementById('bulkActionBar');
             const count = selectedEvents.size;
@@ -1410,6 +1557,31 @@
                 const confBadge = (ev.trigger_confidence != null)
                     ? `<span class="thumb-conf-badge">${escapeHtml(ev.trigger_class || '')} ${Math.round(ev.trigger_confidence * 100)}%</span>`
                     : '';
+                // Permanente Mini-Filmstrip-Reihe unter dem Hauptbild — nutzt
+                // dieselben Filmstrip-Daten wie das Hover-Scrub oben, aber
+                // immer sichtbar statt nur bei Mouseover. Bis zu 6 Bilder,
+                // gleichmäßig über die tatsächliche Aufnahmedauer verteilt
+                // (filmstrip_order berücksichtigt das Reservoir-Sampling, das
+                // die Dateinummern nicht zeitlich sortiert).
+                let filmstripPreview = '';
+                const fsCount = ev.filmstrip_count || 0;
+                if (fsCount > 1) {
+                    const order = (ev.filmstrip_order && ev.filmstrip_order.length === fsCount)
+                        ? ev.filmstrip_order
+                        : Array.from({length: fsCount}, (_, i) => i);
+                    const maxPreview = 6;
+                    const previewN = Math.min(fsCount, maxPreview);
+                    // k*(fsCount-1)/(previewN-1) statt einer festen Schrittweite —
+                    // garantiert genau previewN Positionen, gleichmäßig verteilt,
+                    // erste UND letzte Position immer mit dabei (nicht nur
+                    // näherungsweise, eine feste Schrittweite kann je nach
+                    // Teilbarkeit ein Vorschaubild zu wenig liefern).
+                    const positions = previewN <= 1
+                        ? [0]
+                        : Array.from({length: previewN}, (_, k) => Math.round(k * (fsCount - 1) / (previewN - 1)));
+                    const frames = positions.map(pos => `<img src="${fsBase}${order[pos]}" class="filmstrip-preview-frame" loading="lazy" alt="">`).join('');
+                    filmstripPreview = `<div class="filmstrip-preview-strip">${frames}</div>`;
+                }
                 const triggerParts = [];
                 if (ev.trigger_class && ev.trigger_confidence != null) {
                     triggerParts.push(`${ev.trigger_class} detected (${Math.round(ev.trigger_confidence * 100)}%)`);
@@ -1441,31 +1613,15 @@
                 const analyzeUrl = (isArchived ? '/analyze/archive/' : '/analyze/') + fn;
                 const showAnalyzeBtn = (ev.filmstrip_count || 0) > 0 && !ev.ai_pending;
                 const analyzeBtn = showAnalyzeBtn
-                    ? `<form action="${analyzeUrl}" method="POST" style="margin:0">
-                         <input type="hidden" name="csrf_token" value="${CSRF_TOKEN}">
-                         <button type="submit" class="btn-analyze" title="${ev.ai_description ? 'Re-analyze' : 'Analyze'}" onclick="event.stopPropagation()"><i class="fa-solid fa-wand-magic-sparkles"></i></button>
-                       </form>`
+                    ? `<button type="button" class="btn-analyze" title="${ev.ai_description ? 'Re-analyze' : 'Analyze'}" onclick="event.stopPropagation(); analyzeEvent('${fn}', ${isArchived})"><i class="fa-solid fa-wand-magic-sparkles"></i></button>`
                     : '';
-                const exportUrl = (isArchived ? '/export/archive/' : '/export/') + fn;
                 const exportBtn = EXPORT_ENABLED
-                    ? `<form action="${exportUrl}" method="POST" style="margin:0">
-                         <input type="hidden" name="csrf_token" value="${CSRF_TOKEN}">
-                         <button type="submit" class="btn-export" title="Export to configured folder" onclick="event.stopPropagation()"><i class="fa-solid fa-file-export"></i></button>
-                       </form>`
+                    ? `<button type="button" class="btn-export" title="Export to configured folder" onclick="event.stopPropagation(); exportEvent('${fn}', ${isArchived})"><i class="fa-solid fa-file-export"></i></button>`
                     : '';
                 const actions = (isArchived
-                    ? `<form action="/delete_archived/${fn}" method="POST" style="margin:0" onsubmit="return confirm('Are you sure you want to permanently delete this video?');">
-                         <input type="hidden" name="csrf_token" value="${CSRF_TOKEN}">
-                         <button type="submit" class="btn-delete" title="Permanently delete video" onclick="event.stopPropagation()"><i class="fa-solid fa-trash-can"></i></button>
-                       </form>`
-                    : `<form action="/archive/${fn}" method="POST" style="margin:0">
-                         <input type="hidden" name="csrf_token" value="${CSRF_TOKEN}">
-                         <button type="submit" class="btn-archive" title="Archive video" onclick="event.stopPropagation()"><i class="fa-solid fa-box-archive"></i></button>
-                       </form>
-                       <form action="/delete/${fn}" method="POST" style="margin:0" onsubmit="return confirm('Are you sure you want to delete this video?');">
-                         <input type="hidden" name="csrf_token" value="${CSRF_TOKEN}">
-                         <button type="submit" class="btn-delete" title="Delete video" onclick="event.stopPropagation()"><i class="fa-solid fa-trash-can"></i></button>
-                       </form>`) + analyzeBtn + exportBtn;
+                    ? `<button type="button" class="btn-delete" title="Permanently delete video" onclick="event.stopPropagation(); deleteEvent('${fn}', true, this)"><i class="fa-solid fa-trash-can"></i></button>`
+                    : `<button type="button" class="btn-archive" title="Archive video" onclick="event.stopPropagation(); archiveEvent('${fn}', this)"><i class="fa-solid fa-box-archive"></i></button>
+                       <button type="button" class="btn-delete" title="Delete video" onclick="event.stopPropagation(); deleteEvent('${fn}', false, this)"><i class="fa-solid fa-trash-can"></i></button>`) + analyzeBtn + exportBtn;
                 let aiLine = '';
                 if (ev.ai_pending) {
                     aiLine = `<span class="event-ai-desc event-ai-pending"><i class="fa-solid fa-spinner fa-spin"></i> Analyzing...</span>`;
@@ -1481,6 +1637,7 @@
                     <div class="event-thumb" data-default-src="${defaultSrc}" data-fs-base="${fsBase}" data-fs-count="${ev.filmstrip_count || 0}" data-fs-order="${(ev.filmstrip_order || []).join(',')}">${thumbHtml}${confBadge}
                         <input type="checkbox" class="event-select-checkbox" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleEventSelection('${fn}', ${isArchived}, this)" title="Select for bulk actions">
                     </div>
+                    ${filmstripPreview}
                     <div class="event-body">
                         <div class="event-info">
                             <span class="event-name">${fn}</span>

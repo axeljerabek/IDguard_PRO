@@ -92,7 +92,7 @@ h1 i { color: var(--primary); }
     background-color: var(--card-bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    padding: clamp(16px, 2.6vw, 24px);
+    padding: clamp(12px, 1.8vw, 18px);
     margin-bottom: var(--gap);
     box-shadow: 0 4px 18px -6px rgba(60, 50, 30, 0.12);
     min-width: 0;
@@ -314,9 +314,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 .stream-container {
     background: var(--card-bg-inset);
-    padding: 10px;
+    padding: 6px;
     border-radius: var(--radius-md);
-    border: 1px solid var(--border);
 }
 
 .stream-header {
@@ -751,20 +750,19 @@ input:checked + .slider:before { transform: translateX(21px); background: #fffff
 }
 .event-item {
     background: var(--card-bg-inset);
-    border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    padding: 10px;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
-    gap: 8px;
     cursor: pointer;
-    transition: border-color 0.15s;
+    transition: box-shadow 0.15s;
 }
-.event-item:hover { border-color: var(--primary); }
+.event-item:hover { box-shadow: 0 0 0 2px var(--primary); }
 .event-body {
+    padding: 8px 10px 10px;
     display: flex;
     flex-direction: column;
-    gap: 7px;
+    gap: 6px;
     min-width: 0;
 }
 .event-actions {
@@ -778,17 +776,32 @@ input:checked + .slider:before { transform: translateX(21px); background: #fffff
     width: 100%;
     aspect-ratio: 16/9;
     flex-shrink: 0;
-    border-radius: var(--radius-sm);
-    overflow: hidden;
     background: #000;
     display: flex;
     align-items: center;
     justify-content: center;
-    border: 1px solid var(--border);
     cursor: ew-resize;
 }
 .event-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .event-thumb i { color: var(--text-dim); font-size: 1.3rem; }
+.filmstrip-preview-strip {
+    display: flex;
+    gap: 2px;
+    padding: 4px 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    background: var(--card-bg-inset);
+}
+.filmstrip-preview-strip::-webkit-scrollbar { display: none; }
+.filmstrip-preview-frame {
+    height: 42px;
+    width: auto;
+    aspect-ratio: 16/9;
+    object-fit: cover;
+    flex-shrink: 0;
+    border-radius: 3px;
+    opacity: 0.88;
+}
 .thumb-conf-badge {
     position: absolute;
     bottom: 8px;
@@ -940,7 +953,7 @@ input:checked + .slider:before { transform: translateX(21px); background: #fffff
     overflow: hidden;
     text-overflow: ellipsis;
     display: -webkit-box;
-    -webkit-line-clamp: 2;
+    -webkit-line-clamp: 4;
     -webkit-box-orient: vertical;
     cursor: pointer;
 }
@@ -973,6 +986,24 @@ input:checked + .slider:before { transform: translateX(21px); background: #fffff
     white-space: pre-wrap;
     max-height: 55vh;
     overflow-y: auto;
+}
+
+.face-zoom-content {
+    max-width: 90vw;
+    max-height: 90vh;
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+}
+.face-zoom-content img {
+    max-width: 90vw;
+    max-height: 90vh;
+    display: block;
+    border-radius: var(--radius-md);
+    object-fit: contain;
+}
+.event-person-avatar, .cluster-preview-thumb, .face-thumb, .person-face {
+    cursor: zoom-in;
 }
 
 .btn-archive {
@@ -1142,6 +1173,26 @@ input:checked + .slider:before { transform: translateX(21px); background: #fffff
     align-items: center;
     justify-content: center;
     padding: 0;
+}
+.face-select-checkbox {
+    position: absolute;
+    bottom: 6px;
+    left: 6px;
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+    accent-color: var(--primary);
+}
+.face-select-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+.face-select-count {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-muted);
 }
 .cluster-actions {
     display: flex;
