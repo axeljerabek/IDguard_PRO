@@ -248,6 +248,7 @@ def _analyze_inner(video_basename, base_dir):
 
     files = _pick_frames(frame_dir, MAX_FRAMES)
     if not files:
+        print(f"⚠️ Filmstrip-Ordner für {video_basename} ist vorhanden, aber leer (keine .jpg-Dateien) — AI-Analyse übersprungen.")
         return
 
     # Retry mit halbierter Bildzahl bei einem erkannten Kontext-Overflow
@@ -261,6 +262,7 @@ def _analyze_inner(video_basename, base_dir):
     while files:
         images_b64 = _encode_images(files)
         if not images_b64:
+            print(f"⚠️ Konnte keine der {len(files)} Filmstrip-Bilddateien für {video_basename} lesen/kodieren — AI-Analyse übersprungen.")
             return
         payload = json.dumps({
             "model": OLLAMA_MODEL,
