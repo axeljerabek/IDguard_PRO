@@ -18,6 +18,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-venv ffmpeg git \
     && rm -rf /var/lib/apt/lists/*
 
+# cuDNN 9 für onnxruntime-gpu (Gesichtserkennung/Transkription).
+# PyTorch (YOLO/CLAP) bringt sein eigenes cuDNN über den pip-Wheel selbst
+# mit — onnxruntime-gpu dagegen erwartet cuDNN als System-Bibliothek
+# (libcudnn.so.9) und findet sie sonst nicht, auch wenn PyTorch im selben
+# Image tadellos läuft. Ohne diesen Schritt fällt onnxruntime lautlos auf
+# CPU zurück (siehe INSTALL.md's Face-Recognition-Abschnitt zum verwandten
+# onnxruntime/onnxruntime-gpu-Namespace-Problem — das hier ist eine ANDERE,
+# zusätzliche Ursache für dasselbe Symptom).
+#
+# UNVERIFIZIERT: dieser exakte Build-Schritt wurde nicht gegen eine echte
+# GPU getestet. nvidia/cuda-Basis-Images haben normalerweise das NVIDIA-
+# apt-Repo schon konfiguriert, sodass "cudnn9-cuda-12" direkt auflösbar
+# sein sollte — falls dieser Schritt bei euch fehlschlägt oder eine
+# überraschende Unterversion zieht (12.8 vs. z.B. 12.9), bitte melden.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cudnn9-cuda-12 \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Erst nur requirements.txt kopieren, damit Docker den pip-Install-Layer
