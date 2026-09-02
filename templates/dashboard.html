@@ -277,6 +277,11 @@
                                 <label>Max. frames per analysis</label>
                                 <input type="number" name="AI_ANALYZE_MAX_FRAMES" min="1" max="64" value="{{ settings.get('AI_ANALYZE_MAX_FRAMES', 12) }}">
                             </div>
+                            <div class="settings-group">
+                                <label>Ollama context size (num_ctx)</label>
+                                <input type="number" name="OLLAMA_CONTEXT_SIZE" min="0" max="131072" step="512" value="{{ settings.get('OLLAMA_CONTEXT_SIZE', 0) }}" placeholder="0 = Ollama's own default">
+                                <p class="settings-hint" style="margin-top:4px;">0 leaves Ollama's own default untouched. Set this if you get "exceeds the available context size" errors — but a larger value needs more GPU memory, so raise it carefully on limited-VRAM hardware (e.g. a small NUC).</p>
+                            </div>
                         </div>
                     </div>
 

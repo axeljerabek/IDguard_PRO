@@ -73,6 +73,13 @@ def _describe_ollama_error(e):
 
 
 MAX_FRAMES = int(os.environ.get("AI_ANALYZE_MAX_FRAMES", _settings.get("AI_ANALYZE_MAX_FRAMES", 12)))
+# Ollamas Server-Standard für die Kontextgröße ist oft künstlich klein (klassisch
+# 4096) — viele Modelle vertragen deutlich mehr, wenn man's explizit per Request
+# anfragt ("num_ctx"). Bei wenig VRAM (z.B. NUC mit nur 6GB) ist ein größerer
+# Wert aber ein echter Hardware-Trade-off (mehr Kontext = mehr GPU-Speicher fürs
+# KV-Cache) — deshalb einstellbar statt fix hochgesetzt. 0 = Ollamas eigenen
+# Standard unangetastet lassen (kein num_ctx im Request).
+OLLAMA_CONTEXT_SIZE = int(os.environ.get("OLLAMA_CONTEXT_SIZE", _settings.get("OLLAMA_CONTEXT_SIZE", 0)))
 AI_TOPICS_ENABLED = bool(_settings.get("AI_TOPICS_ENABLED", False))
 AI_TOPICS = [t.strip() for t in _settings.get("AI_TOPICS", []) if isinstance(t, str) and t.strip()]
 AI_TOPICS_THRESHOLD = float(_settings.get("AI_TOPICS_THRESHOLD", 50))
@@ -165,13 +172,16 @@ def _classify_topics(images_b64, topics):
     images = list(images_b64)
     parsed = None
     while images:
-        payload = json.dumps({
+        payload_dict = {
             "model": OLLAMA_MODEL,
             "prompt": prompt,
             "images": images,
             "format": "json",
             "stream": False
-        }).encode("utf-8")
+        }
+        if OLLAMA_CONTEXT_SIZE > 0:
+            payload_dict["options"] = {"num_ctx": OLLAMA_CONTEXT_SIZE}
+        payload = json.dumps(payload_dict).encode("utf-8")
         req = urllib.request.Request(
             f"{OLLAMA_URL}/api/generate", data=payload,
             headers={"Content-Type": "application/json"}
@@ -264,12 +274,15 @@ def _analyze_inner(video_basename, base_dir):
         if not images_b64:
             print(f"⚠️ Konnte keine der {len(files)} Filmstrip-Bilddateien für {video_basename} lesen/kodieren — AI-Analyse übersprungen.")
             return
-        payload = json.dumps({
+        payload_dict = {
             "model": OLLAMA_MODEL,
             "prompt": PROMPT,
             "images": images_b64,
             "stream": False
-        }).encode("utf-8")
+        }
+        if OLLAMA_CONTEXT_SIZE > 0:
+            payload_dict["options"] = {"num_ctx": OLLAMA_CONTEXT_SIZE}
+        payload = json.dumps(payload_dict).encode("utf-8")
         req = urllib.request.Request(
             f"{OLLAMA_URL}/api/generate", data=payload,
             headers={"Content-Type": "application/json"}
