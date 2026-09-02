@@ -785,25 +785,54 @@ def api_log():
 @app.route('/api/search')
 @requires_auth
 def api_search():
-    if search_index is None:
-        return json.dumps({'results': [], 'error': 'Search index module not available.'})
     query = request.args.get('q', '').strip()
     if not query:
         return json.dumps({'results': []})
-    try:
-        matches = search_index.search(query)
-    except Exception as e:
-        return json.dumps({'results': [], 'error': str(e)})
+
+    # (filename, base_dir) -> score, damit Text/Semantik- und Personen-Treffer
+    # sich nicht duplizieren, wenn beide auf dasselbe Video zeigen.
+    matched = {}
+
+    if search_index is not None:
+        try:
+            for filename, base_dir, description, score in search_index.search(query):
+                matched[(filename, base_dir)] = max(matched.get((filename, base_dir), 0), score)
+        except Exception as e:
+            if faces_db is None:
+                return json.dumps({'results': [], 'error': str(e)})
+
+    # Personensuche: Namen gegen die Anfrage matchen (Teilstring, case-
+    # insensitive), gefundene Personen -> deren Videos mit reinmischen.
+    # Eigener, fester Score-Bonus, unabhängig vom Text/Semantik-Score, damit
+    # ein Namenstreffer nie einfach "verschwindet" nur weil die Beschreibung
+    # selbst zufällig niedriger bewertet wurde.
+    if faces_db is not None:
+        q_lower = query.lower()
+        try:
+            for person in faces_db.list_people():
+                if q_lower in (person.get('name') or '').lower():
+                    for face in faces_db.get_faces_for_person(person['id']):
+                        key = (face['filename'], face['base_dir'])
+                        matched[key] = max(matched.get(key, 0), 0.6)
+        except Exception:
+            pass
+
+    if not matched:
+        return json.dumps({'results': []})
 
     results = []
-    for filename, base_dir, description, score in matches:
+    for (filename, base_dir), score in matched.items():
         full_path = os.path.join(base_dir, filename)
         if not os.path.exists(full_path):
             continue  # Datei zwischenzeitlich gelöscht, Index noch nicht nachgezogen
         ev = _event_from_file(full_path)
         if ev:
             ev['archived'] = (os.path.abspath(base_dir) == os.path.abspath(ARCHIVE_DIR))
+            ev['_search_score'] = score
             results.append(ev)
+    results.sort(key=lambda e: e['_search_score'], reverse=True)
+    for ev in results:
+        del ev['_search_score']
     return json.dumps({'results': results})
 
 @app.route('/api/people_data')
