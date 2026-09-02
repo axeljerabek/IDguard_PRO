@@ -66,29 +66,32 @@
             </div>
         </details>
 
-        <div class="card">
-            <h2>
-                <i class="fa-solid fa-clapperboard"></i> Recent Recordings
-                <span id="event-count" class="count-badge">{{ recent_events|length }}</span>
-            </h2>
-            <div class="search-bar">
-                <i class="fa-solid fa-magnifying-glass"></i>
-                <input type="text" id="searchInput" placeholder="Search descriptions (e.g. 'person carrying a box')..." onkeydown="if(event.key==='Enter') runSearch()">
-                <button type="button" onclick="runSearch()">Search</button>
-                <button type="button" id="searchClearBtn" onclick="clearSearch()" style="display:none;" title="Clear search"><i class="fa-solid fa-xmark"></i></button>
+        <details open class="collapse-card">
+            <summary>
+                <span><i class="fa-solid fa-clapperboard"></i> Recent Recordings
+                <span id="event-count" class="count-badge">{{ recent_events|length }}</span></span>
+                <i class="fa-solid fa-chevron-down chevron"></i>
+            </summary>
+            <div class="collapse-body">
+                <div class="search-bar">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <input type="text" id="searchInput" placeholder="Search descriptions (e.g. 'person carrying a box')..." onkeydown="if(event.key==='Enter') runSearch()">
+                    <button type="button" onclick="runSearch()">Search</button>
+                    <button type="button" id="searchClearBtn" onclick="clearSearch()" style="display:none;" title="Clear search"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="filter-bar">
+                    <select class="filter-camera" onchange="applyFilters(this)"><option value="">All cameras</option></select>
+                    <select class="filter-person" onchange="applyFilters(this)"><option value="">All people</option></select>
+                    <select class="filter-topic" onchange="applyFilters(this)"><option value="">All topics</option></select>
+                    <button type="button" class="btn-select-all filter-clear-btn" onclick="clearFilters()" style="display:none;" title="Clear filters"><i class="fa-solid fa-xmark"></i> Clear filters</button>
+                </div>
+                <div id="searchStatus" style="display:none;"></div>
+                <div class="filter-status" style="display:none;"></div>
+                <button type="button" class="btn-select-all" onclick="selectAllEvents('recent')"><i class="fa-solid fa-square-check"></i> Select all</button>
+                <a class="btn-select-all" href="/api/export_metadata?format=csv" download title="Download metadata (filenames, triggers, topics, people, descriptions, transcripts) for every recording as CSV"><i class="fa-solid fa-file-csv"></i> Export all metadata (CSV)</a>
+                <div class="event-list" id="recent-event-list"></div>
             </div>
-            <div class="filter-bar">
-                <select class="filter-camera" onchange="applyFilters(this)"><option value="">All cameras</option></select>
-                <select class="filter-person" onchange="applyFilters(this)"><option value="">All people</option></select>
-                <select class="filter-topic" onchange="applyFilters(this)"><option value="">All topics</option></select>
-                <button type="button" class="btn-select-all filter-clear-btn" onclick="clearFilters()" style="display:none;" title="Clear filters"><i class="fa-solid fa-xmark"></i> Clear filters</button>
-            </div>
-            <div id="searchStatus" style="display:none;"></div>
-            <div class="filter-status" style="display:none;"></div>
-            <button type="button" class="btn-select-all" onclick="selectAllEvents('recent')"><i class="fa-solid fa-square-check"></i> Select all</button>
-            <a class="btn-select-all" href="/api/export_metadata?format=csv" download title="Download metadata (filenames, triggers, topics, people, descriptions, transcripts) for every recording as CSV"><i class="fa-solid fa-file-csv"></i> Export all metadata (CSV)</a>
-            <div class="event-list" id="recent-event-list"></div>
-        </div>
+        </details>
 
         <!-- Sekundäre Bereiche: aufklappbar, standardmäßig zu -->
         <details class="collapse-card">
