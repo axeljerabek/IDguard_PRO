@@ -10,7 +10,6 @@ import queue
 import datetime
 import multiprocessing
 from collections import deque
-from fractions import Fraction
 
 try:
     from audio_trigger import AudioTrigger
@@ -551,12 +550,8 @@ class CameraAgent(multiprocessing.Process):
         out_container = None
         out_video = None
         out_audio = None
-        resampler = None
-        video_frame_count = 0
         recording_start_time = 0
-        last_pts = -1
-        audio_samples_written = 0
-        audio_first_frame_time = None
+        pts_offset = 0  # Neuer Nullpunkt fürs Packet-Copy-Remuxing, pro Aufnahme neu gesetzt
 
         # Filmstrip (Hover-Scrub-Vorschau + AI-taugliche Großbilder): pro
         # Recording neu gesetzt, siehe RECORDING-Start weiter unten.
@@ -576,36 +571,18 @@ class CameraAgent(multiprocessing.Process):
         filmstrip_pending = {}
 
         def close_writer():
-            nonlocal out_container, out_video, out_audio, resampler, video_frame_count, last_pts, audio_samples_written, audio_first_frame_time
+            nonlocal out_container, out_video, out_audio, pts_offset
             if out_container:
                 try:
-                    # Restliche Warteschlange komplett abarbeiten, BEVOR die
-                    # Encoder final geflusht werden — sonst gingen evtl. noch
-                    # nicht encodierte Frames (Pre-Roll-Rest, oder normale
-                    # Frames kurz vor Aufnahmeende) beim Schließen verloren.
+                    # Restliche Warteschlange komplett abarbeiten — sonst
+                    # gingen evtl. noch nicht gemuxte Pakete (Pre-Roll-Rest,
+                    # oder normale Pakete kurz vor Aufnahmeende) beim
+                    # Schließen verloren.
                     _drain_encode_queue_fully()
 
-                    # Flush Resampler zuerst — explizite, fortlaufende PTS statt
-                    # None, damit am Dateiende keine Unstetigkeit zur sonst
-                    # überall expliziten Audio-PTS-Vergabe entsteht.
-                    if out_audio and resampler:
-                        try:
-                            for rf in resampler.resample(None):
-                                rf.pts = audio_samples_written
-                                audio_samples_written += rf.samples
-                                for packet in out_audio.encode(rf):
-                                    out_container.mux(packet)
-                        except Exception as e:
-                            self.logger.warning(f"⚠️ Audio resampler flush error: {e}")
-
-                    # Flush Encoders
-                    if out_video:
-                        for packet in out_video.encode(None):
-                            out_container.mux(packet)
-                    if out_audio:
-                        for packet in out_audio.encode(None):
-                            out_container.mux(packet)
-
+                    # Kein Encoder-Flush mehr nötig — Packet-Copy hat kein
+                    # Lookahead/Encoder-internes Buffering wie NVENC/libx264,
+                    # das explizit mit encode(None) geleert werden müsste.
                     out_container.close()
                 except Exception as e:
                     self.logger.error(f"❌ Error closing output file: {e}")
@@ -620,46 +597,32 @@ class CameraAgent(multiprocessing.Process):
                     out_container = None
                     out_video = None
                     out_audio = None
-                    resampler = None
-                    video_frame_count = 0
-                    last_pts = -1
-                    audio_samples_written = 0
-                    audio_first_frame_time = None
+                    pts_offset = 0
                     av_buffer.clear()
                     pending_encode_queue.clear()
 
-        def encode_video_frame(img_bgr, ts=None):
-            nonlocal video_frame_count, last_pts
-            if not out_container or not out_video:
+        def remux_packet(packet, ts=None):
+            """Ersetzt encode_video_frame/encode_audio_frame komplett — kein
+            Neu-Encodieren mehr, das Paket ist ja schon komprimiert. Nur PTS/
+            DTS um pts_offset verschieben (neuer Nullpunkt = erster Keyframe
+            der Aufnahme) und direkt muxen. ts wird nicht mehr für die PTS-
+            Berechnung gebraucht (die Quelle liefert ihre eigenen, echten
+            Zeitstempel) — Parameter bleibt nur der Kompatibilität mit
+            write_buffered_item()/der Warteschlange wegen erhalten."""
+            if not out_container:
+                return
+            target_stream = out_video if packet.stream.type == 'video' else out_audio
+            if not target_stream:
                 return
             try:
-                t = ts if ts is not None else time.time()
-                elapsed = max(0.0, t - recording_start_time)
-                # ZURÜCKGENOMMEN: die vorherige "Frame-Zähler mit Lücken-
-                # Erkennung"-Glättung ging davon aus, dass NVENC PTS-Werte
-                # unabhängig von der tatsächlichen Submit-Zeit interpretiert
-                # — tut es aber nicht: die Ratenkontrolle orientiert sich an
-                # der WIRKLICHEN Ankunftszeit der Frames. Ein künstlich
-                # geglätteter Zähler, der von der echten Zeit abweicht,
-                # konnte darum genau die Art Mikroruckeln erzeugen, die er
-                # eigentlich verhindern sollte. Zurück auf reine Wall-Clock-
-                # PTS (das, was ausgereifte Tools wie Motion auch tun) —
-                # echte Aussetzer sind laut Axel selten und zeigen sich dann
-                # einfach ehrlich als kurze Lücke, statt jedes Frame ständig
-                # leicht zu verzerren.
-                pts = int(elapsed * TARGET_FPS)
-                if pts <= last_pts:
-                    pts = last_pts + 1
-                last_pts = pts
-
-                av_frame = av.VideoFrame.from_ndarray(img_bgr, format="bgr24")
-                av_frame.pts = pts
-                video_frame_count += 1
-
-                for packet in out_video.encode(av_frame):
-                    out_container.mux(packet)
+                if packet.dts is None:
+                    return
+                packet.stream = target_stream
+                packet.pts -= pts_offset
+                packet.dts -= pts_offset
+                out_container.mux(packet)
             except Exception as e:
-                self.logger.error(f"❌ Video encoding error: {e}")
+                self.logger.error(f"❌ Remux error ({packet.stream.type if packet.stream else '?'}): {e}")
 
         def capture_filmstrip(img_bgr, boxes=None, names=None):
             """Wählt im Intervall einen Filmstrip-Slot aus und legt NUR einen
@@ -754,63 +717,8 @@ class CameraAgent(multiprocessing.Process):
                 pass
 
 
-        def encode_audio_frame(a_frame, ts=None):
-            nonlocal resampler, audio_samples_written, audio_first_frame_time
-            if not out_container or not out_audio:
-                return
-            try:
-                if resampler is None:
-                    resampler = av.AudioResampler(
-                        format=out_audio.format.name,
-                        layout=out_audio.layout.name,
-                        rate=out_audio.rate
-                    )
-
-                t = ts if ts is not None else time.time()
-                if audio_first_frame_time is None:
-                    audio_first_frame_time = t
-                    audio_samples_written = 0
-
-                # Gap-Erkennung: einmal pro Aufruf, mit dem Zählerstand VOR
-                # diesem Aufruf — ein echter Netz-/Kamera-Hänger bleibt so
-                # weiterhin als sichtbare Lücke erhalten, normale Resampler-
-                # Puffer-Schwankungen lösen nicht mehr fälschlich aus.
-                expected_elapsed = audio_samples_written / out_audio.rate
-                actual_elapsed = t - audio_first_frame_time
-                if actual_elapsed - expected_elapsed > 3.0:
-                    gap_samples = int((actual_elapsed - expected_elapsed) * out_audio.rate)
-                    audio_samples_written += gap_samples
-
-                resampled_frames = resampler.resample(a_frame)
-                for rf in resampled_frames:
-                    # DER eigentliche Root-Cause-Bug hinter der wild falschen
-                    # Spieldauer (Axel fand's per ffprobe + Debug-Log: eine
-                    # Aufnahme meldete 6:56:20 statt echter ~9 Minuten). Per
-                    # Debug-Ausgabe bestätigt: das vom Resampler gelieferte
-                    # Frame trägt selbst eine Zeitbasis von 1/1000 (offenbar
-                    # vom Decoder des eingehenden RTMP-Streams geerbt), auch
-                    # wenn out_audio.time_base korrekt auf 1/rate steht. rf.pts
-                    # wird zwar korrekt in SAMPLES hochgezählt, aber mit
-                    # rf.time_base=1/1000 interpretiert der Muxer 1024 Samples
-                    # als 1024 MILLISEKUNDEN (1.024s) statt als 1024/48000s
-                    # (~21ms) — exakt der beobachtete Faktor ~48. Reproduziert
-                    # und mit echtem PyAV-Encoding verifiziert. Fix: rf.time_base
-                    # explizit setzen, bevor rf.pts zugewiesen wird — dann
-                    # bedeutet ein PTS von 1024 tatsächlich 1024 Samples bei
-                    # der echten Rate, nicht 1024 Millisekunden.
-                    rf.time_base = Fraction(1, out_audio.rate)
-                    rf.pts = audio_samples_written
-                    audio_samples_written += rf.samples
-                    for packet in out_audio.encode(rf):
-                        out_container.mux(packet)
-            except Exception as e:
-                self.logger.error(f"❌ Audio encoding error: {e}")
-
         def write_buffered_item(item_type, data, ts=None):
-            if item_type == "video":
-                encode_video_frame(data, ts)
-            elif item_type == "audio":
-                encode_audio_frame(data, ts)
+            remux_packet(data, ts)
 
         def _drain_encode_queue(max_items=8):
             """Arbeitet höchstens max_items aus der Warteschlange ab, statt
@@ -911,6 +819,11 @@ class CameraAgent(multiprocessing.Process):
 
                         # VIDEO FRAME PROCESSING
                         if packet.stream.type == 'video':
+                            # Verhindert, dass DASSELBE Paket mehrfach gepuffert/
+                            # eingereiht wird, falls es (selten) zu mehreren Frames
+                            # dekodiert — das Paket wird ja nur EINMAL gemuxt,
+                            # unabhängig davon wie viele Frames es liefert.
+                            packet_video_queued = False
                             for frame in packet.decode():
                                 now = time.time()
 
@@ -932,8 +845,9 @@ class CameraAgent(multiprocessing.Process):
                                 # Puffer-Verwaltung, auch während der Aufnahme
                                 # selbst, wo es reine Verschwendung war. Nur
                                 # noch im IDLE-Zustand befüllen.
-                                if state == "IDLE":
-                                    av_buffer.append(("video", img_bgr.copy(), now))
+                                if state == "IDLE" and not packet_video_queued:
+                                    av_buffer.append(("video", packet, now))
+                                    packet_video_queued = True
                                     trim_buffer()
 
                                 # Modell nachladen, falls es beim Start (oder nach einem
@@ -1000,12 +914,11 @@ class CameraAgent(multiprocessing.Process):
                                             open(os.path.splitext(video_file_path)[0] + '.recording', 'w').close()
                                         except Exception:
                                             pass
-                                        self.logger.warning(f"🚨 [DETECTED] Target object found! Starting recording (YOLO {YOLO_VERSION}, NVENC + Audio).")
+                                        self.logger.warning(f"🚨 [DETECTED] Target object found! Starting recording (YOLO {YOLO_VERSION}, Packet-Copy).")
 
-                                        # Zeit-Nullpunkt fürs PTS: ältester Pre-Roll-Frame,
-                                        # damit dessen echte Zeitstempel korrekt einsortiert werden.
+                                        # Zeit-Nullpunkt: ältester Pre-Roll-Frame, damit
+                                        # relative Zeitstempel (Filmstrip etc.) korrekt einsortiert werden.
                                         recording_start_time = av_buffer[0][2] if av_buffer else time.time()
-                                        last_pts = -1
 
                                         # Trigger-Screenshot mit eingezeichneter Erkennungs-Box
                                         # speichern (gleicher Basisname, .jpg) — wird von
@@ -1054,66 +967,56 @@ class CameraAgent(multiprocessing.Process):
                                         filmstrip_pending = {}
 
                                         h, w = img_bgr.shape[:2]
-                                        # ~2s Keyframe-Abstand: macht die Event-Clips beim
-                                        # Scrubben im Lightbox-Player deutlich reaktionsfreudiger
-                                        # (ohne das brauchen Player oft den letzten Keyframe,
-                                        # der bei sehr langen GOP-Defaults weit zurückliegen kann).
-                                        gop_size = str(max(1, TARGET_FPS * 2))
                                         try:
                                             out_container = av.open(video_file_path, mode='w')
 
-                                            if nvenc_available:
-                                                out_video = out_container.add_stream('h264_nvenc', rate=TARGET_FPS)
-                                                # Bewusst konservative Optionen (breite Kompatibilität über
-                                                # NVENC-Generationen von Turing bis Blackwell) — keine
-                                                # generationsspezifischen Preset-Namen (p1-p7 vs. ältere
-                                                # Namen wie 'hq'/'ll' unterscheiden sich je nach
-                                                # ffmpeg/Treiber-Version), daher separat abgesichert.
-                                                try:
-                                                    out_video.options = {'rc': 'vbr', 'cq': '23', 'gpu': '0', 'g': gop_size}
-                                                except Exception as opt_err:
-                                                    self.logger.warning(f"⚠️ NVENC-Optionen konnten nicht gesetzt werden ({opt_err}), nutze Encoder-Defaults.")
-                                            else:
-                                                out_video = out_container.add_stream('libx264', rate=TARGET_FPS)
-                                                try:
-                                                    out_video.options = {'preset': 'veryfast', 'crf': '23', 'g': gop_size}
-                                                except Exception:
-                                                    pass
-
-                                            out_video.width = w
-                                            out_video.height = h
-                                            out_video.pix_fmt = 'yuv420p'
-                                            out_video.time_base = Fraction(1, TARGET_FPS)
+                                            # PACKET-COPY statt Neu-Encodieren: die Recherche zu Motion
+                                            # (die dieselbe Pre-Roll-Architektur nutzt) zeigte, dass genau
+                                            # das Neu-Encodieren des Pre-Roll-Bursts das Problem ist, nicht
+                                            # die PTS-Logik. Motion selbst warnt in der eigenen Doku davor,
+                                            # große Pre-Capture-Werte zu nutzen, weil währenddessen keine
+                                            # neuen Frames von der Quelle gelesen werden können. Statt die
+                                            # gepufferten Frames neu zu encodieren, werden hier die bereits
+                                            # komprimierten Pakete direkt in den Container gemuxt (wie
+                                            # "ffmpeg -c:v copy") — grob 1000x schneller pro Frame als ein
+                                            # echter Encode-Durchlauf (gemessen: 0.7ms vs. 786ms für 150
+                                            # Frames). add_stream_from_template kopiert die Codec-Parameter
+                                            # direkt von der Quelle, kein manuelles NVENC/libx264-Setup mehr
+                                            # nötig — die Aufnahme-Qualität entspricht exakt dem, was die
+                                            # Kamera selbst liefert.
+                                            in_video_stream = next(s for s in container.streams if s.type == 'video')
+                                            out_video = out_container.add_stream_from_template(in_video_stream)
 
                                             audio_in_stream = next((s for s in container.streams if s.type == 'audio'), None)
                                             if audio_in_stream:
-                                                out_audio = out_container.add_stream('aac')
-                                                out_audio.rate = audio_in_stream.rate if audio_in_stream.rate else 44100
-                                                out_audio.layout = audio_in_stream.layout.name if audio_in_stream.layout else 'stereo'
-                                                # DER Root-Cause-Bug hinter der wild falschen Spieldauer
-                                                # (169MB-Datei meldete 6:56:20, Axel fand's per ffprobe):
-                                                # ohne explizite Zeitbasis nimmt PyAV/der Muxer für den
-                                                # Audio-Stream einen Standardwert (empirisch bestätigt:
-                                                # 1/1000, nicht 1/rate) — jedes rf.pts wird zwar KORREKT
-                                                # in Samples hochgezählt (encode_audio_frame), aber beim
-                                                # Schreiben als "pts * falsche_zeitbasis" interpretiert.
-                                                # Bei 1024 Samples/Frame und rate=48000 macht das aus
-                                                # ~21ms echter Paketlänge fälschlich 1024/1000 = 1.024s —
-                                                # exakt der Faktor ~48, der bei jeder Messung auftauchte.
-                                                # Video hatte diesen Bug nie, weil dort schon immer
-                                                # explizit `out_video.time_base = Fraction(1, TARGET_FPS)`
-                                                # gesetzt wurde (siehe zwei Zeilen oben) — bei Audio fehlte
-                                                # das exakte Gegenstück komplett. Meine vorherigen PTS-
-                                                # Gap-Korrektur-Fixes waren zwar für sich genommen korrekt,
-                                                # konnten das aber nie beheben, weil das Problem gar nicht
-                                                # in der Gap-Logik lag.
-                                                out_audio.time_base = Fraction(1, out_audio.rate)
+                                                out_audio = out_container.add_stream_from_template(audio_in_stream)
 
-                                            # Nicht mehr sofort encodieren — nur einreihen. Der
-                                            # Drain-Schritt (siehe _drain_encode_queue) arbeitet das
-                                            # über die nächsten Loop-Durchläufe verteilt ab, statt den
-                                            # Decode-Loop für den kompletten Pre-Roll-Burst zu blockieren.
-                                            pending_encode_queue.extend(av_buffer)
+                                            # Keyframe-Suche: ein Video kann nur an einem Keyframe (I-Frame)
+                                            # sauber beginnen — vom Ende des Puffers rückwärts zum letzten
+                                            # Video-Keyframe suchen, alles davor verwerfen. Ohne das wäre
+                                            # die Datei am Anfang nicht dekodierbar.
+                                            keyframe_idx = 0
+                                            for i in range(len(av_buffer) - 1, -1, -1):
+                                                item_type, pkt, _ts = av_buffer[i]
+                                                if item_type == "video" and pkt.is_keyframe:
+                                                    keyframe_idx = i
+                                                    break
+                                            aligned_buffer = list(av_buffer)[keyframe_idx:]
+
+                                            # PTS-Rebase: die Quelle zählt PTS/DTS seit Verbindungsaufbau
+                                            # durch, nicht seit Aufnahmestart — ohne Offset würde die
+                                            # Ausgabedatei mit einem riesigen Startwert beginnen. Erster
+                                            # Video-Keyframe im ausgerichteten Puffer ist der neue Nullpunkt.
+                                            pts_offset = next(
+                                                (pkt.dts for t, pkt, _ts in aligned_buffer if t == "video" and pkt.dts is not None),
+                                                0
+                                            )
+
+                                            # Nicht mehr sofort schreiben — nur einreihen. Der Drain-Schritt
+                                            # (siehe _drain_encode_queue) arbeitet das über die nächsten
+                                            # Loop-Durchläufe verteilt ab. Bei Packet-Copy ist das ohnehin
+                                            # kaum noch nötig (so schnell), bleibt aber als Sicherheitsnetz.
+                                            pending_encode_queue.extend(aligned_buffer)
 
                                         except Exception as e:
                                             self.logger.error(f"❌ Failed to initialize video writer: {e}")
@@ -1123,14 +1026,18 @@ class CameraAgent(multiprocessing.Process):
 
                                 elif state == "RECORDING":
                                     if target_detected:
-                                        pending_encode_queue.append(('video', img_bgr, now))
+                                        if not packet_video_queued:
+                                            pending_encode_queue.append(('video', packet, now))
+                                            packet_video_queued = True
                                         capture_filmstrip(img_bgr, boxes, names)
                                     else:
                                         state = "POST_ROLL"
                                         _write_state(self.name, "POST_ROLL")
                                         post_roll_end_time = time.time() + POST_ROLL_SEC
                                         self.logger.info(f"🏠 [GONE] Target object left frame. Monitoring for {POST_ROLL_SEC}s extra.")
-                                        pending_encode_queue.append(('video', img_bgr, now))
+                                        if not packet_video_queued:
+                                            pending_encode_queue.append(('video', packet, now))
+                                            packet_video_queued = True
                                         capture_filmstrip(img_bgr, boxes, names)
 
                                 elif state == "POST_ROLL":
@@ -1145,10 +1052,14 @@ class CameraAgent(multiprocessing.Process):
                                             sources.append(f"audio ('{audio_label}')" if audio_label else "audio")
                                         source_desc = " + ".join(sources) if sources else "detection"
                                         self.logger.info(f"🚨 [DETECTED] Target returned ({source_desc})! Resuming recording.")
-                                        pending_encode_queue.append(('video', img_bgr, now))
+                                        if not packet_video_queued:
+                                            pending_encode_queue.append(('video', packet, now))
+                                            packet_video_queued = True
                                         capture_filmstrip(img_bgr, boxes, names)
                                     else:
-                                        pending_encode_queue.append(('video', img_bgr, now))
+                                        if not packet_video_queued:
+                                            pending_encode_queue.append(('video', packet, now))
+                                            packet_video_queued = True
                                         capture_filmstrip(img_bgr, boxes, names)
                                         if time.time() > post_roll_end_time:
                                             self.logger.info(f"✅ Session ended for {self.name}. Closing file.")
@@ -1175,13 +1086,16 @@ class CameraAgent(multiprocessing.Process):
 
                         # AUDIO FRAME PROCESSING
                         elif packet.stream.type == 'audio':
+                            packet_audio_queued = False
                             for a_frame in packet.decode():
                                 now = time.time()
-                                if state == "IDLE":
-                                    av_buffer.append(("audio", a_frame, now))
+                                if state == "IDLE" and not packet_audio_queued:
+                                    av_buffer.append(("audio", packet, now))
+                                    packet_audio_queued = True
                                     trim_buffer()
-                                if state in ["RECORDING", "POST_ROLL"]:
-                                    pending_encode_queue.append(('audio', a_frame, now))
+                                if state in ["RECORDING", "POST_ROLL"] and not packet_audio_queued:
+                                    pending_encode_queue.append(('audio', packet, now))
+                                    packet_audio_queued = True
                                 _drain_encode_queue()
 
                                 # Audio-Trigger füttern: NUR ein billiger Buffer-Append,
@@ -1218,6 +1132,16 @@ class CameraAgent(multiprocessing.Process):
                     close_writer()
                     state = "IDLE"
                     _write_state(self.name, "IDLE")
+                    # av_buffer explizit leeren, bevor der Quell-Container
+                    # geschlossen wird — close_writer() räumt den Puffer nur
+                    # auf, wenn gerade aufgenommen wurde (if out_container:).
+                    # War der Zustand IDLE, könnte der Puffer trotzdem noch
+                    # Pre-Roll-Pakete der ALTEN Verbindung enthalten. PyAV-
+                    # Pakete halten intern eine Referenz auf ihren Quell-
+                    # Kontext — wird der geschlossen, während noch Pakete
+                    # darauf zeigen, stürzt ein späteres Muxen mit Segfault
+                    # ab (im Test konkret reproduziert und verifiziert).
+                    av_buffer.clear()
                     if container:
                         try:
                             container.close()
@@ -1232,6 +1156,7 @@ class CameraAgent(multiprocessing.Process):
             self.logger.error(f"💥 Process Crash [{self.name}]: {e}")
         finally:
             close_writer()
+            av_buffer.clear()  # dieselbe Absicherung wie beim Reconnect-Pfad
             _detector_stop_event.set()
             if audio_trigger is not None:
                 audio_trigger.stop()
