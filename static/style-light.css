@@ -364,6 +364,64 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 .thumb-rec-badge .rec-dot { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
 
+.stream-container.stream-live-expanded {
+    grid-column: span 2;
+}
+@media (max-width: 640px) {
+    .stream-container.stream-live-expanded { grid-column: span 1; }
+}
+.stream-live-video {
+    width: 100%;
+    aspect-ratio: 16/9;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
+    background: #000;
+    display: block;
+}
+.stream-live-status {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: 0.85rem;
+    font-weight: 600;
+    border-radius: var(--radius-sm);
+    text-align: center;
+    padding: 12px;
+}
+.stream-live-controls {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+.stream-live-toggle, .stream-live-record {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 7px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--card-bg);
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.stream-live-toggle:hover { border-color: var(--primary); color: var(--primary); }
+.stream-live-toggle.active { border-color: var(--primary); color: var(--primary); background: rgba(193, 125, 31, 0.12); }
+.stream-live-record:hover { border-color: var(--danger); color: var(--danger); }
+.stream-live-record.recording {
+    border-color: var(--danger);
+    color: var(--danger);
+    background: rgba(209, 66, 74, 0.1);
+    animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
 /* Toggle Switch */
 .switch { position: relative; display: inline-block; width: 46px; height: 25px; flex-shrink: 0; }
 .switch input { opacity: 0; width: 0; height: 0; }
@@ -1427,6 +1485,33 @@ input:checked + .slider:before { transform: translateX(21px); background: #fffff
 .lightbox-actions .lightbox-btn-archive:hover { border-color: var(--primary); color: var(--primary); }
 .lightbox-actions .lightbox-btn-export:hover { border-color: var(--success); color: var(--success); }
 .lightbox-actions .lightbox-btn-delete:hover { border-color: var(--danger); color: var(--danger); }
+.live-lightbox-actions { display: flex; margin-top: 4px; }
+#liveRecordBtn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--card-bg-inset);
+    color: var(--text);
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+#liveRecordBtn i { color: var(--danger); }
+#liveRecordBtn:hover { border-color: var(--danger); }
+#liveRecordBtn.recording {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #fff;
+}
+#liveRecordBtn.recording i {
+    color: #fff;
+    animation: pulse-dot 1.2s infinite;
+}
 .player-controls button {
     background: var(--card-bg-inset);
     border: 1px solid var(--border);

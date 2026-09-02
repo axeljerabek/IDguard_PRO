@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, Response, abort, send_file
 import os
 import sys
 import glob
+import uuid
 import csv
 import io
 import subprocess
@@ -190,6 +191,7 @@ def _event_from_file(f):
         ai_pending = os.path.exists(os.path.splitext(f)[0] + '.ai.pending')
         trigger_conf, trigger_cls = None, None
         audio_trigger_label, audio_trigger_conf = None, None
+        is_manual = False
         trigger_path = os.path.splitext(f)[0] + '.trigger.json'
         if os.path.exists(trigger_path):
             try:
@@ -199,6 +201,7 @@ def _event_from_file(f):
                 trigger_cls = tmeta.get('class')
                 audio_trigger_label = tmeta.get('audio_trigger')
                 audio_trigger_conf = tmeta.get('audio_confidence')
+                is_manual = bool(tmeta.get('manual', False))
             except Exception:
                 pass
         faces_summary = {'people': [], 'unnamed_count': 0}
@@ -222,6 +225,7 @@ def _event_from_file(f):
             'transcript': transcript,
             'trigger_confidence': trigger_conf,
             'trigger_class': trigger_cls,
+            'manual': is_manual,
             'audio_trigger_label': audio_trigger_label,
             'audio_trigger_confidence': audio_trigger_conf,
             'people_in_video': faces_summary['people'],
@@ -244,9 +248,13 @@ def _build_full_event_list(directory):
 
 def _camera_name_from_filename(filename):
     """Kameraname aus dem Dateinamen extrahieren: <Kamera>_EVENT_<Zeitstempel>.mp4
-    (siehe recorder_pipeline.py, video_file_path). Exakter Split statt
-    Prefix-Vergleich, damit z.B. 'Bed' nicht fälschlich 'Bedroom' matcht."""
-    return filename.split('_EVENT_')[0] if '_EVENT_' in filename else filename
+    oder <Kamera>_MANUAL_<Zeitstempel>.mp4 (manuelle Notruf-Aufnahme, siehe
+    api_manual_record_start). Exakter Split statt Prefix-Vergleich, damit z.B.
+    'Bed' nicht fälschlich 'Bedroom' matcht."""
+    for marker in ('_EVENT_', '_MANUAL_'):
+        if marker in filename:
+            return filename.split(marker)[0]
+    return filename
 
 @app.route('/api/filter_events')
 @requires_auth
@@ -1000,6 +1008,133 @@ def toggle_stream(name):
     overrides[name] = 'ON' if overrides.get(name, 'OFF') == 'OFF' else 'OFF'
     save_overrides(overrides)
     return json.dumps({'ok': True, 'state': overrides[name]})
+
+# --- Live-Ansicht (HLS) + manuelle Notruf-Aufnahme ---
+# Beide laufen als eigene, vom Erkennungs-Pipeline-Prozess komplett unabhängige
+# ffmpeg-Subprozesse, die direkt von der Kamera-URL lesen — nginx-rtmp
+# unterstützt mehrere gleichzeitige Clients auf demselben Stream problemlos.
+_live_view_procs = {}      # camera_name -> subprocess.Popen
+_manual_record_procs = {}  # recording_id -> {'proc', 'camera', 'path', 'filename'}
+LIVE_HLS_DIR = os.path.join(PROJECT_ROOT, '.live_hls')
+os.makedirs(LIVE_HLS_DIR, exist_ok=True)
+
+def _get_stream_url(camera_name):
+    for s in _load_streams_display():
+        if s['name'] == camera_name:
+            return s.get('url')
+    return None
+
+def _stop_proc(proc, timeout=5):
+    if proc and proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+@app.route('/api/live_start/<camera_name>', methods=['POST'])
+@requires_auth
+def api_live_start(camera_name):
+    _verify_csrf()
+    url = _get_stream_url(camera_name)
+    if not url:
+        return json.dumps({'ok': False, 'error': 'Unknown camera or no URL configured.'})
+
+    existing = _live_view_procs.get(camera_name)
+    if existing and existing.poll() is None:
+        return json.dumps({'ok': True, 'url': f'/live_hls/{camera_name}/stream.m3u8'})
+
+    cam_dir = os.path.join(LIVE_HLS_DIR, camera_name)
+    os.makedirs(cam_dir, exist_ok=True)
+    for old in glob.glob(os.path.join(cam_dir, '*')):
+        try:
+            os.remove(old)
+        except Exception:
+            pass
+
+    m3u8_path = os.path.join(cam_dir, 'stream.m3u8')
+    try:
+        proc = subprocess.Popen([
+            'ffmpeg', '-i', url,
+            '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency',
+            '-c:a', 'aac', '-ac', '2',
+            '-f', 'hls', '-hls_time', '2', '-hls_list_size', '5',
+            '-hls_flags', 'delete_segments+omit_endlist',
+            m3u8_path
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        return json.dumps({'ok': False, 'error': str(e)})
+    _live_view_procs[camera_name] = proc
+    return json.dumps({'ok': True, 'url': f'/live_hls/{camera_name}/stream.m3u8'})
+
+@app.route('/api/live_stop/<camera_name>', methods=['POST'])
+@requires_auth
+def api_live_stop(camera_name):
+    _verify_csrf()
+    _stop_proc(_live_view_procs.pop(camera_name, None))
+    return json.dumps({'ok': True})
+
+@app.route('/live_hls/<camera_name>/<path:filename>')
+@requires_auth
+def serve_live_hls(camera_name, filename):
+    cam_dir = os.path.join(LIVE_HLS_DIR, camera_name)
+    full_path = os.path.abspath(os.path.join(cam_dir, filename))
+    if not full_path.startswith(os.path.abspath(cam_dir) + os.sep) or not os.path.exists(full_path):
+        abort(404)
+    mimetype = 'application/vnd.apple.mpegurl' if filename.endswith('.m3u8') else 'video/mp2t'
+    resp = send_file(full_path, mimetype=mimetype, conditional=True)
+    # HLS-Wiedergabe soll sich immer die aktuellste Playlist/Segmente holen,
+    # kein Browser-Caching zwischenschalten wie bei fertigen Aufnahmen.
+    resp.headers['Cache-Control'] = 'no-cache'
+    return resp
+
+@app.route('/api/manual_record/start/<camera_name>', methods=['POST'])
+@requires_auth
+def api_manual_record_start(camera_name):
+    _verify_csrf()
+    url = _get_stream_url(camera_name)
+    if not url:
+        return json.dumps({'ok': False, 'error': 'Unknown camera or no URL configured.'})
+
+    ts_str = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f'{camera_name}_MANUAL_{ts_str}.mp4'
+    file_path = os.path.join(ALERTS_DIR, filename)
+
+    try:
+        proc = subprocess.Popen([
+            'ffmpeg', '-i', url,
+            '-c:v', 'libx264', '-preset', 'veryfast',
+            '-c:a', 'aac',
+            '-movflags', '+faststart',
+            file_path
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        return json.dumps({'ok': False, 'error': str(e)})
+
+    recording_id = str(uuid.uuid4())
+    _manual_record_procs[recording_id] = {
+        'proc': proc, 'camera': camera_name, 'path': file_path, 'filename': filename
+    }
+
+    # Sidecar-Trigger-JSON mit demselben Mechanismus wie bei normalen
+    # Erkennungs-Aufnahmen (siehe _event_from_file) — das Dashboard zeigt bei
+    # manual=True "Manual Record" statt einer Erkennungs-Konfidenz an.
+    trigger_path = os.path.splitext(file_path)[0] + '.trigger.json'
+    with open(trigger_path, 'w') as f:
+        json.dump({'manual': True}, f)
+
+    return json.dumps({'ok': True, 'recording_id': recording_id})
+
+@app.route('/api/manual_record/stop/<recording_id>', methods=['POST'])
+@requires_auth
+def api_manual_record_stop(recording_id):
+    _verify_csrf()
+    entry = _manual_record_procs.pop(recording_id, None)
+    if not entry:
+        return json.dumps({'ok': False, 'error': 'No such active recording.'})
+    _stop_proc(entry['proc'])
+    _event_cache.clear()
+    return json.dumps({'ok': True, 'filename': entry['filename']})
 
 def _clamp(value, lo, hi):
     return max(lo, min(hi, value))

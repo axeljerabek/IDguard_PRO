@@ -7,6 +7,7 @@
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
     <title>IDguard PRO Dashboard</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.15/hls.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -39,7 +40,7 @@
             <div class="collapse-body">
                 <div class="streams-grid" id="streamsGrid">
                     {% for stream in streams %}
-                    <div class="stream-container">
+                    <div class="stream-container" data-camera="{{ stream }}">
                         <div class="stream-header">
                             <span class="stream-name-wrap">
                                 <span style="font-weight: 500;">{{ stream }}</span>
@@ -51,12 +52,18 @@
                             </label>
                         </div>
                         <div class="thumb-wrap">
-                            <img id="thumb-{{ stream }}" class="stream-thumb" src="/thumbnail/{{ stream }}" alt="{{ stream }} Thumbnail" onclick="if (STREAM_OVERRIDES['{{ stream }}'] === 'ON') openLiveView('{{ stream }}')" style="opacity:0;" onload="this.style.opacity=1" onerror="this.style.opacity=0">
+                            <img id="thumb-{{ stream }}" class="stream-thumb" src="/thumbnail/{{ stream }}" alt="{{ stream }} Thumbnail" onclick="if (STREAM_OVERRIDES['{{ stream }}'] === 'ON') toggleLiveView('{{ stream }}')" style="opacity:0;" onload="this.style.opacity=1" onerror="this.style.opacity=0">
+                            <video id="live-video-{{ stream }}" class="stream-live-video" muted playsinline style="display:none;"></video>
                             <div class="thumb-paused" id="paused-{{ stream }}" style="display:{{ 'none' if overrides.get(stream, 'ON') == 'ON' else 'flex' }};">
                                 <i class="fa-solid fa-eye-slash"></i> Preview hidden
                             </div>
+                            <div class="stream-live-status" id="live-status-{{ stream }}" style="display:none;"></div>
                             {% if overrides.get(stream, 'ON') == 'ON' %}<span class="thumb-live-dot" title="Active"></span>{% endif %}
                             <span class="thumb-rec-badge" id="rec-{{ stream }}" style="display:none;"><span class="rec-dot"></span>REC</span>
+                        </div>
+                        <div class="stream-live-controls">
+                            <button type="button" class="stream-live-toggle" id="live-toggle-{{ stream }}" onclick="toggleLiveView('{{ stream }}')" title="Live view (HLS, with audio)"><i class="fa-solid fa-satellite-dish"></i> Live</button>
+                            <button type="button" class="stream-live-record" id="live-record-btn-{{ stream }}" onclick="toggleManualRecord('{{ stream }}')" style="display:none;"><i class="fa-solid fa-circle"></i> Record</button>
                         </div>
                     </div>
                     {% endfor %}
@@ -728,14 +735,6 @@
         </div>
     </div>
 
-    <!-- Lightbox für den Live-Stream -->
-    <div id="live-lightbox" class="lightbox" onclick="closeLiveView(event)">
-        <div class="lightbox-content" onclick="event.stopPropagation()">
-            <span class="close-btn" onclick="closeLiveView(event)"><i class="fa-solid fa-xmark"></i></span>
-            <img id="live-image-view" src="" alt="Live Stream">
-        </div>
-    </div>
-
     <!-- Lightbox für Personen/Cluster-Details (Gesichter erst hier groß + einzeln bearbeitbar) -->
     <div id="peopleLightbox" class="lightbox" onclick="closePeopleLightbox(event)">
         <div class="lightbox-content people-lightbox-content" onclick="event.stopPropagation()">
@@ -946,7 +945,7 @@
             grid.innerHTML = streamsData.map(s => {
                 STREAM_OVERRIDES[s.name] = s.override_on ? 'ON' : 'OFF';
                 return `
-                <div class="stream-container">
+                <div class="stream-container" data-camera="${escapeHtml(s.name)}">
                     <div class="stream-header">
                         <span class="stream-name-wrap">
                             <span style="font-weight: 500;">${escapeHtml(s.name)}</span>
@@ -958,12 +957,18 @@
                         </label>
                     </div>
                     <div class="thumb-wrap">
-                        <img id="thumb-${s.name}" class="stream-thumb" src="/thumbnail/${s.name}" alt="${escapeHtml(s.name)} Thumbnail" onclick="if (STREAM_OVERRIDES['${s.name}'] === 'ON') openLiveView('${s.name}')" style="opacity:0;" onload="this.style.opacity=1" onerror="this.style.opacity=0">
+                        <img id="thumb-${s.name}" class="stream-thumb" src="/thumbnail/${s.name}" alt="${escapeHtml(s.name)} Thumbnail" onclick="if (STREAM_OVERRIDES['${s.name}'] === 'ON') toggleLiveView('${s.name}')" style="opacity:0;" onload="this.style.opacity=1" onerror="this.style.opacity=0">
+                        <video id="live-video-${s.name}" class="stream-live-video" muted playsinline style="display:none;"></video>
                         <div class="thumb-paused" id="paused-${s.name}" style="display:${s.override_on ? 'none' : 'flex'};">
                             <i class="fa-solid fa-eye-slash"></i> Preview hidden
                         </div>
+                        <div class="stream-live-status" id="live-status-${s.name}" style="display:none;"></div>
                         ${s.override_on ? '<span class="thumb-live-dot" title="Active"></span>' : ''}
                         <span class="thumb-rec-badge" id="rec-${s.name}" style="display:none;"><span class="rec-dot"></span>REC</span>
+                    </div>
+                    <div class="stream-live-controls">
+                        <button type="button" class="stream-live-toggle" id="live-toggle-${s.name}" onclick="toggleLiveView('${s.name}')" title="Live view (HLS, with audio)"><i class="fa-solid fa-satellite-dish"></i> Live</button>
+                        <button type="button" class="stream-live-record" id="live-record-btn-${s.name}" onclick="toggleManualRecord('${s.name}')" style="display:none;"><i class="fa-solid fa-circle"></i> Record</button>
                     </div>
                 </div>
             `;
@@ -1049,22 +1054,112 @@
             });
         }, THUMBNAIL_INTERVAL_MS);
 
-        let liveInterval = null;
-        const liveLightbox = document.getElementById('live-lightbox');
-        const liveImageView = document.getElementById('live-image-view');
+        // Pro-Kamera-Zustand statt eines einzelnen globalen Singletons — jede
+        // Kachel kann unabhängig live geschaltet/aufgenommen werden, nicht nur
+        // eine Kamera gleichzeitig wie bei der früheren Lightbox-Lösung.
+        const liveViewState = {}; // camera_name -> { hls, recordingId }
 
-        function openLiveView(streamName) {
-            liveLightbox.classList.add('active');
-            liveImageView.src = '/thumbnail/' + streamName + '?t=' + new Date().getTime();
-            liveInterval = setInterval(() => {
-                liveImageView.src = '/thumbnail/' + streamName + '?t=' + new Date().getTime();
-            }, THUMBNAIL_INTERVAL_MS);
+        function toggleLiveView(streamName) {
+            if (liveViewState[streamName]) stopLiveView(streamName);
+            else startLiveView(streamName);
         }
 
-        function closeLiveView(e) {
-            if (liveInterval) clearInterval(liveInterval);
-            liveImageView.src = '';
-            liveLightbox.classList.remove('active');
+        function startLiveView(streamName) {
+            liveViewState[streamName] = { hls: null, recordingId: null };
+            const container = document.querySelector(`.stream-container[data-camera="${CSS.escape(streamName)}"]`);
+            if (container) container.classList.add('stream-live-expanded');
+            const img = document.getElementById('thumb-' + streamName);
+            const video = document.getElementById('live-video-' + streamName);
+            const statusEl = document.getElementById('live-status-' + streamName);
+            const toggleBtn = document.getElementById('live-toggle-' + streamName);
+            const recordBtn = document.getElementById('live-record-btn-' + streamName);
+            if (img) img.style.display = 'none';
+            if (video) video.style.display = 'block';
+            if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Connecting…'; }
+            if (toggleBtn) { toggleBtn.classList.add('active'); toggleBtn.innerHTML = '<i class="fa-solid fa-xmark"></i> Close'; }
+            if (recordBtn) recordBtn.style.display = 'inline-flex';
+
+            _postForm('/api/live_start/' + streamName, {}).then(res => {
+                if (!liveViewState[streamName]) return; // wurde inzwischen schon wieder gestoppt
+                if (!res.ok) {
+                    if (statusEl) statusEl.textContent = '⚠️ ' + (res.error || 'Could not start live view.');
+                    return;
+                }
+                if (window.Hls && Hls.isSupported()) {
+                    const hls = new Hls({ lowLatencyMode: true, liveSyncDurationCount: 2 });
+                    hls.loadSource(res.url);
+                    hls.attachMedia(video);
+                    hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
+                    hls.on(Hls.Events.ERROR, (event, data) => {
+                        if (data.fatal && statusEl) statusEl.textContent = '⚠️ Stream error — camera may be offline.';
+                    });
+                    liveViewState[streamName].hls = hls;
+                } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                    // Safari kann HLS nativ, ganz ohne hls.js
+                    video.src = res.url;
+                    video.play().catch(() => {});
+                } else {
+                    if (statusEl) statusEl.textContent = '⚠️ This browser cannot play HLS.';
+                    return;
+                }
+                if (statusEl) statusEl.style.display = 'none';
+            });
+        }
+
+        function stopLiveView(streamName) {
+            const state = liveViewState[streamName];
+            if (!state) return;
+            if (state.recordingId) stopManualRecord(streamName);
+            if (state.hls) state.hls.destroy();
+            delete liveViewState[streamName];
+
+            const container = document.querySelector(`.stream-container[data-camera="${CSS.escape(streamName)}"]`);
+            if (container) container.classList.remove('stream-live-expanded');
+            const img = document.getElementById('thumb-' + streamName);
+            const video = document.getElementById('live-video-' + streamName);
+            const toggleBtn = document.getElementById('live-toggle-' + streamName);
+            const recordBtn = document.getElementById('live-record-btn-' + streamName);
+            if (video) { video.pause(); video.removeAttribute('src'); video.load(); video.style.display = 'none'; }
+            if (img) img.style.display = 'block';
+            if (toggleBtn) { toggleBtn.classList.remove('active'); toggleBtn.innerHTML = '<i class="fa-solid fa-satellite-dish"></i> Live'; }
+            if (recordBtn) recordBtn.style.display = 'none';
+
+            _postForm('/api/live_stop/' + streamName, {});
+        }
+
+        function toggleManualRecord(streamName) {
+            const state = liveViewState[streamName];
+            if (!state) return;
+            if (state.recordingId) stopManualRecord(streamName);
+            else startManualRecord(streamName);
+        }
+
+        function startManualRecord(streamName) {
+            const state = liveViewState[streamName];
+            if (!state) return;
+            _postForm('/api/manual_record/start/' + streamName, {}).then(res => {
+                if (!res.ok) {
+                    showToast('⚠️ ' + (res.error || 'Could not start recording.'), 6000);
+                    return;
+                }
+                state.recordingId = res.recording_id;
+                const btn = document.getElementById('live-record-btn-' + streamName);
+                if (btn) { btn.classList.add('recording'); btn.innerHTML = '<i class="fa-solid fa-stop"></i> Stop'; }
+                showToast('Manual recording started.');
+            });
+        }
+
+        function stopManualRecord(streamName) {
+            const state = liveViewState[streamName];
+            if (!state || !state.recordingId) return;
+            const id = state.recordingId;
+            state.recordingId = null;
+            const btn = document.getElementById('live-record-btn-' + streamName);
+            if (btn) { btn.classList.remove('recording'); btn.innerHTML = '<i class="fa-solid fa-circle"></i> Record'; }
+            _postForm('/api/manual_record/stop/' + id, {}).then(res => {
+                if (res.ok) showToast('✅ Saved: ' + res.filename);
+                else showToast('⚠️ ' + (res.error || 'Could not stop recording.'), 6000);
+            });
         }
 
         // Baut das HTML für eine Event-Liste (Recent oder Archived) aus JSON-Daten —
@@ -1865,9 +1960,11 @@
                 const thumbHtml = ev.has_thumbnail
                     ? `<img src="${defaultSrc}" alt="" loading="lazy">`
                     : `<i class="fa-regular fa-file-video"></i>`;
-                const confBadge = (ev.trigger_confidence != null)
-                    ? `<span class="thumb-conf-badge">${escapeHtml(ev.trigger_class || '')} ${Math.round(ev.trigger_confidence * 100)}%</span>`
-                    : '';
+                const confBadge = ev.manual
+                    ? `<span class="thumb-conf-badge thumb-manual-badge"><i class="fa-solid fa-video"></i> Manual Record</span>`
+                    : (ev.trigger_confidence != null)
+                        ? `<span class="thumb-conf-badge">${escapeHtml(ev.trigger_class || '')} ${Math.round(ev.trigger_confidence * 100)}%</span>`
+                        : '';
                 // Permanente Mini-Filmstrip-Reihe unter dem Hauptbild — nutzt
                 // dieselben Filmstrip-Daten wie das Hover-Scrub oben, aber
                 // immer sichtbar statt nur bei Mouseover. Bis zu 6 Bilder,
@@ -2336,7 +2433,7 @@
         document.addEventListener('keydown', function(e) {
             if (e.key === "Escape") {
                 if (lightbox.classList.contains('active')) closeLightbox();
-                if (liveLightbox.classList.contains('active')) closeLiveView();
+                Object.keys(liveViewState).forEach(name => stopLiveView(name));
             }
             if (lightbox.classList.contains('active')) {
                 if (e.key === "ArrowLeft") skipTime(-10);
