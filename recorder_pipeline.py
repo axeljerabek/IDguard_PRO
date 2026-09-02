@@ -106,13 +106,16 @@ def _draw_boxes_with_labels(cv2, img, boxes, names):
         x1, y1, x2, y2 = map(int, b[:4])
         conf = float(b[4]) if len(b) > 4 else None
         cls_id = int(b[5]) if len(b) > 5 else None
-        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 200, 0), 2)
+        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 220, 0), 3)
         if conf is not None:
             cls_name = names.get(cls_id, str(cls_id)) if names and cls_id is not None else (str(cls_id) if cls_id is not None else '')
             label = f"{cls_name} {conf:.2f}" if cls_name else f"{conf:.2f}"
-            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-            cv2.rectangle(img, (x1, max(0, y1 - th - 6)), (x1 + tw + 4, y1), (0, 200, 0), -1)
-            cv2.putText(img, label, (x1 + 2, max(th, y1 - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+            font_scale = 0.8
+            thickness = 2
+            (tw, th), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+            pad = 6
+            cv2.rectangle(img, (x1, max(0, y1 - th - baseline - pad)), (x1 + tw + pad * 2, y1), (0, 220, 0), -1)
+            cv2.putText(img, label, (x1 + pad, max(th, y1 - baseline // 2 - 2)), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), thickness, cv2.LINE_AA)
 
 def _shared_frame_writer_loop():
     import cv2
@@ -132,7 +135,7 @@ def _shared_frame_writer_loop():
                 except Exception:
                     source = img_bgr
             small = cv2.resize(source, (640, max(1, int(source.shape[0] * 640 / source.shape[1]))))
-            ok, buf = cv2.imencode('.jpg', small, [cv2.IMWRITE_JPEG_QUALITY, 75])
+            ok, buf = cv2.imencode('.jpg', small, [cv2.IMWRITE_JPEG_QUALITY, 90])
             if ok:
                 tmp = os.path.join(frames_dir, f'.{name}.tmp')
                 with open(tmp, 'wb') as f:
@@ -336,6 +339,54 @@ class CameraAgent(multiprocessing.Process):
         else:
             self.logger.warning("⚠️ No valid YOLO path found; running in VISION-ONLY mode.")
 
+        # Erkennung komplett vom Decode/Encode-Loop entkoppelt: YOLO lief
+        # bisher SYNCHRON im selben Loop wie das Video-Encoding — war die
+        # Inferenz mal langsamer (z.B. weil mehrere Kamera-Prozesse
+        # gleichzeitig dieselbe GPU nutzen), verzögerte das direkt das
+        # nächste zu encodierende Frame. Das war vermutlich die
+        # Hauptursache für das beobachtete Mikroruckeln, nicht die PTS-
+        # Berechnung selbst. Jetzt läuft die Inferenz in einem eigenen
+        # Thread: der Haupt-Loop übergibt nur das jeweils NEUESTE Frame
+        # (nicht-blockierend, ein noch unverarbeitetes älteres Frame wird
+        # einfach überschrieben statt aufzustauen) und liest den zuletzt
+        # verfügbaren Erkennungsstand — Encoding wartet nie mehr auf
+        # Erkennung. Nur boxes (NumPy) + names (Dict) werden geteilt, nie
+        # das rohe Ultralytics-Results-Objekt (GPU-/Modell-Zustand,
+        # zwischen Threads riskant aufzuheben — siehe Filmstrip-Kommentare).
+        _detection_lock = threading.Lock()
+        _latest_detection = {'boxes': None, 'names': None}
+        _pending_frame_lock = threading.Lock()
+        _pending_frame = {'img': None}
+        _frame_ready_event = threading.Event()
+        _detector_stop_event = threading.Event()
+
+        def _detection_worker():
+            while not _detector_stop_event.is_set():
+                if not _frame_ready_event.wait(timeout=1.0):
+                    continue
+                _frame_ready_event.clear()
+                with _pending_frame_lock:
+                    img = _pending_frame['img']
+                    _pending_frame['img'] = None
+                if img is None or detector is None:
+                    continue
+                try:
+                    if half_enabled:
+                        results = detector(img, verbose=False, classes=DETECTION_CLASSES, conf=CONFIDENCE_THRESHOLD, device=device_target, quantize=16)
+                    else:
+                        results = detector(img, verbose=False, classes=DETECTION_CLASSES, conf=CONFIDENCE_THRESHOLD, device=device_target)
+                    boxes = results[0].boxes.data.cpu().numpy().copy()
+                    names = dict(results[0].names)
+                except Exception as det_exc:
+                    self.logger.error(f"❌ [{self.name}] Fehler in der Erkennungs-Inferenz: {det_exc}")
+                    continue
+                with _detection_lock:
+                    _latest_detection['boxes'] = boxes
+                    _latest_detection['names'] = names
+
+        _detection_thread = threading.Thread(target=_detection_worker, daemon=True)
+        _detection_thread.start()
+
         # Einmaliger echter NVENC-Test beim Start dieses Kamera-Prozesses.
         # add_stream('h264_nvenc', ...) allein ist KEIN zuverlässiger
         # Verfügbarkeits-Check — PyAV/ffmpeg öffnen den eigentlichen Encoder
@@ -436,7 +487,7 @@ class CameraAgent(multiprocessing.Process):
         shared_frame_last_check = 0
         show_boxes_live = True
 
-        def write_shared_frame(img_bgr, results=None):
+        def write_shared_frame(img_bgr, boxes=None, names=None):
             nonlocal shared_frame_next_time, shared_frame_interval, shared_frame_last_check, show_boxes_live
             now2 = time.time()
             if now2 - shared_frame_last_check > 5.0:
@@ -452,15 +503,9 @@ class CameraAgent(multiprocessing.Process):
             if now2 < shared_frame_next_time:
                 return
             try:
-                boxes = None
-                names = None
-                if show_boxes_live and results:
-                    try:
-                        boxes = results[0].boxes.data.cpu().numpy().copy()
-                        names = dict(results[0].names)
-                    except Exception:
-                        boxes = None
-                        names = None
+                if not show_boxes_live:
+                    boxes = None
+                    names = None
                 # NUR ein günstiger Array-Copy hier im Hauptloop — Annotieren,
                 # Resize, JPEG-Encoding und der eigentliche Schreibvorgang
                 # laufen jetzt komplett im Hintergrund-Thread.
@@ -546,26 +591,19 @@ class CameraAgent(multiprocessing.Process):
             try:
                 t = ts if ts is not None else time.time()
                 elapsed = max(0.0, t - recording_start_time)
-                # Zwei Ziele gleichzeitig, die sich mit EINER reinen Wall-Clock-
-                # PTS-Berechnung gegenseitig im Weg standen:
-                # 1) Ein echter Stall (Netz-Hänger) muss im Video als Lücke
-                #    sichtbar bleiben, nicht einfach verschluckt werden.
-                # 2) Normales, kleines Verarbeitungs-Jitter (YOLO-Inferenz,
-                #    Filmstrip-I/O, GPU-Konkurrenz zwischen mehreren Kamera-
-                #    Prozessen) darf NICHT zu ungleichmäßigem PTS führen — das
-                #    erzeugt sichtbares Ruckeln, obwohl die Quelle sauber
-                #    30fps liefert.
-                # Lösung, analog zum Audio-PTS-Gap-Fix: normal einen reinen
-                # Frame-Zähler hochzählen (glatt, jitter-unempfindlich), nur
-                # bei einer ECHTEN Abweichung (>0.5s zwischen erwarteter
-                # Zähler-Position und tatsächlicher Wall-Clock-Zeit) auf die
-                # Wall-Clock-Zeit springen, damit der Stall sichtbar bleibt.
-                expected_pts = video_frame_count
-                wall_clock_pts = int(elapsed * TARGET_FPS)
-                if wall_clock_pts - expected_pts > TARGET_FPS * 0.5:
-                    pts = wall_clock_pts
-                else:
-                    pts = expected_pts
+                # ZURÜCKGENOMMEN: die vorherige "Frame-Zähler mit Lücken-
+                # Erkennung"-Glättung ging davon aus, dass NVENC PTS-Werte
+                # unabhängig von der tatsächlichen Submit-Zeit interpretiert
+                # — tut es aber nicht: die Ratenkontrolle orientiert sich an
+                # der WIRKLICHEN Ankunftszeit der Frames. Ein künstlich
+                # geglätteter Zähler, der von der echten Zeit abweicht,
+                # konnte darum genau die Art Mikroruckeln erzeugen, die er
+                # eigentlich verhindern sollte. Zurück auf reine Wall-Clock-
+                # PTS (das, was ausgereifte Tools wie Motion auch tun) —
+                # echte Aussetzer sind laut Axel selten und zeigen sich dann
+                # einfach ehrlich als kurze Lücke, statt jedes Frame ständig
+                # leicht zu verzerren.
+                pts = int(elapsed * TARGET_FPS)
                 if pts <= last_pts:
                     pts = last_pts + 1
                 last_pts = pts
@@ -579,7 +617,7 @@ class CameraAgent(multiprocessing.Process):
             except Exception as e:
                 self.logger.error(f"❌ Video encoding error: {e}")
 
-        def capture_filmstrip(img_bgr, results=None):
+        def capture_filmstrip(img_bgr, boxes=None, names=None):
             """Wählt im Intervall einen Filmstrip-Slot aus und legt NUR einen
             günstigen Roh-Frame-Copy + Box-Koordinaten dafür beiseite —
             Resize, Box-Annotation und das eigentliche Schreiben passieren
@@ -629,22 +667,6 @@ class CameraAgent(multiprocessing.Process):
                     slots_to_fill.add(end_slot)
 
                 if slots_to_fill:
-                    # Box-Koordinaten als reines NumPy-Array lösen, statt das
-                    # ganze Ultralytics-Results-Objekt aufzuheben — das kann an
-                    # GPU-/Modell-internen Zustand gebunden sein, der über die
-                    # Dauer einer langen Aufnahme hinweg nicht sicher
-                    # aufzuheben wäre. Ein losgelöstes NumPy-Array ist es.
-                    # names (Klassennamen-Dict) ist ein reines Python-Dict,
-                    # genauso unproblematisch aufzuheben.
-                    boxes = None
-                    names = None
-                    if results:
-                        try:
-                            boxes = results[0].boxes.data.cpu().numpy().copy()
-                            names = dict(results[0].names)
-                        except Exception:
-                            boxes = None
-                            names = None
                     frame_copy = img_bgr.copy()
                     rel_ts = round(now - recording_start_time, 2)
                     for s in slots_to_fill:
@@ -866,24 +888,28 @@ class CameraAgent(multiprocessing.Process):
                                 # sein können (Tiere, Pakete, ...) — die alten Logs
                                 # sagten irreführend "Person found", auch wenn z.B.
                                 # eine Katze erkannt wurde.
-                                target_detected = False
-                                results = None
-                                if detector:
-                                    # HIER wird die CONFIDENCE_THRESHOLD direkt genutzt.
-                                    # quantize=16 statt half=True (deprecated, siehe
-                                    # Kommentar im Selbsttest oben) — sonst spammt die
-                                    # Deprecation-Warnung bei JEDEM Frame ins Log.
-                                    if half_enabled:
-                                        results = detector(img_bgr, verbose=False, classes=DETECTION_CLASSES, conf=CONFIDENCE_THRESHOLD, device=device_target, quantize=16)
-                                    else:
-                                        results = detector(img_bgr, verbose=False, classes=DETECTION_CLASSES, conf=CONFIDENCE_THRESHOLD, device=device_target)
-                                    target_detected = len(results[0].boxes) > 0
+                                #
+                                # KEINE synchrone Inferenz mehr hier — nur das
+                                # aktuelle Frame an den Erkennungs-Thread übergeben
+                                # (nicht-blockierend, überschreibt ein evtl. noch
+                                # unverarbeitetes älteres Frame) und den zuletzt
+                                # verfügbaren Erkennungsstand auslesen. Der Encode-
+                                # Pfad wartet dadurch nie mehr auf die Inferenz.
+                                if detector is not None:
+                                    with _pending_frame_lock:
+                                        _pending_frame['img'] = img_bgr
+                                    _frame_ready_event.set()
+
+                                with _detection_lock:
+                                    boxes = _latest_detection['boxes']
+                                    names = _latest_detection['names']
+                                target_detected = boxes is not None and len(boxes) > 0
 
                                 # Erst NACH der Detection: write_shared_frame bekommt die
                                 # Ergebnisse mit, damit die Live-Vorschau (Grid + Lightbox)
                                 # optional Erkennungs-Boxen zeigen kann — kostet keine
                                 # zusätzliche Inferenz, nutzt nur das bereits berechnete Ergebnis.
-                                write_shared_frame(img_bgr, results)
+                                write_shared_frame(img_bgr, boxes, names)
 
                                 # Audio-Trigger klinkt sich hier NUR an das Ergebnis an —
                                 # keine eigene State-Machine, keine eigene Aufnahme-Logik.
@@ -916,18 +942,21 @@ class CameraAgent(multiprocessing.Process):
                                         # (Recent Recordings + Archiv) angezeigt.
                                         try:
                                             thumb_path = os.path.splitext(video_file_path)[0] + '.jpg'
-                                            annotated = results[0].plot() if results else img_bgr
+                                            annotated = img_bgr
+                                            if boxes is not None and len(boxes) > 0:
+                                                annotated = img_bgr.copy()
+                                                _draw_boxes_with_labels(cv2, annotated, boxes, names)
                                             cv2.imwrite(thumb_path, annotated)
 
                                             # Konfidenz + Klasse der stärksten Erkennung als kleines
                                             # Sidecar — fürs Badge auf dem Thumbnail im Dashboard.
                                             trigger_meta = {}
-                                            if results and len(results[0].boxes) > 0:
-                                                confs = results[0].boxes.conf.tolist()
-                                                clss = results[0].boxes.cls.tolist()
-                                                top_idx = confs.index(max(confs))
+                                            if boxes is not None and len(boxes) > 0:
+                                                confs = boxes[:, 4]
+                                                clss = boxes[:, 5]
+                                                top_idx = int(confs.argmax())
                                                 trigger_meta['confidence'] = round(float(confs[top_idx]), 3)
-                                                trigger_meta['class'] = str(results[0].names[int(clss[top_idx])])
+                                                trigger_meta['class'] = str(names.get(int(clss[top_idx]), int(clss[top_idx]))) if names else str(int(clss[top_idx]))
                                             if audio_triggered_now and audio_label:
                                                 trigger_meta['audio_trigger'] = audio_label
                                                 if audio_score is not None:
@@ -1021,20 +1050,20 @@ class CameraAgent(multiprocessing.Process):
                                 elif state == "RECORDING":
                                     if target_detected:
                                         encode_video_frame(img_bgr, now)
-                                        capture_filmstrip(img_bgr, results)
+                                        capture_filmstrip(img_bgr, boxes, names)
                                     else:
                                         state = "POST_ROLL"
                                         _write_state(self.name, "POST_ROLL")
                                         post_roll_end_time = time.time() + POST_ROLL_SEC
                                         self.logger.info(f"🏠 [GONE] Target object left frame. Monitoring for {POST_ROLL_SEC}s extra.")
                                         encode_video_frame(img_bgr, now)
-                                        capture_filmstrip(img_bgr, results)
+                                        capture_filmstrip(img_bgr, boxes, names)
 
                                 elif state == "POST_ROLL":
                                     if target_detected:
                                         state = "RECORDING"
                                         _write_state(self.name, "RECORDING")
-                                        vision_hit = bool(results and len(results[0].boxes) > 0)
+                                        vision_hit = bool(boxes is not None and len(boxes) > 0)
                                         sources = []
                                         if vision_hit:
                                             sources.append("visual detection")
@@ -1043,10 +1072,10 @@ class CameraAgent(multiprocessing.Process):
                                         source_desc = " + ".join(sources) if sources else "detection"
                                         self.logger.info(f"🚨 [DETECTED] Target returned ({source_desc})! Resuming recording.")
                                         encode_video_frame(img_bgr, now)
-                                        capture_filmstrip(img_bgr, results)
+                                        capture_filmstrip(img_bgr, boxes, names)
                                     else:
                                         encode_video_frame(img_bgr, now)
-                                        capture_filmstrip(img_bgr, results)
+                                        capture_filmstrip(img_bgr, boxes, names)
                                         if time.time() > post_roll_end_time:
                                             self.logger.info(f"✅ Session ended for {self.name}. Closing file.")
                                             close_writer()
@@ -1122,6 +1151,7 @@ class CameraAgent(multiprocessing.Process):
             self.logger.error(f"💥 Process Crash [{self.name}]: {e}")
         finally:
             close_writer()
+            _detector_stop_event.set()
             if audio_trigger is not None:
                 audio_trigger.stop()
             if container:
