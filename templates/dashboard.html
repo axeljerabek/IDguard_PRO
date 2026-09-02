@@ -1114,8 +1114,35 @@
                     hlsInstance.loadSource(res.url);
                     hlsInstance.attachMedia(video);
                     hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
+                    // hls.js' eigene, offizielle Erholungslogik nutzen, statt bei
+                    // JEDEM fatalen Fehler sofort aufzugeben — ein kurzer Netz-
+                    // Hänger (genau das, was Axel als gelegentlichen Timeout auch
+                    // bei einem sonst funktionierenden Stream beschreibt) ist damit
+                    // kein Endzustand mehr, sondern wird automatisch neu geladen.
+                    // Auf 3 Versuche begrenzt, damit eine wirklich tote Kamera nicht
+                    // endlos weiterprobiert wird.
+                    let hlsRecoveryAttempts = 0;
                     hlsInstance.on(Hls.Events.ERROR, (event, data) => {
-                        if (data.fatal) document.getElementById('liveLightboxStatus').textContent = '⚠️ Stream error — camera may be offline.';
+                        if (!data.fatal) return;
+                        if (hlsRecoveryAttempts >= 3) {
+                            document.getElementById('liveLightboxStatus').textContent = '⚠️ Stream error — camera may be offline.';
+                            hlsInstance.destroy();
+                            return;
+                        }
+                        hlsRecoveryAttempts++;
+                        document.getElementById('liveLightboxStatus').textContent = `⚠️ Connection hiccup — reconnecting (${hlsRecoveryAttempts}/3)…`;
+                        switch (data.type) {
+                            case Hls.ErrorTypes.NETWORK_ERROR:
+                                hlsInstance.startLoad();
+                                break;
+                            case Hls.ErrorTypes.MEDIA_ERROR:
+                                hlsInstance.recoverMediaError();
+                                break;
+                            default:
+                                hlsInstance.destroy();
+                                document.getElementById('liveLightboxStatus').textContent = '⚠️ Stream error — camera may be offline.';
+                                break;
+                        }
                     });
                 } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
                     // Safari kann HLS nativ, ganz ohne hls.js

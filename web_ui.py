@@ -1074,7 +1074,7 @@ def api_live_start(camera_name):
     # scheiterte still. Kurzes Polling (max. 8s) auf das tatsächliche
     # Erscheinen der Datei ODER einen frühen Absturz des ffmpeg-Prozesses,
     # damit die Antwort den echten Zustand widerspiegelt.
-    deadline = time.time() + 8
+    deadline = time.time() + 15
     while time.time() < deadline:
         if proc.poll() is not None:
             try:
