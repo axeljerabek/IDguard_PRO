@@ -48,9 +48,13 @@ def _describe_ollama_error_detailed(e):
     sich nur einmal lesen) und liefert (ist_kontext_overflow, lesbare_
     Fehlerbeschreibung) zurück. Ollamas Fehlerformat variiert: bei einem
     fehlenden Modell ist "error" ein einfacher String, bei einem
-    gesprengten Kontextfenster ein verschachteltes Objekt mit eigenem
-    "type"-Feld ("exceed_context_size_error") — beide Formen hier
-    abgedeckt, statt nur die eine anzunehmen."""
+    gesprengten Kontextfenster normalerweise ein verschachteltes Objekt mit
+    eigenem "type"-Feld ("exceed_context_size_error") — bei Axel zeigte sich
+    aber noch eine DRITTE Form: "error" als JSON-kodierter STRING (doppelt
+    kodiert, vermutlich durch einen Proxy/Gateway vor Ollama), der bei einem
+    einfachen isinstance(err, dict)-Check durchrutschte UND dessen Zweig
+    vorher sofort zurückgab, bevor der Text-Muster-Fallback unten überhaupt
+    eine Chance hatte zu greifen."""
     if isinstance(e, urllib.error.HTTPError):
         try:
             body = json.loads(e.read().decode("utf-8"))
@@ -59,16 +63,26 @@ def _describe_ollama_error_detailed(e):
                 is_overflow = err.get("type") == "exceed_context_size_error"
                 detail = err.get("message") or str(err)
                 return is_overflow, f"{e} — {detail}"
+            elif isinstance(err, str) and err.strip().startswith("{"):
+                # Doppelt kodiert: "error" ist selbst ein JSON-String statt
+                # eines verschachtelten Objekts — nochmal parsen.
+                try:
+                    inner = json.loads(err)
+                    if isinstance(inner, dict):
+                        is_overflow = inner.get("type") == "exceed_context_size_error"
+                        detail = inner.get("message") or err
+                        return is_overflow, f"{e} — {detail}"
+                except Exception:
+                    pass
+                is_overflow = "exceed_context_size_error" in err or "exceeds the available context size" in err
+                return is_overflow, f"{e} — {err}"
             elif err:
-                return False, f"{e} — {err}"
+                is_overflow = "exceed_context_size_error" in str(err) or "exceeds the available context size" in str(err)
+                return is_overflow, f"{e} — {err}"
         except Exception:
             pass
-    # Text-Muster-Fallback: unabhängig davon, ob die JSON-Body-Extraktion
-    # oben aus irgendeinem Grund fehlschlägt (z.B. je nach Python-/urllib-
-    # Version unterschiedliches HTTPError-Verhalten) — erkennt den Overflow
-    # direkt am vollständigen Fehlertext. Beobachtet bei Axel: str(e) enthält
-    # den kompletten rohen JSON-Body bereits, nur die eigentliche
-    # is_overflow-Erkennung oben griff dort aus unbekanntem Grund nicht.
+    # Letzter Fallback: Text-Muster direkt am vollständigen Fehlertext, falls
+    # oben aus irgendeinem Grund nichts gegriffen hat.
     text = str(e)
     is_overflow = "exceed_context_size_error" in text or "exceeds the available context size" in text
     return is_overflow, text
