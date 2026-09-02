@@ -22,7 +22,7 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 os.chdir(SCRIPT_DIR)
 
-from config import STREAMS, STREAMS_F, ALERTS_DIR, PROJECT_ROOT, SETTINGS_F, YOLO_VERSION, MODEL_SIZE, MODEL_FILENAME
+from config import STREAMS, STREAMS_F, ALERTS_DIR, PROJECT_ROOT, SETTINGS_F, YOLO_VERSION, MODEL_SIZE, MODEL_FILENAME, COCO_CLASS_NAMES
 from auth import requires_auth
 from helpers import (
     LATEST_FRAMES, start_thumbnail_thread, is_pipeline_running,
@@ -79,23 +79,7 @@ def _verify_csrf():
     if not secrets.compare_digest(token, CSRF_TOKEN):
         abort(403)
 
-AVAILABLE_CLASSES = {
-    0: "Person", 1: "Bicycle", 2: "Car", 3: "Motorcycle", 4: "Airplane", 5: "Bus",
-    6: "Train", 7: "Truck", 8: "Boat", 9: "Traffic light", 10: "Fire hydrant", 11: "Stop sign",
-    12: "Parking meter", 13: "Bench", 14: "Bird", 15: "Cat", 16: "Dog", 17: "Horse",
-    18: "Sheep", 19: "Cow", 20: "Elephant", 21: "Bear", 22: "Zebra", 23: "Giraffe",
-    24: "Backpack", 25: "Umbrella", 26: "Handbag", 27: "Tie", 28: "Suitcase",
-    29: "Frisbee", 30: "Skis", 31: "Snowboard", 32: "Sports ball", 33: "Kite",
-    34: "Baseballschläger", 35: "Baseball glove", 36: "Skateboard", 37: "Surfboard",
-    38: "Tennis racquet", 39: "Bottle", 40: "Wine glass", 41: "Cup", 42: "Fork",
-    43: "Knife", 44: "Spoon", 45: "Bowl", 46: "Banana", 47: "Apple", 48: "Sandwich",
-    49: "Orange", 50: "Broccoli", 51: "Carrot", 52: "Hotdog", 53: "Pizza", 54: "Donut",
-    55: "Cake", 56: "Chair", 57: "Couch", 58: "Potted plant", 59: "Bed", 60: "Dining table",
-    61: "Toilet", 62: "Television", 63: "Laptop", 64: "Mouse", 65: "Remote control",
-    66: "Keyboard", 67: "Mobile phone", 68: "Microwave", 69: "Oven", 70: "Toaster",
-    71: "Sink", 72: "Refrigerator", 73: "Book", 74: "Clock", 75: "Vase", 76: "Scissors",
-    77: "Teddy bear", 78: "Hair dryer", 79: "Toothbrush"
-}
+AVAILABLE_CLASSES = COCO_CLASS_NAMES
 
 # Worker-Thread starten
 start_thumbnail_thread()

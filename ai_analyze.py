@@ -21,9 +21,11 @@ import urllib.error
 DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(DIR)
 try:
-    from config import SETTINGS_F
+    from config import SETTINGS_F, DETECTION_CLASSES, COCO_CLASS_NAMES
 except ImportError:
     SETTINGS_F = "pipeline_settings.json"
+    DETECTION_CLASSES = [0]
+    COCO_CLASS_NAMES = {0: "Person"}
 try:
     import search_index
 except ImportError:
@@ -123,17 +125,47 @@ AI_TOPICS_ENABLED = bool(_settings.get("AI_TOPICS_ENABLED", False))
 AI_TOPICS = [t.strip() for t in _settings.get("AI_TOPICS", []) if isinstance(t, str) and t.strip()]
 AI_TOPICS_THRESHOLD = float(_settings.get("AI_TOPICS_THRESHOLD", 50))
 
-PROMPT = (
-    "Das sind aufeinanderfolgende Standbilder aus einer Sicherheitskamera-"
-    "Aufnahme, in zeitlicher Reihenfolge. Beschreibe auf Deutsch in 3-5 Sätzen "
-    "detailliert, was passiert. Geh dabei ein auf: wer/was zu sehen ist "
-    "(Anzahl Personen, ungefähres Aussehen/Kleidung falls erkennbar, oder "
-    "Fahrzeug/Tier/Objekt-Art), was diese Person oder dieses Objekt konkret "
-    "tut, in welche Richtung sie sich bewegt, ob etwas getragen oder "
-    "mitgeführt wird, und wie sich die Szene über die Bildfolge hinweg "
-    "verändert (Ankunft, Handlung, Abgang). Nur was tatsächlich sichtbar "
-    "ist, keine Spekulation über Absichten oder Identität."
-)
+def _build_prompt():
+    """Baut den Beschreibungs-Prompt dynamisch, statt eines starren Texts —
+    nennt explizit, auf welche Objektklassen das YOLO-Modell gerade
+    eingestellt ist (z.B. nur "Person"), und bittet gezielt um mehr Detail
+    GENAU dazu, statt dass das Vision-Modell nur allgemein den Raum
+    beschreibt und die eigentlich überwachte Objektart nur beiläufig
+    erwähnt. Konfigurierte Topics fließen ebenfalls als Aufmerksamkeits-
+    punkte mit ein, falls vorhanden — 'bessere KI-Verknüpfung' zwischen den
+    drei Signalen (YOLO-Klassen, Vision-Beschreibung, Topics), statt dass
+    sie unabhängig voneinander laufen."""
+    watched = [COCO_CLASS_NAMES.get(c, str(c)) for c in DETECTION_CLASSES]
+    watched_str = ", ".join(watched) if watched else "Personen"
+
+    focus_line = (
+        f"Diese Kamera überwacht gezielt: {watched_str}. Leg den Schwerpunkt "
+        f"der Beschreibung klar darauf — was genau tut {'die erkannte Person/das erkannte Objekt' if len(watched) == 1 else 'das erkannte Objekt'} "
+        "(Bewegungsrichtung, Handlung, mitgeführte Gegenstände, ungefähres "
+        "Aussehen/Kleidung falls erkennbar), nicht nur der Raum drumherum. "
+        "Den Raum/Kontext trotzdem kurz mit einordnen, aber das erkannte "
+        "Objekt bleibt der Kern der Beschreibung."
+    )
+
+    topics_line = ""
+    if AI_TOPICS_ENABLED and AI_TOPICS:
+        topics_str = ", ".join(f'"{t}"' for t in AI_TOPICS)
+        topics_line = (
+            f" Falls die Szene zu einer dieser Kategorien passt, erwähne das "
+            f"explizit in der Beschreibung: {topics_str}."
+        )
+
+    return (
+        "Das sind aufeinanderfolgende Standbilder aus einer Sicherheitskamera-"
+        "Aufnahme, in zeitlicher Reihenfolge. Beschreibe auf Deutsch in 3-5 Sätzen "
+        "detailliert, was passiert. " + focus_line + topics_line +
+        " Wie sich die Szene über die Bildfolge hinweg verändert (Ankunft, "
+        "Handlung, Abgang) gehört ebenfalls dazu. Nur was tatsächlich sichtbar "
+        "ist, keine Spekulation über Absichten oder Identität."
+    )
+
+
+PROMPT = _build_prompt()
 
 
 def _xml_escape(s):
