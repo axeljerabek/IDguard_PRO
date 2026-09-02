@@ -1032,6 +1032,35 @@ def _stop_proc(proc, timeout=5):
         except subprocess.TimeoutExpired:
             proc.kill()
 
+def _start_live_ffmpeg(url, m3u8_path, log_path, use_nvenc):
+    """Startet den ffmpeg-Prozess fürs Live-HLS. NVENC (Hardware) passt zur
+    restlichen Maschine (IDguards eigene Aufnahme nutzt schon NVENC, Axels
+    exec_push-Skript nutzt Intel QuickSync) — Software-Encoding (libx264)
+    ist der garantiert funktionierende Fallback für Maschinen ohne
+    NVIDIA-GPU."""
+    log_f = open(log_path, 'w')
+    video_args = (
+        ['-c:v', 'h264_nvenc', '-preset', 'p1', '-tune', 'ull']
+        if use_nvenc else
+        ['-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency']
+    )
+    return subprocess.Popen([
+        'ffmpeg',
+        # Axels nginx-rtmp-Config hat "hls_continuous on" explizit, um
+        # Zeitstempel-Sprünge in der Quelle zu ignorieren — derselbe
+        # Robustheits-Gedanke hier: genpts rekonstruiert fehlende/kaputte
+        # PTS-Werte, discardcorrupt verwirft beschädigte Frames statt
+        # den ganzen Stream daran hängenzulassen.
+        '-fflags', '+genpts+discardcorrupt',
+        '-i', url,
+    ] + video_args + [
+        '-c:a', 'aac', '-ac', '2',
+        '-avoid_negative_ts', 'make_zero',
+        '-f', 'hls', '-hls_time', '2', '-hls_list_size', '5',
+        '-hls_flags', 'delete_segments+omit_endlist',
+        m3u8_path
+    ], stdout=log_f, stderr=subprocess.STDOUT)
+
 @app.route('/api/live_start/<camera_name>', methods=['POST'])
 @requires_auth
 def api_live_start(camera_name):
@@ -1055,23 +1084,7 @@ def api_live_start(camera_name):
     m3u8_path = os.path.join(cam_dir, 'stream.m3u8')
     log_path = os.path.join(cam_dir, 'ffmpeg.log')
     try:
-        log_f = open(log_path, 'w')
-        proc = subprocess.Popen([
-            'ffmpeg',
-            # Axels nginx-rtmp-Config hat "hls_continuous on" explizit, um
-            # Zeitstempel-Sprünge in der Quelle zu ignorieren — derselbe
-            # Robustheits-Gedanke hier: genpts rekonstruiert fehlende/kaputte
-            # PTS-Werte, discardcorrupt verwirft beschädigte Frames statt
-            # den ganzen Stream daran hängenzulassen.
-            '-fflags', '+genpts+discardcorrupt',
-            '-i', url,
-            '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency',
-            '-c:a', 'aac', '-ac', '2',
-            '-avoid_negative_ts', 'make_zero',
-            '-f', 'hls', '-hls_time', '2', '-hls_list_size', '5',
-            '-hls_flags', 'delete_segments+omit_endlist',
-            m3u8_path
-        ], stdout=log_f, stderr=subprocess.STDOUT)
+        proc = _start_live_ffmpeg(url, m3u8_path, log_path, use_nvenc=True)
     except Exception as e:
         return json.dumps({'ok': False, 'error': str(e)})
     _live_view_procs[camera_name] = proc
@@ -1079,12 +1092,24 @@ def api_live_start(camera_name):
     # Ohne dieses Warten meldete die Route sofort "ok: true", bevor ffmpeg
     # überhaupt Zeit hatte, die erste Playlist-Datei zu schreiben — der
     # Browser bekam dann eine URL, hinter der (noch) nichts lag, und
-    # scheiterte still. Kurzes Polling (max. 8s) auf das tatsächliche
-    # Erscheinen der Datei ODER einen frühen Absturz des ffmpeg-Prozesses,
-    # damit die Antwort den echten Zustand widerspiegelt.
+    # scheiterte still. Kurzes Polling auf das tatsächliche Erscheinen der
+    # Datei ODER einen frühen Absturz des ffmpeg-Prozesses, damit die
+    # Antwort den echten Zustand widerspiegelt.
+    tried_software_fallback = False
     deadline = time.time() + 15
     while time.time() < deadline:
         if proc.poll() is not None:
+            if not tried_software_fallback:
+                # NVENC evtl. auf dieser Maschine nicht verfügbar (kein
+                # NVIDIA-GPU, oder Treiber-Problem) — automatisch mit
+                # Software-Encoding erneut versuchen, statt komplett
+                # aufzugeben. Deckt "soll auch auf weniger krassen
+                # Maschinen laufen" ab, ohne manuelles Umschalten.
+                tried_software_fallback = True
+                proc = _start_live_ffmpeg(url, m3u8_path, log_path, use_nvenc=False)
+                _live_view_procs[camera_name] = proc
+                deadline = time.time() + 15
+                continue
             try:
                 with open(log_path) as f:
                     tail = f.read()[-500:]
