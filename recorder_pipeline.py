@@ -838,28 +838,37 @@ class CameraAgent(multiprocessing.Process):
                             for frame in packet.decode():
                                 now = time.time()
 
-                                # Drosselung zuerst (vor der BGR-Konvertierung!), damit
-                                # übersprungene Quell-Frames auch den Konvertierungs-
-                                # Overhead sparen, nicht nur die Inferenz.
+                                # KRITISCH: Paket-Einreihung für die Aufnahme MUSS
+                                # unbedingt bei JEDEM Paket passieren, VOR jeder
+                                # Drosselung. Bei Packet-Copy sind Video-Pakete
+                                # nicht mehr unabhängig voneinander wie bei echtem
+                                # Encoding — P-/B-Frames referenzieren VORHERIGE
+                                # Frames. Ein durch die Drosselung übersprungenes
+                                # Paket würde eine Lücke in dieser Referenzkette
+                                # reißen und bei allen nachfolgenden Frames bis
+                                # zum nächsten Keyframe zu Artefakten/Geisterbildern
+                                # führen (genau das von Axel beobachtete Symptom).
+                                # Nutzt den state-Stand zu Beginn dieses Frames —
+                                # ein IDLE->RECORDING-Übergang weiter unten in
+                                # DERSELBEN Iteration schließt dieses Paket über
+                                # av_buffer (gerade eben befüllt) automatisch mit
+                                # ein, wenn der Pre-Roll-Puffer gleich eingereiht wird.
+                                if state == "IDLE" and not packet_video_queued:
+                                    av_buffer.append(("video", packet, now))
+                                    packet_video_queued = True
+                                    trim_buffer()
+                                elif state in ("RECORDING", "POST_ROLL") and not packet_video_queued:
+                                    pending_encode_queue.append(('video', packet, now))
+                                    packet_video_queued = True
+
+                                # Drosselung jetzt NUR noch für Erkennung/Vorschau/
+                                # Filmstrip — beeinflusst nicht mehr, ob das Paket
+                                # in der Aufnahme landet (siehe oben, immer).
                                 if frame_interval > 0 and (now - last_processed_time) < frame_interval:
                                     continue
                                 last_processed_time = now
 
                                 img_bgr = frame.to_ndarray(format='bgr24')
-
-                                # Der Pre-Roll-Puffer wird NUR beim Start einer
-                                # neuen Aufnahme gelesen (siehe weiter unten,
-                                # "for item_type, data, item_ts in av_buffer").
-                                # Während einer laufenden Aufnahme wird er nie
-                                # wieder angefasst — trotzdem lief hier bisher
-                                # bei JEDEM Frame ein voller Bild-Copy plus
-                                # Puffer-Verwaltung, auch während der Aufnahme
-                                # selbst, wo es reine Verschwendung war. Nur
-                                # noch im IDLE-Zustand befüllen.
-                                if state == "IDLE" and not packet_video_queued:
-                                    av_buffer.append(("video", packet, now))
-                                    packet_video_queued = True
-                                    trim_buffer()
 
                                 # Modell nachladen, falls es beim Start (oder nach einem
                                 # vorherigen Fehlversuch) noch nicht verfügbar war —
@@ -1041,18 +1050,12 @@ class CameraAgent(multiprocessing.Process):
 
                                 elif state == "RECORDING":
                                     if target_detected:
-                                        if not packet_video_queued:
-                                            pending_encode_queue.append(('video', packet, now))
-                                            packet_video_queued = True
                                         capture_filmstrip(img_bgr, boxes, names)
                                     else:
                                         state = "POST_ROLL"
                                         _write_state(self.name, "POST_ROLL")
                                         post_roll_end_time = time.time() + POST_ROLL_SEC
                                         self.logger.info(f"🏠 [GONE] Target object left frame. Monitoring for {POST_ROLL_SEC}s extra.")
-                                        if not packet_video_queued:
-                                            pending_encode_queue.append(('video', packet, now))
-                                            packet_video_queued = True
                                         capture_filmstrip(img_bgr, boxes, names)
 
                                 elif state == "POST_ROLL":
@@ -1067,14 +1070,8 @@ class CameraAgent(multiprocessing.Process):
                                             sources.append(f"audio ('{audio_label}')" if audio_label else "audio")
                                         source_desc = " + ".join(sources) if sources else "detection"
                                         self.logger.info(f"🚨 [DETECTED] Target returned ({source_desc})! Resuming recording.")
-                                        if not packet_video_queued:
-                                            pending_encode_queue.append(('video', packet, now))
-                                            packet_video_queued = True
                                         capture_filmstrip(img_bgr, boxes, names)
                                     else:
-                                        if not packet_video_queued:
-                                            pending_encode_queue.append(('video', packet, now))
-                                            packet_video_queued = True
                                         capture_filmstrip(img_bgr, boxes, names)
                                         if time.time() > post_roll_end_time:
                                             self.logger.info(f"✅ Session ended for {self.name}. Closing file.")
