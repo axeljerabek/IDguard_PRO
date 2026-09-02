@@ -558,18 +558,22 @@ def _load_streams_display():
     Aufnahme (recorder_pipeline.py) brauchen trotzdem ihren jeweiligen
     Prozess-Neustart, um eine neue Kamera wirklich zu bedienen — das kann
     aus einem laufenden Web-Request heraus nicht sauber selbst ausgelöst
-    werden (würde die eigene Antwort mit abwürgen)."""
+    werden (würde die eigene Antwort mit abwürgen).
+
+    WICHTIG: 'enabled' hier ist NUR die Aufnahme-Einstellung aus dem
+    Settings-Formular (Video-Checkbox) — NICHT mit dem Live-Vorschau-
+    Override vermischen (das ist ein komplett separates Konzept, die
+    Live-Vorschau-Kacheln lesen ihren eigenen 'overrides'-Wert direkt aus
+    stream_overrides.json). Diese Datei hier hatte das früher vermischt:
+    enabled wurde mit dem Override-Zustand überschrieben, wodurch eine
+    gerade abgewählte Kamera nach jedem Reload wieder als aktiviert
+    angezeigt wurde, obwohl streams.json korrekt gespeichert hatte."""
     try:
         if os.path.exists(STREAMS_F):
             with open(STREAMS_F) as f:
                 loaded = json.load(f)
             if isinstance(loaded, list) and loaded:
-                streams_copy = [dict(s) for s in loaded]
-                overrides = load_overrides()
-                for s in streams_copy:
-                    if s.get("name") in overrides:
-                        s["enabled"] = (overrides[s["name"]] == "ON")
-                return streams_copy
+                return [dict(s) for s in loaded]
     except Exception:
         pass
     return STREAMS
