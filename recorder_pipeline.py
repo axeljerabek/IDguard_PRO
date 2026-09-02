@@ -101,19 +101,28 @@ _shared_frame_write_queue = queue.Queue()
 def _draw_boxes_with_labels(cv2, img, boxes, names):
     """Zeichnet Box + Klassenname + Konfidenz — Ersatz für results[0].plot(),
     aber mit reinen (GPU-losgelösten) Werten, sicher über Zeit-/Thread-
-    Grenzen hinweg aufzuheben. box-Zeilen: x1,y1,x2,y2,conf,cls_id."""
+    Grenzen hinweg aufzuheben. box-Zeilen: x1,y1,x2,y2,conf,cls_id.
+
+    Wird auf dem VOLLEN Kamerabild gezeichnet (z.B. 1920px), das Ergebnis
+    aber meist erst DANACH auf ~640px runterskaliert — eine feste
+    Schriftgröße wäre nach diesem Resize kaum noch lesbar. Skaliert daher
+    proportional zur tatsächlichen Bildbreite (640px als Referenz, worauf
+    die Basiswerte kalibriert sind), damit nach dem Resize immer dieselbe
+    lesbare Endgröße rauskommt, unabhängig von der Kamera-Auflösung."""
+    scale = max(1.0, img.shape[1] / 640.0)
+    font_scale = 0.8 * scale
+    thickness = max(1, round(2 * scale))
+    box_thickness = max(1, round(3 * scale))
     for b in boxes:
         x1, y1, x2, y2 = map(int, b[:4])
         conf = float(b[4]) if len(b) > 4 else None
         cls_id = int(b[5]) if len(b) > 5 else None
-        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 220, 0), 3)
+        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 220, 0), box_thickness)
         if conf is not None:
             cls_name = names.get(cls_id, str(cls_id)) if names and cls_id is not None else (str(cls_id) if cls_id is not None else '')
             label = f"{cls_name} {conf:.2f}" if cls_name else f"{conf:.2f}"
-            font_scale = 0.8
-            thickness = 2
             (tw, th), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
-            pad = 6
+            pad = round(6 * scale)
             cv2.rectangle(img, (x1, max(0, y1 - th - baseline - pad)), (x1 + tw + pad * 2, y1), (0, 220, 0), -1)
             cv2.putText(img, label, (x1 + pad, max(th, y1 - baseline // 2 - 2)), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), thickness, cv2.LINE_AA)
 
