@@ -551,7 +551,7 @@ class CameraAgent(multiprocessing.Process):
         out_video = None
         out_audio = None
         recording_start_time = 0
-        pts_offset = 0  # Neuer Nullpunkt fürs Packet-Copy-Remuxing, pro Aufnahme neu gesetzt
+        pts_offset = None  # None = "noch nicht gesetzt", wird lazy beim ersten Paket der Aufnahme berechnet
 
         # Filmstrip (Hover-Scrub-Vorschau + AI-taugliche Großbilder): pro
         # Recording neu gesetzt, siehe RECORDING-Start weiter unten.
@@ -597,18 +597,27 @@ class CameraAgent(multiprocessing.Process):
                     out_container = None
                     out_video = None
                     out_audio = None
-                    pts_offset = 0
+                    pts_offset = None
                     av_buffer.clear()
                     pending_encode_queue.clear()
 
         def remux_packet(packet, ts=None):
             """Ersetzt encode_video_frame/encode_audio_frame komplett — kein
             Neu-Encodieren mehr, das Paket ist ja schon komprimiert. Nur PTS/
-            DTS um pts_offset verschieben (neuer Nullpunkt = erster Keyframe
-            der Aufnahme) und direkt muxen. ts wird nicht mehr für die PTS-
-            Berechnung gebraucht (die Quelle liefert ihre eigenen, echten
-            Zeitstempel) — Parameter bleibt nur der Kompatibilität mit
-            write_buffered_item()/der Warteschlange wegen erhalten."""
+            DTS um pts_offset verschieben und direkt muxen. ts wird nicht mehr
+            für die PTS-Berechnung gebraucht (die Quelle liefert ihre eigenen,
+            echten Zeitstempel) — Parameter bleibt nur der Kompatibilität mit
+            write_buffered_item()/der Warteschlange wegen erhalten.
+
+            pts_offset wird LAZY beim ersten tatsächlich verarbeiteten Paket
+            dieser Aufnahme gesetzt (nicht vorab am Trigger-Zeitpunkt) — war
+            der Pre-Roll-Puffer beim Trigger leer (PRE_ROLL_SEC=0, oder ein
+            Trigger direkt nach Verbindungsaufbau, bevor sich der Puffer
+            füllen konnte), hätte eine vorab-berechnete Offset sonst bei 0
+            hängenbleiben, während das erste ECHTE Paket einen riesigen PTS-
+            Wert trägt (die Quelle zählt seit Verbindungsaufbau, nicht seit
+            Aufnahmestart) — die Datei hätte dann falsch riesig begonnen."""
+            nonlocal pts_offset
             if not out_container:
                 return
             target_stream = out_video if packet.stream.type == 'video' else out_audio
@@ -617,6 +626,8 @@ class CameraAgent(multiprocessing.Process):
             try:
                 if packet.dts is None:
                     return
+                if pts_offset is None:
+                    pts_offset = packet.dts
                 packet.stream = target_stream
                 packet.pts -= pts_offset
                 packet.dts -= pts_offset
@@ -966,7 +977,6 @@ class CameraAgent(multiprocessing.Process):
                                         filmstrip_next_time = time.time()
                                         filmstrip_pending = {}
 
-                                        h, w = img_bgr.shape[:2]
                                         try:
                                             out_container = av.open(video_file_path, mode='w')
 
@@ -996,21 +1006,26 @@ class CameraAgent(multiprocessing.Process):
                                             # Video-Keyframe suchen, alles davor verwerfen. Ohne das wäre
                                             # die Datei am Anfang nicht dekodierbar.
                                             keyframe_idx = 0
+                                            found_keyframe = False
                                             for i in range(len(av_buffer) - 1, -1, -1):
                                                 item_type, pkt, _ts = av_buffer[i]
                                                 if item_type == "video" and pkt.is_keyframe:
                                                     keyframe_idx = i
+                                                    found_keyframe = True
                                                     break
+                                            if not found_keyframe and av_buffer:
+                                                # Seltener Randfall: Trigger direkt nach Verbindungsaufbau,
+                                                # bevor der erste Keyframe überhaupt ankam. Puffer beginnt
+                                                # dann zwangsläufig NICHT an einem Keyframe — kann zu einem
+                                                # kurz unsauberen/nicht dekodierbaren Anfang führen. Selten
+                                                # genug, um es nur sichtbar zu machen statt komplex
+                                                # abzufangen (z.B. Pre-Roll für diesen einen Trigger verwerfen).
+                                                self.logger.warning(
+                                                    f"⚠️ [{self.name}] Kein Keyframe im Pre-Roll-Puffer gefunden "
+                                                    f"(vermutlich Trigger kurz nach Verbindungsaufbau) — Aufnahme-"
+                                                    f"Anfang könnte kurz unsauber sein."
+                                                )
                                             aligned_buffer = list(av_buffer)[keyframe_idx:]
-
-                                            # PTS-Rebase: die Quelle zählt PTS/DTS seit Verbindungsaufbau
-                                            # durch, nicht seit Aufnahmestart — ohne Offset würde die
-                                            # Ausgabedatei mit einem riesigen Startwert beginnen. Erster
-                                            # Video-Keyframe im ausgerichteten Puffer ist der neue Nullpunkt.
-                                            pts_offset = next(
-                                                (pkt.dts for t, pkt, _ts in aligned_buffer if t == "video" and pkt.dts is not None),
-                                                0
-                                            )
 
                                             # Nicht mehr sofort schreiben — nur einreihen. Der Drain-Schritt
                                             # (siehe _drain_encode_queue) arbeitet das über die nächsten
