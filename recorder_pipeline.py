@@ -88,6 +88,49 @@ def _filmstrip_writer_loop():
 
 threading.Thread(target=_filmstrip_writer_loop, daemon=True).start()
 
+# Dieselbe Idee wie beim Filmstrip-Writer oben, aber für die 1fps-Live-
+# Vorschau — die lief bisher NICHT nur mit blockierendem Schreiben im
+# Hauptloop, sondern hatte dort sogar noch results[0].plot() (Box-Zeichnen),
+# cv2.resize() und cv2.imencode() mit drin. Läuft dazu noch KONTINUIERLICH
+# alle ~1s (Standard-THUMBNAIL_FPS), unabhängig davon ob gerade überhaupt
+# aufgenommen wird — vermutlich der Hauptverursacher fürs beobachtete
+# Mikroruckeln, da es bei JEDER Kamera bei JEDEM Intervall-Tick zuschlägt,
+# nicht nur während aktiver Aufnahmen mit aktiviertem Filmstrip.
+_shared_frame_write_queue = queue.Queue()
+
+def _shared_frame_writer_loop():
+    import cv2
+    frames_dir = os.path.join(ALERTS_DIR, '.frames')
+    os.makedirs(frames_dir, exist_ok=True)
+    while True:
+        item = _shared_frame_write_queue.get()
+        if item is None:
+            break
+        try:
+            name, img_bgr, boxes = item
+            source = img_bgr
+            if boxes is not None and len(boxes) > 0:
+                try:
+                    source = img_bgr.copy()
+                    for b in boxes:
+                        x1, y1, x2, y2 = map(int, b[:4])
+                        cv2.rectangle(source, (x1, y1), (x2, y2), (0, 200, 0), 2)
+                except Exception:
+                    source = img_bgr
+            small = cv2.resize(source, (640, max(1, int(source.shape[0] * 640 / source.shape[1]))))
+            ok, buf = cv2.imencode('.jpg', small, [cv2.IMWRITE_JPEG_QUALITY, 75])
+            if ok:
+                tmp = os.path.join(frames_dir, f'.{name}.tmp')
+                with open(tmp, 'wb') as f:
+                    f.write(buf.tobytes())
+                os.replace(tmp, os.path.join(frames_dir, f'{name}.jpg'))
+        except Exception:
+            pass
+        finally:
+            _shared_frame_write_queue.task_done()
+
+threading.Thread(target=_shared_frame_writer_loop, daemon=True).start()
+
 def _load_filmstrip_settings():
     """FILMSTRIP_COUNT=0 -> Feature aus. Live aus der Settings-Datei gelesen,
     kein Pipeline-Neustart bei Änderung nötig."""
@@ -395,21 +438,16 @@ class CameraAgent(multiprocessing.Process):
             if now2 < shared_frame_next_time:
                 return
             try:
-                source = img_bgr
+                boxes = None
                 if show_boxes_live and results:
-                    # Fällt bei JEDEM Problem sofort aufs Rohbild zurück — die
-                    # Live-Vorschau ist rein kosmetisch, darf nie etwas anderes stören.
                     try:
-                        source = results[0].plot()
+                        boxes = results[0].boxes.data.cpu().numpy().copy()
                     except Exception:
-                        source = img_bgr
-                small = cv2.resize(source, (640, max(1, int(source.shape[0] * 640 / source.shape[1]))))
-                ok, buf = cv2.imencode('.jpg', small, [cv2.IMWRITE_JPEG_QUALITY, 75])
-                if ok:
-                    tmp = os.path.join(FRAMES_DIR, f'.{self.name}.tmp')
-                    with open(tmp, 'wb') as f:
-                        f.write(buf.tobytes())
-                    os.replace(tmp, os.path.join(FRAMES_DIR, f'{self.name}.jpg'))
+                        boxes = None
+                # NUR ein günstiger Array-Copy hier im Hauptloop — Annotieren,
+                # Resize, JPEG-Encoding und der eigentliche Schreibvorgang
+                # laufen jetzt komplett im Hintergrund-Thread.
+                _shared_frame_write_queue.put((self.name, img_bgr.copy(), boxes))
                 shared_frame_next_time = now2 + shared_frame_interval
             except Exception:
                 pass
