@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="{{ 'light' if settings.get('THEME') == 'light' else 'dark' }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='style-light.css' if settings.get('THEME') == 'light' else 'style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <div class="container">
@@ -942,12 +942,7 @@
         }
 
         function applyTheme(theme) {
-            const link = document.querySelector('link[rel="stylesheet"][href*="style"]');
-            if (!link) return;
-            const targetFile = theme === 'light' ? 'style-light.css' : 'style.css';
-            if (!link.href.endsWith(targetFile)) {
-                link.href = link.href.replace(/style(-light)?\.css(\?.*)?$/, targetFile);
-            }
+            document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
         }
 
         function renderStreamsGrid(streamsData) {

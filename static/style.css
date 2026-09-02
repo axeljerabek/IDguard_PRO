@@ -28,8 +28,43 @@
     --radius-sm: 7px;
     --gap: clamp(14px, 2.2vw, 22px);
 
+    /* Bisher hart codierte Einzelwerte (kein Theme-Wechsel möglich) — jetzt
+       als eigene Variablen, damit der Light-Override-Block direkt darunter
+       sie mit übernehmen kann, ohne die ganzen Regeln zu duplizieren. */
+    --text-on-primary: #241804;   /* Text auf Amber-Hintergrund — bleibt in beiden Themes gleich */
+    --switch-thumb-off: #f3efe6;  /* Schalter-Kreis im "Aus"-Zustand */
+    --switch-thumb-on: #0e1a14;   /* Schalter-Kreis im "An"-Zustand */
+    --input-hover-border: #454051; /* Rahmenfarbe bei Hover auf Formularfeldern */
+
     --font-sans: 'IBM Plex Sans', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     --font-mono: 'IBM Plex Mono', ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+/* Light-Theme: nur die Variablen, die sich unterscheiden — der Rest des
+   Stylesheets (alle tatsächlichen Layout-/Komponenten-Regeln) bleibt exakt
+   EINMAL bestehen und gilt für beide Themes, da praktisch alles bereits
+   über var(--xxx) läuft. Umschalten passiert über ein data-theme-Attribut
+   auf <html>, kein zweites Stylesheet mehr nötig. */
+[data-theme="light"] {
+    --bg: #eceae5;
+    --bg-wash: radial-gradient(ellipse 900px 500px at 50% -10%, rgba(193, 125, 31, 0.06), transparent 60%);
+    --card-bg: #ffffff;
+    --card-bg-inset: #f2f0ea;
+    --text: #26241f;
+    --text-muted: #766f61;
+    --text-dim: #a39c8c;
+    --primary: #c17d1f;
+    --primary-hover: #a86a15;
+    --primary-soft: rgba(193, 125, 31, 0.12);
+    --success: #1e9e63;
+    --success-soft: rgba(30, 158, 99, 0.12);
+    --danger: #d1424a;
+    --danger-soft: rgba(209, 66, 74, 0.1);
+    --warning: #c17d1f;
+    --border: #ddd8cd;
+    --switch-thumb-off: #ffffff;
+    --switch-thumb-on: #ffffff;
+    --input-hover-border: #c9c2b4;
 }
 
 * {
@@ -182,7 +217,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 
 .btn-save {
     background-color: var(--primary);
-    color: #241804;
+    color: var(--text-on-primary);
     width: 100%;
     margin-top: 18px;
 }
@@ -396,12 +431,12 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 .slider:before {
     position: absolute; content: ""; height: 19px; width: 19px; left: 3px; bottom: 3px;
-    background-color: #f3efe6;
+    background-color: var(--switch-thumb-off);
     transition: .25s;
     border-radius: 50%;
 }
 input:checked + .slider { background-color: var(--success); }
-input:checked + .slider:before { transform: translateX(21px); background: #0e1a14; }
+input:checked + .slider:before { transform: translateX(21px); background: var(--switch-thumb-on); }
 
 /* Settings Grid */
 .settings-grid {
@@ -469,7 +504,7 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
     min-height: 42px;
 }
 .settings-group select { cursor: pointer; }
-.settings-group input:hover, .settings-group select:hover { border-color: #454051; }
+.settings-group input:hover, .settings-group select:hover { border-color: var(--input-hover-border); }
 
 .range-wrap { display: flex; align-items: center; gap: 12px; }
 .range-wrap input[type="range"] {
@@ -897,7 +932,7 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
 }
 #bulkExportBtn {
     background: var(--primary);
-    color: #241804;
+    color: var(--text-on-primary);
     border: none;
     border-radius: 999px;
     padding: 8px 16px;
@@ -1302,7 +1337,7 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
 }
 .btn-name-cluster {
     background: var(--primary);
-    color: #241804;
+    color: var(--text-on-primary);
     border: none;
     border-radius: var(--radius-sm);
     padding: 8px 14px;
@@ -1487,7 +1522,7 @@ input:checked + .slider:before { transform: translateX(21px); background: #0e1a1
 .player-controls button.active {
     background: var(--primary);
     border-color: var(--primary);
-    color: #241804;
+    color: var(--text-on-primary);
 }
 .btn-download {
     background: var(--card-bg-inset);
