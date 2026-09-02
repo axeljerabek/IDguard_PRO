@@ -6,6 +6,7 @@ import time
 import signal
 import random
 import threading
+import queue
 import datetime
 import multiprocessing
 from collections import deque
@@ -50,6 +51,42 @@ except ImportError as e:
 # web_ui.py gelesen (kein *.mp4-Glob-Konflikt durch führenden Punkt).
 STATUS_DIR = os.path.join(ALERTS_DIR, '.status')
 os.makedirs(STATUS_DIR, exist_ok=True)
+
+# Hintergrund-Writer fürs Filmstrip: nimmt der Haupt-Frame-Schleife die
+# blockierende Festplatten-I/O (cv2.imwrite + JSON) komplett ab. Vorher lief
+# das synchron direkt im Capture-Loop bei jedem Filmstrip-Intervall (Standard
+# alle 2s) — bei mehreren Kameras auf gemeinsamer Platte konnten sich diese
+# kurzen Stalls überlappen und verlängern. Der eingehende RTMP-Stream läuft
+# während eines solchen Stalls unbeeindruckt weiter; die Aufnahme verpasst in
+# dieser Zeit effektiv Frames, was sich als Ruckeln in der fertigen Datei
+# zeigt, OHNE dass GPU oder CPU dabei ausgelastet wären (reine I/O-Wartezeit
+# erscheint nicht als Prozessorlast). Da jede Kamera als eigener 'spawn'-
+# Prozess läuft (siehe multiprocessing-Fix weiter unten), ist ein modul-
+# globaler Writer hier automatisch schon "ein Writer-Thread pro Kamera",
+# ganz ohne zusätzliche Verwaltung.
+_filmstrip_write_queue = queue.Queue()
+
+def _filmstrip_writer_loop():
+    import cv2  # lokal wie an anderer Stelle im CameraAgent — hält den Master-
+    # Prozess leicht, nur Kamera-Prozesse, die den Thread tatsächlich starten,
+    # zahlen die Importkosten.
+    while True:
+        item = _filmstrip_write_queue.get()
+        if item is None:
+            break
+        try:
+            kind, path, payload = item
+            if kind == 'jpg':
+                cv2.imwrite(path, payload)
+            elif kind == 'json':
+                with open(path, 'w') as f:
+                    json.dump(payload, f)
+        except Exception:
+            pass
+        finally:
+            _filmstrip_write_queue.task_done()
+
+threading.Thread(target=_filmstrip_writer_loop, daemon=True).start()
 
 def _load_filmstrip_settings():
     """FILMSTRIP_COUNT=0 -> Feature aus. Live aus der Settings-Datei gelesen,
@@ -399,6 +436,13 @@ class CameraAgent(multiprocessing.Process):
         filmstrip_taken_total = 0   # ALLE seit Recording-Start gesehenen Kandidaten (fürs Reservoir Sampling)
         filmstrip_timestamps = {}  # slot_idx (str) -> Sekunden seit Recording-Start, für korrekte Zeitreihenfolge trotz Slot-Überschreibung
         filmstrip_next_time = 0
+        # slot_idx (int) -> (roher Frame-Copy, Box-Koordinaten oder None, rel_ts).
+        # Während der Aufnahme wird hier NUR reingeschrieben (reiner Array-Copy,
+        # kein Resize/Annotieren/Schreiben) — die eigentliche teurere Arbeit
+        # läuft erst in flush_filmstrip() bei Aufnahmeende, wenn Zeit keine
+        # Rolle mehr spielt. Durch FILMSTRIP_COUNT natürlich nach oben
+        # begrenzt, kein unbegrenztes Wachstum bei langen Aufnahmen.
+        filmstrip_pending = {}
 
         def close_writer():
             nonlocal out_container, out_video, out_audio, resampler, video_frame_count, last_pts, audio_samples_written, audio_first_frame_time
@@ -429,6 +473,7 @@ class CameraAgent(multiprocessing.Process):
                 except Exception as e:
                     self.logger.error(f"❌ Error closing output file: {e}")
                 finally:
+                    flush_filmstrip()
                     out_container = None
                     out_video = None
                     out_audio = None
@@ -480,8 +525,16 @@ class CameraAgent(multiprocessing.Process):
                 self.logger.error(f"❌ Video encoding error: {e}")
 
         def capture_filmstrip(img_bgr, results=None):
-            """Small (Hover-Scrub, MIT Boxen) + Large (KI-Analyse, bewusst ROH ohne
-            Boxen — sauberere Eingabe für Ollama) Frames im Intervall.
+            """Wählt im Intervall einen Filmstrip-Slot aus und legt NUR einen
+            günstigen Roh-Frame-Copy + Box-Koordinaten dafür beiseite —
+            Resize, Box-Annotation und das eigentliche Schreiben passieren
+            NICHT hier, sondern erst nachträglich in flush_filmstrip() bei
+            Aufnahmeende (siehe close_writer()). Ein reiner Array-Copy kostet
+            unter einer Millisekunde; Resize+Annotieren+JPEG-Encoding+Disk-I/O
+            zusammen können ein Vielfaches davon sein — und genau das sollte
+            nie im zeitkritischen Aufnahme-Loop passieren, selbst nicht in
+            einem Hintergrund-Thread (der nimmt nur die Disk-I/O ab, nicht
+            die CPU-Arbeit fürs Resize/Annotieren).
 
             Hybrid aus Reservoir Sampling + garantiertem Ende-Slot:
             - Der LETZTE Slot wird bei JEDEM Aufruf überschrieben — zeigt also
@@ -514,35 +567,68 @@ class CameraAgent(multiprocessing.Process):
                         if j < reservoir_size:
                             slot = j
 
-                h, w = img_bgr.shape[:2]
-                annotated = img_bgr
-                if results:
-                    try:
-                        annotated = results[0].plot()
-                    except Exception:
-                        annotated = img_bgr
-                small_full = cv2.resize(annotated, (560, max(1, int(h * 560 / w))))
-                large_full = img_bgr if w <= 1280 else cv2.resize(img_bgr, (1280, max(1, int(h * 1280 / w))))
-
-                slots_to_write = set()
+                slots_to_fill = set()
                 if slot is not None:
-                    slots_to_write.add(slot)
+                    slots_to_fill.add(slot)
                 if end_slot is not None:
-                    slots_to_write.add(end_slot)
+                    slots_to_fill.add(end_slot)
 
-                for s in slots_to_write:
-                    cv2.imwrite(os.path.join(fs_small_dir, f'{s:04d}.jpg'), small_full)
-                    cv2.imwrite(os.path.join(fs_large_dir, f'{s:04d}.jpg'), large_full)
-                    filmstrip_timestamps[str(s)] = round(now - recording_start_time, 2)
-
-                if slots_to_write:
-                    ts_path = os.path.join(os.path.dirname(fs_small_dir), 'timestamps.json')
-                    with open(ts_path, 'w') as tf:
-                        json.dump(filmstrip_timestamps, tf)
+                if slots_to_fill:
+                    # Box-Koordinaten als reines NumPy-Array lösen, statt das
+                    # ganze Ultralytics-Results-Objekt aufzuheben — das kann an
+                    # GPU-/Modell-internen Zustand gebunden sein, der über die
+                    # Dauer einer langen Aufnahme hinweg nicht sicher
+                    # aufzuheben wäre. Ein losgelöstes NumPy-Array ist es.
+                    boxes = None
+                    if results:
+                        try:
+                            boxes = results[0].boxes.data.cpu().numpy().copy()
+                        except Exception:
+                            boxes = None
+                    frame_copy = img_bgr.copy()
+                    rel_ts = round(now - recording_start_time, 2)
+                    for s in slots_to_fill:
+                        filmstrip_pending[s] = (frame_copy, boxes, rel_ts)
 
                 filmstrip_next_time = now + filmstrip_interval
             except Exception:
                 pass
+
+        def flush_filmstrip():
+            """Läuft einmalig bei Aufnahmeende (siehe close_writer()) — hier
+            passiert die eigentliche, vorher im Hauptloop laufende
+            Resize/Annotations-Arbeit, plus das Einreihen der tatsächlichen
+            Schreibvorgänge in die Hintergrund-Queue. Zeit spielt hier keine
+            Rolle mehr: die Aufnahme ist zu diesem Zeitpunkt schon fertig
+            encodiert, ein paar zusätzliche Millisekunden hier beeinflussen
+            die Video-Glätte in keiner Weise."""
+            if not fs_small_dir or not filmstrip_pending:
+                return
+            try:
+                for s, (frame, boxes, rel_ts) in filmstrip_pending.items():
+                    h, w = frame.shape[:2]
+                    annotated = frame
+                    if boxes is not None and len(boxes) > 0:
+                        try:
+                            annotated = frame.copy()
+                            for b in boxes:
+                                x1, y1, x2, y2 = map(int, b[:4])
+                                cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 200, 0), 2)
+                        except Exception:
+                            annotated = frame
+                    small_full = cv2.resize(annotated, (560, max(1, int(h * 560 / w))))
+                    large_full = frame if w <= 1280 else cv2.resize(frame, (1280, max(1, int(h * 1280 / w))))
+
+                    _filmstrip_write_queue.put(('jpg', os.path.join(fs_small_dir, f'{s:04d}.jpg'), small_full))
+                    _filmstrip_write_queue.put(('jpg', os.path.join(fs_large_dir, f'{s:04d}.jpg'), large_full))
+                    filmstrip_timestamps[str(s)] = rel_ts
+
+                ts_path = os.path.join(os.path.dirname(fs_small_dir), 'timestamps.json')
+                _filmstrip_write_queue.put(('json', ts_path, filmstrip_timestamps.copy()))
+                filmstrip_pending.clear()
+            except Exception:
+                pass
+
 
         def encode_audio_frame(a_frame, ts=None):
             nonlocal resampler, audio_samples_written, audio_first_frame_time
@@ -797,6 +883,7 @@ class CameraAgent(multiprocessing.Process):
                                         filmstrip_taken_total = 0
                                         filmstrip_timestamps = {}
                                         filmstrip_next_time = time.time()
+                                        filmstrip_pending = {}
 
                                         h, w = img_bgr.shape[:2]
                                         # ~2s Keyframe-Abstand: macht die Event-Clips beim
