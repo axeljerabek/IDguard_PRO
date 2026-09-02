@@ -48,47 +48,55 @@ def _describe_ollama_error_detailed(e):
     sich nur einmal lesen) und liefert (ist_kontext_overflow, lesbare_
     Fehlerbeschreibung) zurück.
 
-    WICHTIG (bei Axel beobachtet, Python 3.14): str(e) verhält sich
-    inkonsistent — mal kurz ("HTTP Error 400: Bad Request"), mal mit dem
-    kompletten Body angehängt, je nachdem was vorher schon an der Exception
-    aufgerufen wurde. Deshalb wird der Rohtext des Bodies HIER EINMAL in
-    einer eigenen Variable (raw_text) gehalten, und die Text-Muster-Prüfung
-    läuft IMMER auf DIESEM Text, nie auf str(e) — das eliminiert die
-    Abhängigkeit von diesem inkonsistenten Verhalten komplett.
-
-    Ollamas Fehlerformat variiert außerdem: bei einem fehlenden Modell ist
-    "error" ein einfacher String, bei einem gesprengten Kontextfenster
-    normalerweise ein verschachteltes Objekt mit eigenem "type"-Feld, bei
-    Axel aber ein JSON-kodierter STRING (doppelt kodiert, vermutlich durch
-    einen Proxy/Gateway vor Ollama) — alle drei Formen hier abgedeckt."""
+    TEMPORÄR: sehr ausführliche Debug-Ausgaben (DEBUG_OLLAMA_ERROR-Präfix),
+    um bei Axel Schritt für Schritt sichtbar zu machen, welcher Zweig
+    genommen wird — nach Bestätigung wieder entfernen."""
+    print(f"DEBUG_OLLAMA_ERROR: Exception-Typ = {type(e).__name__}, isinstance(HTTPError) = {isinstance(e, urllib.error.HTTPError)}")
     if isinstance(e, urllib.error.HTTPError):
         try:
-            raw_text = e.read().decode("utf-8")
-        except Exception:
+            raw_bytes = e.read()
+            print(f"DEBUG_OLLAMA_ERROR: e.read() lieferte {len(raw_bytes)} Bytes, Typ = {type(raw_bytes).__name__}")
+            raw_text = raw_bytes.decode("utf-8")
+            print(f"DEBUG_OLLAMA_ERROR: raw_text Typ = {type(raw_text).__name__}, Länge = {len(raw_text)}")
+            print(f"DEBUG_OLLAMA_ERROR: raw_text repr (erste 300 Zeichen) = {raw_text[:300]!r}")
+        except Exception as read_exc:
+            print(f"DEBUG_OLLAMA_ERROR: read()/decode() warf Exception: {type(read_exc).__name__}: {read_exc}")
             raw_text = None
         if raw_text:
+            pattern_check_1 = "exceed_context_size_error" in raw_text
+            pattern_check_2 = "exceeds the available context size" in raw_text
+            print(f"DEBUG_OLLAMA_ERROR: 'exceed_context_size_error' in raw_text = {pattern_check_1}")
+            print(f"DEBUG_OLLAMA_ERROR: 'exceeds the available context size' in raw_text = {pattern_check_2}")
             try:
                 body = json.loads(raw_text)
+                print(f"DEBUG_OLLAMA_ERROR: json.loads erfolgreich, body Typ = {type(body).__name__}, body = {body!r}")
                 err = body.get("error")
+                print(f"DEBUG_OLLAMA_ERROR: body.get('error') Typ = {type(err).__name__}, Wert = {err!r}")
                 if isinstance(err, dict):
                     is_overflow = err.get("type") == "exceed_context_size_error"
                     detail = err.get("message") or str(err)
+                    print(f"DEBUG_OLLAMA_ERROR: Zweig 'err ist dict' -> is_overflow={is_overflow}")
                     return is_overflow, f"{e} — {detail}"
                 elif isinstance(err, str) and err.strip().startswith("{"):
+                    print("DEBUG_OLLAMA_ERROR: Zweig 'err ist JSON-String' betreten")
                     try:
                         inner = json.loads(err)
                         if isinstance(inner, dict):
                             is_overflow = inner.get("type") == "exceed_context_size_error"
                             detail = inner.get("message") or err
+                            print(f"DEBUG_OLLAMA_ERROR: innerer JSON-Parse erfolgreich -> is_overflow={is_overflow}")
                             return is_overflow, f"{e} — {detail}"
-                    except Exception:
+                    except Exception as inner_exc:
+                        print(f"DEBUG_OLLAMA_ERROR: innerer JSON-Parse fehlgeschlagen: {inner_exc}")
                         pass
-            except Exception:
-                pass
+            except Exception as json_exc:
+                print(f"DEBUG_OLLAMA_ERROR: äußerer json.loads(raw_text) fehlgeschlagen: {type(json_exc).__name__}: {json_exc}")
             # Egal was oben schiefging — Text-Muster-Prüfung IMMER auf dem
             # tatsächlich gelesenen Rohtext, nicht auf str(e).
             is_overflow = "exceed_context_size_error" in raw_text or "exceeds the available context size" in raw_text
+            print(f"DEBUG_OLLAMA_ERROR: Fallback-Zweig (Textmuster auf raw_text) -> is_overflow={is_overflow}")
             return is_overflow, f"{e} — {raw_text}"
+    print(f"DEBUG_OLLAMA_ERROR: Letzter Fallback (kein HTTPError oder raw_text leer) -> is_overflow=False, str(e)={str(e)!r}")
     return False, str(e)
 
 
