@@ -461,6 +461,18 @@ class CameraAgent(multiprocessing.Process):
         # Sicherheitsnetz gegen Speicher-Runaway, trimmt aber nicht mehr aktiv.
         safety_cap = int((TARGET_FPS + 60) * PRE_ROLL_SEC) * 3
         av_buffer = deque(maxlen=safety_cap)
+        # Encoding-Warteschlange: encode_video_frame()/encode_audio_frame()
+        # werden NICHT mehr direkt aus der State-Machine heraus aufgerufen,
+        # sondern nur noch eingereiht. Ein Drain-Schritt (siehe
+        # _drain_encode_queue) arbeitet davon pro Paket-Durchlauf nur eine
+        # BEGRENZTE Menge ab — das verteilt den Pre-Roll-Burst (bei 10s
+        # Pre-Roll und 30fps potenziell 300+ Frames) über mehrere
+        # Loop-Durchläufe, statt ihn in einem einzigen blockierenden Rutsch
+        # abzuarbeiten, während der Decode-Loop keine neuen Quell-Pakete
+        # liest. Bewusst EIN Thread (kein zweiter Encoding-Thread) — die
+        # PyAV/ffmpeg-Encoder-Objekte sind nicht garantiert thread-sicher
+        # für gleichzeitige encode()-Aufrufe, das wäre ein neues Risiko.
+        pending_encode_queue = deque()
 
         def trim_buffer():
             cutoff = time.time() - PRE_ROLL_SEC
@@ -567,6 +579,12 @@ class CameraAgent(multiprocessing.Process):
             nonlocal out_container, out_video, out_audio, resampler, video_frame_count, last_pts, audio_samples_written, audio_first_frame_time
             if out_container:
                 try:
+                    # Restliche Warteschlange komplett abarbeiten, BEVOR die
+                    # Encoder final geflusht werden — sonst gingen evtl. noch
+                    # nicht encodierte Frames (Pre-Roll-Rest, oder normale
+                    # Frames kurz vor Aufnahmeende) beim Schließen verloren.
+                    _drain_encode_queue_fully()
+
                     # Flush Resampler zuerst — explizite, fortlaufende PTS statt
                     # None, damit am Dateiende keine Unstetigkeit zur sonst
                     # überall expliziten Audio-PTS-Vergabe entsteht.
@@ -608,6 +626,7 @@ class CameraAgent(multiprocessing.Process):
                     audio_samples_written = 0
                     audio_first_frame_time = None
                     av_buffer.clear()
+                    pending_encode_queue.clear()
 
         def encode_video_frame(img_bgr, ts=None):
             nonlocal video_frame_count, last_pts
@@ -792,6 +811,26 @@ class CameraAgent(multiprocessing.Process):
                 encode_video_frame(data, ts)
             elif item_type == "audio":
                 encode_audio_frame(data, ts)
+
+        def _drain_encode_queue(max_items=8):
+            """Arbeitet höchstens max_items aus der Warteschlange ab, statt
+            alles auf einmal — verteilt einen Pre-Roll-Burst über mehrere
+            Loop-Durchläufe, damit der Decode-Loop dazwischen immer wieder
+            neue Quell-Pakete lesen kann, statt für den kompletten Burst zu
+            pausieren."""
+            n = 0
+            while pending_encode_queue and n < max_items:
+                item_type, data, ts = pending_encode_queue.popleft()
+                write_buffered_item(item_type, data, ts)
+                n += 1
+
+        def _drain_encode_queue_fully():
+            """Restlos abarbeiten, ohne Obergrenze — für close_writer(), damit
+            beim Beenden einer Aufnahme garantiert nichts verloren geht, egal
+            wie viel noch in der Warteschlange steht."""
+            while pending_encode_queue:
+                item_type, data, ts = pending_encode_queue.popleft()
+                write_buffered_item(item_type, data, ts)
 
         # NVDEC-Hardware-Decode vorbereiten (Punkt "GPU voll nutzen" — bisher
         # lag utilization.decoder konstant bei 0%). Das HWAccel-Objekt selbst
@@ -1070,8 +1109,11 @@ class CameraAgent(multiprocessing.Process):
                                                 # in der Gap-Logik lag.
                                                 out_audio.time_base = Fraction(1, out_audio.rate)
 
-                                            for item_type, data, item_ts in av_buffer:
-                                                write_buffered_item(item_type, data, item_ts)
+                                            # Nicht mehr sofort encodieren — nur einreihen. Der
+                                            # Drain-Schritt (siehe _drain_encode_queue) arbeitet das
+                                            # über die nächsten Loop-Durchläufe verteilt ab, statt den
+                                            # Decode-Loop für den kompletten Pre-Roll-Burst zu blockieren.
+                                            pending_encode_queue.extend(av_buffer)
 
                                         except Exception as e:
                                             self.logger.error(f"❌ Failed to initialize video writer: {e}")
@@ -1081,14 +1123,14 @@ class CameraAgent(multiprocessing.Process):
 
                                 elif state == "RECORDING":
                                     if target_detected:
-                                        encode_video_frame(img_bgr, now)
+                                        pending_encode_queue.append(('video', img_bgr, now))
                                         capture_filmstrip(img_bgr, boxes, names)
                                     else:
                                         state = "POST_ROLL"
                                         _write_state(self.name, "POST_ROLL")
                                         post_roll_end_time = time.time() + POST_ROLL_SEC
                                         self.logger.info(f"🏠 [GONE] Target object left frame. Monitoring for {POST_ROLL_SEC}s extra.")
-                                        encode_video_frame(img_bgr, now)
+                                        pending_encode_queue.append(('video', img_bgr, now))
                                         capture_filmstrip(img_bgr, boxes, names)
 
                                 elif state == "POST_ROLL":
@@ -1103,10 +1145,10 @@ class CameraAgent(multiprocessing.Process):
                                             sources.append(f"audio ('{audio_label}')" if audio_label else "audio")
                                         source_desc = " + ".join(sources) if sources else "detection"
                                         self.logger.info(f"🚨 [DETECTED] Target returned ({source_desc})! Resuming recording.")
-                                        encode_video_frame(img_bgr, now)
+                                        pending_encode_queue.append(('video', img_bgr, now))
                                         capture_filmstrip(img_bgr, boxes, names)
                                     else:
-                                        encode_video_frame(img_bgr, now)
+                                        pending_encode_queue.append(('video', img_bgr, now))
                                         capture_filmstrip(img_bgr, boxes, names)
                                         if time.time() > post_roll_end_time:
                                             self.logger.info(f"✅ Session ended for {self.name}. Closing file.")
@@ -1125,6 +1167,12 @@ class CameraAgent(multiprocessing.Process):
                                                 except Exception as e:
                                                     self.logger.warning(f"⚠️ [{self.name}] Konnte Nachbearbeitung nicht starten: {e}")
 
+                                # Begrenzte Menge aus der Encoding-Warteschlange abarbeiten —
+                                # nach JEDEM verarbeiteten Video-Frame, unabhängig vom State-
+                                # Zweig, damit ein Pre-Roll-Burst gleichmäßig über die
+                                # nächsten Loop-Durchläufe verteilt wird.
+                                _drain_encode_queue()
+
                         # AUDIO FRAME PROCESSING
                         elif packet.stream.type == 'audio':
                             for a_frame in packet.decode():
@@ -1133,7 +1181,8 @@ class CameraAgent(multiprocessing.Process):
                                     av_buffer.append(("audio", a_frame, now))
                                     trim_buffer()
                                 if state in ["RECORDING", "POST_ROLL"]:
-                                    encode_audio_frame(a_frame, now)
+                                    pending_encode_queue.append(('audio', a_frame, now))
+                                _drain_encode_queue()
 
                                 # Audio-Trigger füttern: NUR ein billiger Buffer-Append,
                                 # die eigentliche (langsame) Klassifikation läuft komplett
