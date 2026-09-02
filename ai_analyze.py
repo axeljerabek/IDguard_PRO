@@ -63,7 +63,15 @@ def _describe_ollama_error_detailed(e):
                 return False, f"{e} — {err}"
         except Exception:
             pass
-    return False, str(e)
+    # Text-Muster-Fallback: unabhängig davon, ob die JSON-Body-Extraktion
+    # oben aus irgendeinem Grund fehlschlägt (z.B. je nach Python-/urllib-
+    # Version unterschiedliches HTTPError-Verhalten) — erkennt den Overflow
+    # direkt am vollständigen Fehlertext. Beobachtet bei Axel: str(e) enthält
+    # den kompletten rohen JSON-Body bereits, nur die eigentliche
+    # is_overflow-Erkennung oben griff dort aus unbekanntem Grund nicht.
+    text = str(e)
+    is_overflow = "exceed_context_size_error" in text or "exceeds the available context size" in text
+    return is_overflow, text
 
 
 def _describe_ollama_error(e):
