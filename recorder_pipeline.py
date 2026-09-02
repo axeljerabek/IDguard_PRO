@@ -593,6 +593,12 @@ class CameraAgent(multiprocessing.Process):
                     self.logger.error(f"❌ Error closing output file: {e}")
                 finally:
                     flush_filmstrip()
+                    try:
+                        marker = os.path.splitext(video_file_path)[0] + '.recording'
+                        if os.path.exists(marker):
+                            os.remove(marker)
+                    except Exception:
+                        pass
                     out_container = None
                     out_video = None
                     out_audio = None
@@ -948,6 +954,13 @@ class CameraAgent(multiprocessing.Process):
                                         ts_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                                         os.makedirs(ALERTS_DIR, exist_ok=True)
                                         video_file_path = os.path.join(ALERTS_DIR, f"{self.name}_EVENT_{ts_str}.mp4")
+                                        # Markerdatei, solange die Aufnahme läuft — dasselbe Muster
+                                        # wie .ai.pending. web_ui.py zeigt anhand dieser Datei ein
+                                        # "REC"-Abzeichen an, close_writer() räumt sie wieder auf.
+                                        try:
+                                            open(os.path.splitext(video_file_path)[0] + '.recording', 'w').close()
+                                        except Exception:
+                                            pass
                                         self.logger.warning(f"🚨 [DETECTED] Target object found! Starting recording (YOLO {YOLO_VERSION}, NVENC + Audio).")
 
                                         # Zeit-Nullpunkt fürs PTS: ältester Pre-Roll-Frame,

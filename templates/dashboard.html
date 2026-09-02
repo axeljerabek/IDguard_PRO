@@ -2017,6 +2017,9 @@
                     : (ev.trigger_confidence != null)
                         ? `<span class="thumb-conf-badge">${escapeHtml(ev.trigger_class || '')} ${Math.round(ev.trigger_confidence * 100)}%</span>`
                         : '';
+                const recordingBadge = ev.is_recording
+                    ? `<span class="thumb-recording-badge"><span class="rec-dot"></span>REC</span>`
+                    : '';
                 // Permanente Mini-Filmstrip-Reihe unter dem Hauptbild — nutzt
                 // dieselben Filmstrip-Daten wie das Hover-Scrub oben, aber
                 // immer sichtbar statt nur bei Mouseover. Bis zu 6 Bilder,
@@ -2094,7 +2097,7 @@
                     : '';
                 const isSelected = selectedEvents.has(fn);
                 html += `<div class="event-item${alt ? ' event-item-alt' : ''}${isSelected ? ' event-item-selected' : ''}" data-filename="${escapeHtml(fn)}" onclick="handleCardClick(event, '${fn}', ${isArchived})">
-                    <div class="event-thumb" data-default-src="${defaultSrc}" data-fs-base="${fsBase}" data-fs-count="${ev.filmstrip_count || 0}" data-fs-order="${(ev.filmstrip_order || []).join(',')}">${thumbHtml}${confBadge}
+                    <div class="event-thumb" data-default-src="${defaultSrc}" data-fs-base="${fsBase}" data-fs-count="${ev.filmstrip_count || 0}" data-fs-order="${(ev.filmstrip_order || []).join(',')}">${thumbHtml}${confBadge}${recordingBadge}
                         <input type="checkbox" class="event-select-checkbox" data-filename="${escapeHtml(fn)}" data-archived="${isArchived}" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); toggleEventSelection(this, event)" title="Select for bulk actions (Ctrl/Shift+click a card to select ranges)">
                     </div>
                     ${filmstripPreview}
@@ -2103,6 +2106,7 @@
                             <span class="event-name">${fn}</span>
                             <span class="event-meta">
                                 <span><i class="fa-regular fa-calendar"></i> ${ev.datetime}</span>
+                                ${ev.duration ? `<span><i class="fa-regular fa-clock"></i> ${ev.duration}</span>` : ''}
                                 <span><i class="fa-solid fa-hard-drive"></i> ${ev.size}</span>${isArchived ? ' <span title="Archived"><i class="fa-solid fa-box-archive"></i></span>' : ''}
                             </span>
                             ${triggerLine}

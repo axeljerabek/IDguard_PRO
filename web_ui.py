@@ -149,6 +149,27 @@ def build_event_list(directory, limit=MAX_EVENTS):
     _event_cache[directory] = (now + EVENT_CACHE_TTL, events)
     return events
 
+def _get_video_duration(path):
+    """Liest nur die Container-Metadaten (kein Dekodieren) — schnell genug,
+    um bei jedem Event-Listing-Refresh für alle Videos aufgerufen zu
+    werden. av lokal importiert (wie in recorder_pipeline.py), damit der
+    Web-UI-Prozess av nicht unnötig lädt, wenn diese Funktion nie gebraucht
+    wird. Liefert None statt eine 0:00-Anzeige, falls das Lesen fehlschlägt
+    — besser gar keine Angabe als eine falsche."""
+    try:
+        import av
+        with av.open(path) as c:
+            dur = c.duration
+        if not dur:
+            return None
+        total_seconds = int(dur / 1_000_000)  # av.duration ist in AV_TIME_BASE (Mikrosekunden)
+        m, s = divmod(total_seconds, 60)
+        h, m = divmod(m, 60)
+        return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+    except Exception:
+        return None
+
+
 def _event_from_file(f):
     try:
         mtime = os.path.getmtime(f)
@@ -210,10 +231,19 @@ def _event_from_file(f):
                 faces_summary = faces_db.get_faces_summary_for_video(os.path.basename(f))
             except Exception:
                 pass
+        # Solange recorder_pipeline.py noch schreibt, ist die Container-Datei
+        # unvollständig (moov-Atom oft erst beim Schließen finalisiert) —
+        # Dauer währenddessen NICHT lesen (unzuverlässig/inkorrekt), nur das
+        # REC-Abzeichen anzeigen. Beides über dieselbe Markerdatei, die
+        # recorder_pipeline.py beim Start anlegt und beim Schließen entfernt.
+        is_recording = os.path.exists(os.path.splitext(f)[0] + '.recording')
+        duration = None if is_recording else _get_video_duration(f)
         return {
             'filename': os.path.basename(f),
             'datetime': datetime.fromtimestamp(mtime).strftime('%d.%m.%Y %H:%M'),
             'size': format_size(size),
+            'duration': duration,
+            'is_recording': is_recording,
             'has_thumbnail': os.path.exists(thumb_path),
             'filmstrip_count': fs_count,
             'filmstrip_order': fs_order,

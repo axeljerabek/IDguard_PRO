@@ -894,6 +894,29 @@ input:checked + .slider:before { transform: translateX(21px); background: var(--
     border-radius: 5px;
     text-transform: capitalize;
 }
+.thumb-recording-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--danger);
+    color: #fff;
+    font-size: 0.8rem;
+    font-weight: 800;
+    letter-spacing: 0.03em;
+    padding: 4px 10px;
+    border-radius: 5px;
+    box-shadow: 0 2px 8px rgba(242, 84, 91, 0.5);
+    z-index: 2;
+}
+.thumb-recording-badge .rec-dot {
+    width: 8px;
+    height: 8px;
+    background: #fff;
+    box-shadow: 0 0 6px #fff;
+}
 .event-select-checkbox {
     position: absolute;
     top: 8px;
