@@ -98,6 +98,22 @@ threading.Thread(target=_filmstrip_writer_loop, daemon=True).start()
 # nicht nur während aktiver Aufnahmen mit aktiviertem Filmstrip.
 _shared_frame_write_queue = queue.Queue()
 
+def _draw_boxes_with_labels(cv2, img, boxes, names):
+    """Zeichnet Box + Klassenname + Konfidenz — Ersatz für results[0].plot(),
+    aber mit reinen (GPU-losgelösten) Werten, sicher über Zeit-/Thread-
+    Grenzen hinweg aufzuheben. box-Zeilen: x1,y1,x2,y2,conf,cls_id."""
+    for b in boxes:
+        x1, y1, x2, y2 = map(int, b[:4])
+        conf = float(b[4]) if len(b) > 4 else None
+        cls_id = int(b[5]) if len(b) > 5 else None
+        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 200, 0), 2)
+        if conf is not None:
+            cls_name = names.get(cls_id, str(cls_id)) if names and cls_id is not None else (str(cls_id) if cls_id is not None else '')
+            label = f"{cls_name} {conf:.2f}" if cls_name else f"{conf:.2f}"
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            cv2.rectangle(img, (x1, max(0, y1 - th - 6)), (x1 + tw + 4, y1), (0, 200, 0), -1)
+            cv2.putText(img, label, (x1 + 2, max(th, y1 - 4)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
+
 def _shared_frame_writer_loop():
     import cv2
     frames_dir = os.path.join(ALERTS_DIR, '.frames')
@@ -107,14 +123,12 @@ def _shared_frame_writer_loop():
         if item is None:
             break
         try:
-            name, img_bgr, boxes = item
+            name, img_bgr, boxes, names = item
             source = img_bgr
             if boxes is not None and len(boxes) > 0:
                 try:
                     source = img_bgr.copy()
-                    for b in boxes:
-                        x1, y1, x2, y2 = map(int, b[:4])
-                        cv2.rectangle(source, (x1, y1), (x2, y2), (0, 200, 0), 2)
+                    _draw_boxes_with_labels(cv2, source, boxes, names)
                 except Exception:
                     source = img_bgr
             small = cv2.resize(source, (640, max(1, int(source.shape[0] * 640 / source.shape[1]))))
@@ -439,15 +453,18 @@ class CameraAgent(multiprocessing.Process):
                 return
             try:
                 boxes = None
+                names = None
                 if show_boxes_live and results:
                     try:
                         boxes = results[0].boxes.data.cpu().numpy().copy()
+                        names = dict(results[0].names)
                     except Exception:
                         boxes = None
+                        names = None
                 # NUR ein günstiger Array-Copy hier im Hauptloop — Annotieren,
                 # Resize, JPEG-Encoding und der eigentliche Schreibvorgang
                 # laufen jetzt komplett im Hintergrund-Thread.
-                _shared_frame_write_queue.put((self.name, img_bgr.copy(), boxes))
+                _shared_frame_write_queue.put((self.name, img_bgr.copy(), boxes, names))
                 shared_frame_next_time = now2 + shared_frame_interval
             except Exception:
                 pass
@@ -617,16 +634,21 @@ class CameraAgent(multiprocessing.Process):
                     # GPU-/Modell-internen Zustand gebunden sein, der über die
                     # Dauer einer langen Aufnahme hinweg nicht sicher
                     # aufzuheben wäre. Ein losgelöstes NumPy-Array ist es.
+                    # names (Klassennamen-Dict) ist ein reines Python-Dict,
+                    # genauso unproblematisch aufzuheben.
                     boxes = None
+                    names = None
                     if results:
                         try:
                             boxes = results[0].boxes.data.cpu().numpy().copy()
+                            names = dict(results[0].names)
                         except Exception:
                             boxes = None
+                            names = None
                     frame_copy = img_bgr.copy()
                     rel_ts = round(now - recording_start_time, 2)
                     for s in slots_to_fill:
-                        filmstrip_pending[s] = (frame_copy, boxes, rel_ts)
+                        filmstrip_pending[s] = (frame_copy, boxes, names, rel_ts)
 
                 filmstrip_next_time = now + filmstrip_interval
             except Exception:
@@ -643,15 +665,13 @@ class CameraAgent(multiprocessing.Process):
             if not fs_small_dir or not filmstrip_pending:
                 return
             try:
-                for s, (frame, boxes, rel_ts) in filmstrip_pending.items():
+                for s, (frame, boxes, names, rel_ts) in filmstrip_pending.items():
                     h, w = frame.shape[:2]
                     annotated = frame
                     if boxes is not None and len(boxes) > 0:
                         try:
                             annotated = frame.copy()
-                            for b in boxes:
-                                x1, y1, x2, y2 = map(int, b[:4])
-                                cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 200, 0), 2)
+                            _draw_boxes_with_labels(cv2, annotated, boxes, names)
                         except Exception:
                             annotated = frame
                     small_full = cv2.resize(annotated, (560, max(1, int(h * 560 / w))))
@@ -817,8 +837,18 @@ class CameraAgent(multiprocessing.Process):
 
                                 img_bgr = frame.to_ndarray(format='bgr24')
 
-                                av_buffer.append(("video", img_bgr.copy(), now))
-                                trim_buffer()
+                                # Der Pre-Roll-Puffer wird NUR beim Start einer
+                                # neuen Aufnahme gelesen (siehe weiter unten,
+                                # "for item_type, data, item_ts in av_buffer").
+                                # Während einer laufenden Aufnahme wird er nie
+                                # wieder angefasst — trotzdem lief hier bisher
+                                # bei JEDEM Frame ein voller Bild-Copy plus
+                                # Puffer-Verwaltung, auch während der Aufnahme
+                                # selbst, wo es reine Verschwendung war. Nur
+                                # noch im IDLE-Zustand befüllen.
+                                if state == "IDLE":
+                                    av_buffer.append(("video", img_bgr.copy(), now))
+                                    trim_buffer()
 
                                 # Modell nachladen, falls es beim Start (oder nach einem
                                 # vorherigen Fehlversuch) noch nicht verfügbar war —
@@ -1038,8 +1068,9 @@ class CameraAgent(multiprocessing.Process):
                         elif packet.stream.type == 'audio':
                             for a_frame in packet.decode():
                                 now = time.time()
-                                av_buffer.append(("audio", a_frame, now))
-                                trim_buffer()
+                                if state == "IDLE":
+                                    av_buffer.append(("audio", a_frame, now))
+                                    trim_buffer()
                                 if state in ["RECORDING", "POST_ROLL"]:
                                     encode_audio_frame(a_frame, now)
 
