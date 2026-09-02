@@ -48,56 +48,61 @@ def _describe_ollama_error_detailed(e):
     sich nur einmal lesen) und liefert (ist_kontext_overflow, lesbare_
     Fehlerbeschreibung) zurück.
 
-    TEMPORÄR: sehr ausführliche Debug-Ausgaben (DEBUG_OLLAMA_ERROR-Präfix),
-    um bei Axel Schritt für Schritt sichtbar zu machen, welcher Zweig
-    genommen wird — nach Bestätigung wieder entfernen."""
-    print(f"DEBUG_OLLAMA_ERROR: Exception-Typ = {type(e).__name__}, isinstance(HTTPError) = {isinstance(e, urllib.error.HTTPError)}")
-    if isinstance(e, urllib.error.HTTPError):
+    WICHTIG: is_overflow kommt IMMER aus einer simplen Text-Muster-Prüfung
+    auf dem vollständigen Rohtext — das ist die einzige Wahrheitsquelle.
+    Bei Axel zeigte sich, dass Ollama (bzw. ein Proxy/Gateway davor) die
+    Fehlerantwort in eine WECHSELNDE Anzahl von {"error": "..."}-Schichten
+    verpackt (mal zwei, mal drei) — jeder Versuch, eine FESTE Verschachte-
+    lungstiefe anzunehmen, ging früher oder später wieder schief und
+    überschrieb die eigentlich korrekte Text-Erkennung mit einem falschen
+    False. Das strukturierte JSON-Parsen unten (mit einer Schleife statt
+    fester Tiefe) dient jetzt NUR NOCH dazu, eine schönere Detail-Nachricht
+    zu extrahieren, kann is_overflow aber nie mehr beeinflussen."""
+    if not isinstance(e, urllib.error.HTTPError):
+        return False, str(e)
+    try:
+        raw_text = e.read().decode("utf-8")
+    except Exception:
+        return False, str(e)
+    if not raw_text:
+        return False, str(e)
+
+    # Einzige Wahrheitsquelle für is_overflow — unabhängig von der
+    # Verschachtelungstiefe der JSON-Struktur.
+    is_overflow = (
+        "exceed_context_size_error" in raw_text
+        or "exceeds the available context size" in raw_text
+    )
+
+    # Best-effort: sich durch beliebig viele {"error": "<JSON-String>"}-
+    # Schichten hindurcharbeiten, um eine kurze, lesbare "message" zu
+    # finden — rein kosmetisch, verändert is_overflow nicht mehr.
+    detail = raw_text
+    current = raw_text
+    for _ in range(5):  # großzügige Obergrenze gegen kaputte/endlose Verschachtelung
         try:
-            raw_bytes = e.read()
-            print(f"DEBUG_OLLAMA_ERROR: e.read() lieferte {len(raw_bytes)} Bytes, Typ = {type(raw_bytes).__name__}")
-            raw_text = raw_bytes.decode("utf-8")
-            print(f"DEBUG_OLLAMA_ERROR: raw_text Typ = {type(raw_text).__name__}, Länge = {len(raw_text)}")
-            print(f"DEBUG_OLLAMA_ERROR: raw_text repr (erste 300 Zeichen) = {raw_text[:300]!r}")
-        except Exception as read_exc:
-            print(f"DEBUG_OLLAMA_ERROR: read()/decode() warf Exception: {type(read_exc).__name__}: {read_exc}")
-            raw_text = None
-        if raw_text:
-            pattern_check_1 = "exceed_context_size_error" in raw_text
-            pattern_check_2 = "exceeds the available context size" in raw_text
-            print(f"DEBUG_OLLAMA_ERROR: 'exceed_context_size_error' in raw_text = {pattern_check_1}")
-            print(f"DEBUG_OLLAMA_ERROR: 'exceeds the available context size' in raw_text = {pattern_check_2}")
-            try:
-                body = json.loads(raw_text)
-                print(f"DEBUG_OLLAMA_ERROR: json.loads erfolgreich, body Typ = {type(body).__name__}, body = {body!r}")
-                err = body.get("error")
-                print(f"DEBUG_OLLAMA_ERROR: body.get('error') Typ = {type(err).__name__}, Wert = {err!r}")
-                if isinstance(err, dict):
-                    is_overflow = err.get("type") == "exceed_context_size_error"
-                    detail = err.get("message") or str(err)
-                    print(f"DEBUG_OLLAMA_ERROR: Zweig 'err ist dict' -> is_overflow={is_overflow}")
-                    return is_overflow, f"{e} — {detail}"
-                elif isinstance(err, str) and err.strip().startswith("{"):
-                    print("DEBUG_OLLAMA_ERROR: Zweig 'err ist JSON-String' betreten")
-                    try:
-                        inner = json.loads(err)
-                        if isinstance(inner, dict):
-                            is_overflow = inner.get("type") == "exceed_context_size_error"
-                            detail = inner.get("message") or err
-                            print(f"DEBUG_OLLAMA_ERROR: innerer JSON-Parse erfolgreich -> is_overflow={is_overflow}")
-                            return is_overflow, f"{e} — {detail}"
-                    except Exception as inner_exc:
-                        print(f"DEBUG_OLLAMA_ERROR: innerer JSON-Parse fehlgeschlagen: {inner_exc}")
-                        pass
-            except Exception as json_exc:
-                print(f"DEBUG_OLLAMA_ERROR: äußerer json.loads(raw_text) fehlgeschlagen: {type(json_exc).__name__}: {json_exc}")
-            # Egal was oben schiefging — Text-Muster-Prüfung IMMER auf dem
-            # tatsächlich gelesenen Rohtext, nicht auf str(e).
-            is_overflow = "exceed_context_size_error" in raw_text or "exceeds the available context size" in raw_text
-            print(f"DEBUG_OLLAMA_ERROR: Fallback-Zweig (Textmuster auf raw_text) -> is_overflow={is_overflow}")
-            return is_overflow, f"{e} — {raw_text}"
-    print(f"DEBUG_OLLAMA_ERROR: Letzter Fallback (kein HTTPError oder raw_text leer) -> is_overflow=False, str(e)={str(e)!r}")
-    return False, str(e)
+            parsed = json.loads(current)
+        except Exception:
+            break
+        if isinstance(parsed, dict) and "message" in parsed and isinstance(parsed.get("message"), str):
+            detail = parsed["message"]
+            break
+        err = parsed.get("error") if isinstance(parsed, dict) else None
+        if isinstance(err, dict):
+            if isinstance(err.get("message"), str):
+                detail = err["message"]
+            else:
+                detail = str(err)
+            break
+        elif isinstance(err, str) and err.strip().startswith("{"):
+            current = err  # eine Schicht tiefer, nächste Runde
+            continue
+        else:
+            break
+
+    return is_overflow, f"{e} — {detail}"
+
+
 
 
 def _describe_ollama_error(e):
