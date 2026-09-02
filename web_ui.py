@@ -1339,7 +1339,7 @@ def save_pipeline_settings():
         "OLLAMA_URL": request.form.get('OLLAMA_URL', 'http://localhost:11434').strip() or 'http://localhost:11434',
         "OLLAMA_VISION_MODEL": request.form.get('OLLAMA_VISION_MODEL', 'llava:latest').strip() or 'llava:latest',
         "AI_ANALYZE_MAX_FRAMES": _clamp(ai_max_frames, 1, 64),
-        "OLLAMA_CONTEXT_SIZE": _clamp(ollama_context_size, 0, 131072),
+        "OLLAMA_CONTEXT_SIZE": _clamp(ollama_context_size, 0, 262144),
         "SHOW_DETECTION_BOXES": request.form.get('SHOW_DETECTION_BOXES') == 'on',
         "AUDIO_TRIGGER_ENABLED": request.form.get('AUDIO_TRIGGER_ENABLED') == 'on',
         "AUDIO_TRIGGER_CATEGORIES": audio_categories,

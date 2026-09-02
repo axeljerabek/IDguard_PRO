@@ -265,12 +265,13 @@
                             </div>
                             <div class="settings-group">
                                 <label>Vision Model</label>
-                                {% set known_models = ['llava:latest', 'huihui_ai/qwen3-vl-abliterated:8b', 'orcarouter/Qwen3.8-27B-Uncensored'] %}
+                                {% set known_models = ['llava:latest', 'huihui_ai/qwen3-vl-abliterated:8b', 'orcarouter/Qwen3.8-27B-Uncensored', 'orcarouter/Qwen3.8-27B-Uncensored:iq4_xs'] %}
                                 {% set current_model = settings.get('OLLAMA_VISION_MODEL', 'huihui_ai/qwen3-vl-abliterated:8b') %}
                                 <select id="ollamaModelPreset" {% if current_model in known_models %}name="OLLAMA_VISION_MODEL"{% endif %} onchange="onModelPresetChange()">
                                     <option value="huihui_ai/qwen3-vl-abliterated:8b" {% if current_model == 'huihui_ai/qwen3-vl-abliterated:8b' %}selected{% endif %}>huihui_ai/qwen3-vl-abliterated:8b — uncensored, vision confirmed ✅</option>
                                     <option value="llava:latest" {% if current_model == 'llava:latest' %}selected{% endif %}>llava:latest — very reliable, tested ✅</option>
-                                    <option value="orcarouter/Qwen3.8-27B-Uncensored" {% if current_model == 'orcarouter/Qwen3.8-27B-Uncensored' %}selected{% endif %}>orcarouter/Qwen3.8-27B-Uncensored — uncensored, vision confirmed</option>
+                                    <option value="orcarouter/Qwen3.8-27B-Uncensored:iq4_xs" {% if current_model == 'orcarouter/Qwen3.8-27B-Uncensored:iq4_xs' %}selected{% endif %}>orcarouter/Qwen3.8-27B-Uncensored:iq4_xs — 16GB, uncensored, vision untouched</option>
+                                    <option value="orcarouter/Qwen3.8-27B-Uncensored" {% if current_model == 'orcarouter/Qwen3.8-27B-Uncensored' %}selected{% endif %}>orcarouter/Qwen3.8-27B-Uncensored:latest — 18GB (=q4_K_M), uncensored, vision untouched</option>
                                     <option value="__custom__" {% if current_model not in known_models %}selected{% endif %}>Custom model…</option>
                                 </select>
                                 <input type="text" id="ollamaModelCustom" {% if current_model not in known_models %}name="OLLAMA_VISION_MODEL"{% endif %} value="{{ current_model }}" placeholder="e.g. llava:13b" style="margin-top:6px; {% if current_model in known_models %}display:none;{% endif %}">
@@ -281,8 +282,8 @@
                             </div>
                             <div class="settings-group">
                                 <label>Ollama context size (num_ctx)</label>
-                                <input type="number" name="OLLAMA_CONTEXT_SIZE" min="0" max="131072" step="512" value="{{ settings.get('OLLAMA_CONTEXT_SIZE', 0) }}" placeholder="0 = Ollama's own default">
-                                <p class="settings-hint" style="margin-top:4px;">0 leaves Ollama's own default untouched. Set this if you get "exceeds the available context size" errors — but a larger value needs more GPU memory, so raise it carefully on limited-VRAM hardware (e.g. a small NUC).</p>
+                                <input type="number" name="OLLAMA_CONTEXT_SIZE" min="0" max="262144" step="512" value="{{ settings.get('OLLAMA_CONTEXT_SIZE', 0) }}" placeholder="0 = Ollama's own default">
+                                <p class="settings-hint" style="margin-top:4px;">0 leaves Ollama's own default untouched. Each analyzed frame costs roughly 1000-1100 tokens (varies by model/resolution) — so at "Max. frames per analysis" = 64, a full batch needs around 65,000-70,000 tokens total. If you see "exceeds the available context size" errors, raise this above that number, e.g. 98304 gives comfortable headroom for 64 frames. Rule of thumb: (max frames × ~1100) + a few thousand for the prompt. A larger value needs more GPU memory for the KV cache, so raise it carefully on limited-VRAM hardware (e.g. a small NUC) — start low and increase only if you still hit the error.</p>
                             </div>
                         </div>
                     </div>
