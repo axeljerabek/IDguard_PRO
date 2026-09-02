@@ -1057,9 +1057,17 @@ def api_live_start(camera_name):
     try:
         log_f = open(log_path, 'w')
         proc = subprocess.Popen([
-            'ffmpeg', '-i', url,
+            'ffmpeg',
+            # Axels nginx-rtmp-Config hat "hls_continuous on" explizit, um
+            # Zeitstempel-Sprünge in der Quelle zu ignorieren — derselbe
+            # Robustheits-Gedanke hier: genpts rekonstruiert fehlende/kaputte
+            # PTS-Werte, discardcorrupt verwirft beschädigte Frames statt
+            # den ganzen Stream daran hängenzulassen.
+            '-fflags', '+genpts+discardcorrupt',
+            '-i', url,
             '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency',
             '-c:a', 'aac', '-ac', '2',
+            '-avoid_negative_ts', 'make_zero',
             '-f', 'hls', '-hls_time', '2', '-hls_list_size', '5',
             '-hls_flags', 'delete_segments+omit_endlist',
             m3u8_path
