@@ -1053,7 +1053,9 @@ def api_live_start(camera_name):
             pass
 
     m3u8_path = os.path.join(cam_dir, 'stream.m3u8')
+    log_path = os.path.join(cam_dir, 'ffmpeg.log')
     try:
+        log_f = open(log_path, 'w')
         proc = subprocess.Popen([
             'ffmpeg', '-i', url,
             '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency',
@@ -1061,11 +1063,33 @@ def api_live_start(camera_name):
             '-f', 'hls', '-hls_time', '2', '-hls_list_size', '5',
             '-hls_flags', 'delete_segments+omit_endlist',
             m3u8_path
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        ], stdout=log_f, stderr=subprocess.STDOUT)
     except Exception as e:
         return json.dumps({'ok': False, 'error': str(e)})
     _live_view_procs[camera_name] = proc
-    return json.dumps({'ok': True, 'url': f'/live_hls/{camera_name}/stream.m3u8'})
+
+    # Ohne dieses Warten meldete die Route sofort "ok: true", bevor ffmpeg
+    # überhaupt Zeit hatte, die erste Playlist-Datei zu schreiben — der
+    # Browser bekam dann eine URL, hinter der (noch) nichts lag, und
+    # scheiterte still. Kurzes Polling (max. 8s) auf das tatsächliche
+    # Erscheinen der Datei ODER einen frühen Absturz des ffmpeg-Prozesses,
+    # damit die Antwort den echten Zustand widerspiegelt.
+    deadline = time.time() + 8
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            try:
+                with open(log_path) as f:
+                    tail = f.read()[-500:]
+            except Exception:
+                tail = ''
+            return json.dumps({'ok': False, 'error': f'ffmpeg exited immediately: {tail}' if tail else 'ffmpeg exited immediately.'})
+        if os.path.exists(m3u8_path):
+            return json.dumps({'ok': True, 'url': f'/live_hls/{camera_name}/stream.m3u8'})
+        time.sleep(0.2)
+
+    _stop_proc(proc)
+    _live_view_procs.pop(camera_name, None)
+    return json.dumps({'ok': False, 'error': 'Timed out waiting for the stream to start — camera may be unreachable.'})
 
 @app.route('/api/live_stop/<camera_name>', methods=['POST'])
 @requires_auth
@@ -1092,6 +1116,16 @@ def serve_live_hls(camera_name, filename):
 @requires_auth
 def api_manual_record_start(camera_name):
     _verify_csrf()
+    # Nur eine manuelle Aufnahme gleichzeitig — nicht nur UI-seitig verhindert
+    # (ein Button, der ausgegraut wird), sondern auch hier serverseitig
+    # durchgesetzt, damit z.B. zwei offene Browser-Tabs das nicht umgehen
+    # können. Tote Prozesse (bereits von selbst beendet) räumen wir dabei
+    # gleich mit auf, statt fälschlich zu blockieren.
+    for rid, entry in list(_manual_record_procs.items()):
+        if entry['proc'].poll() is None:
+            return json.dumps({'ok': False, 'error': f"Already recording {entry['camera']} — stop that first."})
+        _manual_record_procs.pop(rid, None)
+
     url = _get_stream_url(camera_name)
     if not url:
         return json.dumps({'ok': False, 'error': 'Unknown camera or no URL configured.'})

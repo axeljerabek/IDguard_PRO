@@ -364,48 +364,16 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 .thumb-rec-badge .rec-dot { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
 
-/* Live-Ansicht: HLS direkt eingebettet auf der Kamera-Kachel, statt in einer
-   separaten Lightbox — die Kachel selbst wird beim Live-Schalten größer
-   (spannt beide Grid-Spalten), damit das Bild wirklich groß genug ist. */
-.stream-container.stream-live-expanded {
-    grid-column: span 2;
-}
-@media (max-width: 640px) {
-    .stream-container.stream-live-expanded { grid-column: span 1; }
-}
-.stream-live-video {
+/* Live-Ansicht öffnet eine separate Lightbox (siehe #live-lightbox) — bewusst
+   kein Einbetten direkt auf der Kachel, das verschob sonst das gesamte
+   Grid-Layout der Grundseite. Hier nur der schlichte Button auf der Kachel. */
+.stream-live-toggle {
     width: 100%;
-    aspect-ratio: 16/9;
-    object-fit: contain;
-    border-radius: var(--radius-sm);
-    background: #000;
-    display: block;
-}
-.stream-live-status {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(0, 0, 0, 0.55);
-    color: #fff;
-    font-size: 0.85rem;
-    font-weight: 600;
-    border-radius: var(--radius-sm);
-    text-align: center;
-    padding: 12px;
-}
-.stream-live-controls {
-    display: flex;
-    gap: 8px;
-    margin-top: 8px;
-}
-.stream-live-toggle, .stream-live-record {
-    flex: 1;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 6px;
+    margin-top: 8px;
     padding: 7px;
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
@@ -416,14 +384,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
     cursor: pointer;
 }
 .stream-live-toggle:hover { border-color: var(--primary); color: var(--primary); }
-.stream-live-toggle.active { border-color: var(--primary); color: var(--primary); background: rgba(232, 163, 61, 0.12); }
-.stream-live-record:hover { border-color: var(--danger); color: var(--danger); }
-.stream-live-record.recording {
-    border-color: var(--danger);
-    color: var(--danger);
-    background: rgba(242, 84, 91, 0.14);
-    animation: pulse-dot 1.4s ease-in-out infinite;
-}
 
 /* Toggle Switch */
 .switch { position: relative; display: inline-block; width: 46px; height: 25px; flex-shrink: 0; }
