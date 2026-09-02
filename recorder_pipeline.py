@@ -484,13 +484,17 @@ class CameraAgent(multiprocessing.Process):
         os.makedirs(FRAMES_DIR, exist_ok=True)
         shared_frame_next_time = 0
         shared_frame_interval = 1.0
-        shared_frame_last_check = 0
         show_boxes_live = True
 
-        def write_shared_frame(img_bgr, boxes=None, names=None):
-            nonlocal shared_frame_next_time, shared_frame_interval, shared_frame_last_check, show_boxes_live
-            now2 = time.time()
-            if now2 - shared_frame_last_check > 5.0:
+        def _shared_frame_settings_watcher():
+            """Liest die Settings-Datei alle 5s in einem eigenen Thread —
+            der Hauptloop selbst macht dafür KEINE Datei-I/O mehr, auch
+            keine seltene. Einfache Zuweisungen an nonlocal-Variablen sind
+            unter der GIL atomar genug für diesen Fall (kein mehrstufiger
+            Zustand, der zwischen Lese- und Schreibzugriff inkonsistent
+            werden könnte)."""
+            nonlocal shared_frame_interval, show_boxes_live
+            while not _detector_stop_event.is_set():
                 try:
                     with open(SETTINGS_F) as f:
                         d = json.load(f)
@@ -498,8 +502,14 @@ class CameraAgent(multiprocessing.Process):
                     shared_frame_interval = 1.0 / fps if fps > 0 else 1.0
                     show_boxes_live = bool(d.get('SHOW_DETECTION_BOXES', True))
                 except Exception:
-                    shared_frame_interval = 1.0
-                shared_frame_last_check = now2
+                    pass
+                _detector_stop_event.wait(timeout=5.0)
+
+        threading.Thread(target=_shared_frame_settings_watcher, daemon=True).start()
+
+        def write_shared_frame(img_bgr, boxes=None, names=None):
+            nonlocal shared_frame_next_time
+            now2 = time.time()
             if now2 < shared_frame_next_time:
                 return
             try:
