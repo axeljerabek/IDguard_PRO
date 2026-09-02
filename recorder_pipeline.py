@@ -110,9 +110,9 @@ def _draw_boxes_with_labels(cv2, img, boxes, names):
     die Basiswerte kalibriert sind), damit nach dem Resize immer dieselbe
     lesbare Endgröße rauskommt, unabhängig von der Kamera-Auflösung."""
     scale = max(1.0, img.shape[1] / 640.0)
-    font_scale = 0.8 * scale
-    thickness = max(1, round(2 * scale))
-    box_thickness = max(1, round(3 * scale))
+    font_scale = 0.55 * scale
+    thickness = max(1, round(1.5 * scale))
+    box_thickness = max(1, round(2 * scale))
     for b in boxes:
         x1, y1, x2, y2 = map(int, b[:4])
         conf = float(b[4]) if len(b) > 4 else None

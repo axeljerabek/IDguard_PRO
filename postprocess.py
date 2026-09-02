@@ -89,6 +89,21 @@ if __name__ == "__main__":
     lock_fd = acquire_gpu_lock()
     print(f"🔒 GPU-Lock erhalten, starte Nachbearbeitung für {video_basename}.")
     try:
+        # Derselbe Check wie oben, NOCHMAL — das GPU-Lock kann je nach
+        # Warteschlange mehrere Minuten dauern (mehrere Videos hintereinander
+        # in Bearbeitung), und genau in dieser Zeit kann das Video gelöscht
+        # worden sein. Ohne diesen zweiten Check würde hier trotzdem
+        # analysiert und am Ende .ai.json/.xmp für ein nicht mehr
+        # existierendes Video geschrieben — verwaiste Sidecar-Dateien, die
+        # beim Löschen nie mit aufgeräumt wurden, weil sie zum Löschzeitpunkt
+        # noch gar nicht existierten.
+        if not os.path.exists(os.path.join(base_dir, video_filename)):
+            archive_dir = os.path.join(base_dir, 'archive') if not base_dir.endswith('archive') else base_dir
+            if os.path.exists(os.path.join(archive_dir, video_filename)):
+                base_dir = archive_dir
+            else:
+                print(f"⚠️ {video_filename} wurde während der GPU-Wartezeit gelöscht — Nachbearbeitung übersprungen.")
+                sys.exit(0)
         ai_analyze.analyze(video_basename, base_dir)
         transcribe_audio.transcribe(video_basename, base_dir)
         face_recognize.recognize(video_basename, base_dir)
