@@ -1483,7 +1483,25 @@ input:checked + .slider:before { transform: translateX(21px); background: var(--
 .lightbox-actions .lightbox-btn-archive:hover { border-color: var(--primary); color: var(--primary); }
 .lightbox-actions .lightbox-btn-export:hover { border-color: var(--success); color: var(--success); }
 .lightbox-actions .lightbox-btn-delete:hover { border-color: var(--danger); color: var(--danger); }
-.live-lightbox-actions { display: flex; margin-top: 4px; }
+.live-lightbox-actions { display: flex; gap: 10px; margin-top: 4px; }
+#liveHlsBtn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--card-bg-inset);
+    color: var(--text);
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+#liveHlsBtn i { color: var(--primary); }
+#liveHlsBtn:hover { border-color: var(--primary); }
+#liveHlsBtn:disabled { opacity: 0.6; cursor: default; }
 #liveRecordBtn {
     flex: 1;
     display: flex;

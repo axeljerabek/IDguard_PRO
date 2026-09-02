@@ -776,9 +776,11 @@
         <div class="lightbox-content" onclick="event.stopPropagation()">
             <span class="close-btn" onclick="closeLiveView(event)"><i class="fa-solid fa-xmark"></i></span>
             <h3 id="liveLightboxTitle" style="margin: 0 0 12px 0; font-size: 1.05rem; color: var(--text); padding-right: 30px;"></h3>
-            <video id="liveVideoPlayer" controls autoplay muted playsinline style="width:100%; border-radius: var(--radius-md); background:#000;"></video>
+            <img id="livePreviewImage" style="width:100%; border-radius: var(--radius-md); background:#000; display:block;" alt="">
+            <video id="liveVideoPlayer" controls autoplay muted playsinline style="width:100%; border-radius: var(--radius-md); background:#000; display:none;"></video>
             <p id="liveLightboxStatus" class="settings-hint" style="margin: 10px 0;"></p>
             <div class="live-lightbox-actions">
+                <button type="button" id="liveHlsBtn" onclick="startHlsStream()"><i class="fa-solid fa-satellite-dish"></i> Start Live Stream (HLS)</button>
                 <button type="button" id="liveRecordBtn" onclick="toggleManualRecord()"><i class="fa-solid fa-circle"></i> Start Recording</button>
             </div>
         </div>
@@ -1060,18 +1062,52 @@
         let hlsInstance = null;
         let currentLiveCamera = null;
         let currentManualRecordingId = null;
+        let livePreviewInterval = null;
+        let hlsStarted = false;
 
         function openLiveView(streamName) {
             currentLiveCamera = streamName;
+            hlsStarted = false;
             document.getElementById('liveLightboxTitle').textContent = streamName + ' — Live';
-            document.getElementById('liveLightboxStatus').textContent = 'Connecting…';
+            document.getElementById('liveLightboxStatus').textContent = '';
+
+            const img = document.getElementById('livePreviewImage');
+            const video = document.getElementById('liveVideoPlayer');
+            const hlsBtn = document.getElementById('liveHlsBtn');
+            img.src = '/thumbnail/' + streamName + '?t=' + Date.now();
+            img.style.display = 'block';
+            video.style.display = 'none';
+            hlsBtn.style.display = 'inline-flex';
+            hlsBtn.disabled = false;
+            hlsBtn.innerHTML = '<i class="fa-solid fa-satellite-dish"></i> Start Live Stream (HLS)';
+
             liveLightbox.classList.add('active');
+
+            // Die 1fps-Vorschau ist nur ein periodisch aktualisiertes JPEG (kein
+            // ffmpeg, kein Verbindungsrisiko) — läuft eigenständig weiter, bis
+            // HLS explizit per Button gestartet wird. Danach übernimmt das Video.
+            if (livePreviewInterval) clearInterval(livePreviewInterval);
+            livePreviewInterval = setInterval(() => {
+                if (!hlsStarted && currentLiveCamera === streamName) {
+                    img.src = '/thumbnail/' + streamName + '?t=' + Date.now();
+                }
+            }, THUMBNAIL_INTERVAL_MS);
+        }
+
+        function startHlsStream() {
+            if (!currentLiveCamera || hlsStarted) return;
+            const streamName = currentLiveCamera;
+            const btn = document.getElementById('liveHlsBtn');
+            btn.disabled = true;
+            document.getElementById('liveLightboxStatus').textContent = 'Connecting…';
 
             _postForm('/api/live_start/' + streamName, {}).then(res => {
                 if (!res.ok || currentLiveCamera !== streamName) {
+                    btn.disabled = false;
                     if (!res.ok) document.getElementById('liveLightboxStatus').textContent = '⚠️ ' + (res.error || 'Could not start live view.');
                     return;
                 }
+                const img = document.getElementById('livePreviewImage');
                 const video = document.getElementById('liveVideoPlayer');
                 if (window.Hls && Hls.isSupported()) {
                     hlsInstance = new Hls({ lowLatencyMode: true, liveSyncDurationCount: 2 });
@@ -1087,24 +1123,33 @@
                     video.play().catch(() => {});
                 } else {
                     document.getElementById('liveLightboxStatus').textContent = '⚠️ This browser cannot play HLS.';
+                    btn.disabled = false;
                     return;
                 }
+                hlsStarted = true;
+                img.style.display = 'none';
+                video.style.display = 'block';
+                btn.style.display = 'none';
                 document.getElementById('liveLightboxStatus').textContent = '';
             });
         }
 
         function closeLiveView(e) {
             if (currentManualRecordingId) stopManualRecord();
+            if (livePreviewInterval) { clearInterval(livePreviewInterval); livePreviewInterval = null; }
             if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
             const video = document.getElementById('liveVideoPlayer');
             video.pause();
             video.removeAttribute('src');
             video.load();
             liveLightbox.classList.remove('active');
-            if (currentLiveCamera) {
+            // /api/live_stop nur aufrufen, wenn HLS überhaupt gestartet wurde --
+            // sonst gibt's serverseitig gar nichts zu stoppen.
+            if (currentLiveCamera && hlsStarted) {
                 _postForm('/api/live_stop/' + currentLiveCamera, {});
-                currentLiveCamera = null;
             }
+            currentLiveCamera = null;
+            hlsStarted = false;
         }
 
         function toggleManualRecord() {
