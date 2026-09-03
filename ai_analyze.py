@@ -409,15 +409,26 @@ def _analyze_inner(video_basename, base_dir):
             top_topic = detected_topics[0]["topic"]
             top_topic_score = detected_topics[0]["score"]
 
-    # 1) Eigene JSON-Metadatei — vom Dashboard gelesen
+    # 1) Eigene JSON-Metadatei — vom Dashboard gelesen. Erst lesen & mergen,
+    # NIE blind überschreiben — sonst geht ein evtl. schon vorhandenes
+    # Transkript (transcribe_audio.py schreibt in dieselbe Datei) verloren,
+    # z.B. wenn ai_analyze.py isoliert nochmal läuft (etwa über einen
+    # gezielten "nur Beschreibung neu"-Befehl, der bewusst NICHT auch
+    # transcribe_audio.py mit aufruft). transcribe_audio.py macht das schon
+    # länger korrekt so — hier hatte genau dasselbe Muster gefehlt.
     meta_path = os.path.join(base_dir, f"{video_basename}.ai.json")
+    meta = {}
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path) as f:
+                meta = json.load(f)
+        except Exception:
+            meta = {}
     try:
-        meta = {
-            "description": description,
-            "model": OLLAMA_MODEL,
-            "frame_count": len(images_b64),
-            "ts": time.time()
-        }
+        meta["description"] = description
+        meta["model"] = OLLAMA_MODEL
+        meta["frame_count"] = len(images_b64)
+        meta["ts"] = time.time()
         if topics_result:
             meta["topics"] = topics_result
         if detected_topics:
