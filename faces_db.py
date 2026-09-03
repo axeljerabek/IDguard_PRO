@@ -421,21 +421,53 @@ def list_clusters():
 
 
 def list_people():
-    """Alle benannten Personen mit Gesichts-Anzahl + Titelbild-Pfad."""
+    """Alle benannten Personen mit Gesichts-Anzahl + Titelbild-Pfad.
+
+    Prüft, ob die Titelbild-Datei tatsächlich noch existiert — z.B. wenn das
+    zugehörige Video (und damit sein .thumbs-Ordner) längst gelöscht wurde,
+    aber die Personen-Zuordnung selbst noch besteht. Fällt in dem Fall
+    automatisch auf das nächste noch existierende Gesicht derselben Person
+    zurück, statt ein kaputtes Bild im Dashboard anzuzeigen — und aktualisiert
+    representative_face_id gleich dauerhaft in der DB (selbstheilend, kein
+    wiederholtes Nachprüfen bei jedem künftigen Aufruf nötig)."""
     try:
         conn = _connect()
         rows = conn.execute("""
-            SELECT p.id, p.name, p.representative_face_id, f.crop_path,
+            SELECT p.id, p.name, p.representative_face_id, f.crop_path, f.base_dir,
                    (SELECT COUNT(*) FROM faces WHERE person_id = p.id AND rejected = 0) as face_count
             FROM people p
             LEFT JOIN faces f ON f.id = p.representative_face_id
             ORDER BY p.name
         """).fetchall()
+
+        result = []
+        for r in rows:
+            person_id, name, rep_face_id, crop_path, base_dir, face_count = r
+            full_path = os.path.join(base_dir, crop_path) if (base_dir and crop_path) else None
+            if full_path and not os.path.exists(full_path):
+                # Titelbild-Datei fehlt -- nächstes noch existierendes Gesicht
+                # derselben Person suchen.
+                candidates = conn.execute(
+                    "SELECT id, crop_path, base_dir FROM faces WHERE person_id = ? AND rejected = 0",
+                    (person_id,)
+                ).fetchall()
+                rep_face_id, crop_path, base_dir = None, None, None
+                for cand_id, cand_crop, cand_base in candidates:
+                    cand_full = os.path.join(cand_base, cand_crop) if (cand_base and cand_crop) else None
+                    if cand_full and os.path.exists(cand_full):
+                        rep_face_id, crop_path, base_dir = cand_id, cand_crop, cand_base
+                        conn.execute(
+                            "UPDATE people SET representative_face_id = ? WHERE id = ?",
+                            (cand_id, person_id)
+                        )
+                        break
+            result.append({
+                "id": person_id, "name": name, "representative_face_id": rep_face_id,
+                "crop_path": crop_path, "face_count": face_count
+            })
+        conn.commit()
         conn.close()
-        return [
-            {"id": r[0], "name": r[1], "representative_face_id": r[2], "crop_path": r[3], "face_count": r[4]}
-            for r in rows
-        ]
+        return result
     except Exception as e:
         print(f"⚠️ Konnte Personen-Liste nicht laden: {e}")
         return []
