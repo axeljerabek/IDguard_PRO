@@ -1455,6 +1455,18 @@
         // da immer nur eine Lightbox gleichzeitig offen sein kann.
         let selectedFaces = new Set();
 
+        // Baut aus dem Aufnahme-Dateinamen (z.B. "Entrance_EVENT_20260903_104744.mp4")
+        // eine kurze, lesbare Kamera + Datum/Zeit-Beschriftung fürs Gesichts-
+        // Thumbnail -- hilft zu entscheiden, ob ein unklares Gesicht wirklich zur
+        // Person gehört, ohne extra einen DB-Join/API-Roundtrip zu brauchen (die
+        // Info steckt ja schon im Dateinamen selbst).
+        function formatFaceMeta(f) {
+            const m = (f.filename || '').match(/^(.+?)_EVENT_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})\.mp4$/);
+            if (!m) return escapeHtml(f.filename || '');
+            const [, camera, yyyy, mm, dd, hh, min] = m;
+            return `${escapeHtml(camera)} · ${yyyy}-${mm}-${dd} ${hh}:${min}`;
+        }
+
         function openPersonLightbox(personId) {
             lightboxContext = { type: 'person', id: personId };
             selectedFaces.clear();
@@ -1494,6 +1506,7 @@
                             <img src="/face_crop/${f.id}" class="face-thumb" title="${escapeHtml(f.filename)}" onclick="zoomFace('/face_crop/${f.id}')">
                             <input type="checkbox" class="face-select-checkbox" onclick="toggleFaceSelection(${f.id}, this)" title="Select">
                             <button type="button" class="face-thumb-remove" onclick="unassignFace(${f.id}, ${personId})" title="Remove from this person"><i class="fa-solid fa-xmark"></i></button>
+                            <div class="face-thumb-meta">${formatFaceMeta(f)}</div>
                         </div>
                     `).join('') || '<p class="settings-hint">No faces left for this person.</p>';
                 });
@@ -1515,6 +1528,7 @@
                     <img src="/face_crop/${f.id}" class="face-thumb" title="${escapeHtml(f.filename)}" onclick="zoomFace('/face_crop/${f.id}')">
                     <input type="checkbox" class="face-select-checkbox" onclick="toggleFaceSelection(${f.id}, this)" title="Select">
                     <button type="button" class="face-thumb-remove" onclick="rejectFace(${f.id}, '${cid}')" title="Not a face"><i class="fa-solid fa-xmark"></i></button>
+                    <div class="face-thumb-meta">${formatFaceMeta(f)}</div>
                 </div>
             `).join('');
             body.innerHTML = `
