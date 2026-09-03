@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>IDguard PRO — System-Architektur</title>
+<title>IDguard PRO — System Architecture</title>
 <style>
   :root {
     --bg: #10131a;
@@ -147,29 +147,29 @@
 <div class="layout">
   <nav class="toc">
     <div class="brand">IDGUARD PRO</div>
-    <a href="#overview">1. Gesamtüberblick</a>
-    <a href="#ingest">2. Kamera-Prozess</a>
-    <a href="#recording">3. Aufnahme (Packet-Copy)</a>
-    <a href="#filmstrip">4. Filmstrip &amp; Vorschau</a>
-    <a href="#postprocess">5. Post-Processing / KI</a>
-    <a href="#storage">6. Datenhaltung</a>
-    <a href="#webui">7. Web-UI (Flask)</a>
-    <a href="#orchestration">8. Prozess-Orchestrierung</a>
+    <a href="#overview">1. Overview</a>
+    <a href="#ingest">2. Camera process</a>
+    <a href="#recording">3. Recording (packet copy)</a>
+    <a href="#filmstrip">4. Filmstrip &amp; preview</a>
+    <a href="#postprocess">5. Post-processing / AI</a>
+    <a href="#storage">6. Data storage</a>
+    <a href="#webui">7. Web UI (Flask)</a>
+    <a href="#orchestration">8. Process orchestration</a>
   </nav>
   <main>
     <header class="hero">
-      <h1>IDguard PRO — System-Architektur</h1>
-      <p>Vollständiger Datenfluss von der RTMP-Kamera bis zur durchsuchbaren, KI-analysierten Aufnahme im Dashboard. Acht Abschnitte, jeder mit eigenem Detail-Diagramm.</p>
+      <h1>IDguard PRO — System Architecture</h1>
+      <p>Complete data flow from the RTMP camera to the searchable, AI-analyzed recording in the dashboard. Eight sections, each with its own detail diagram.</p>
     </header>
 
     <!-- 1. OVERVIEW -->
     <section id="overview">
-      <h2>1. Gesamtüberblick <span class="tag">high-level</span></h2>
-      <p class="lede">Der komplette Weg eines Ereignisses: von der Kamera über Erkennung und Aufnahme bis zur KI-Analyse und Anzeige im Dashboard.</p>
+      <h2>1. Overview <span class="tag">high-level</span></h2>
+      <p class="lede">The complete journey of an event: from the camera through detection and recording to AI analysis and display in the dashboard.</p>
       <div class="panel">
         <svg width="100%" viewBox="0 0 1280 420" role="img">
-          <title>Gesamtüberblick der IDguard-PRO-Pipeline</title>
-          <desc>RTMP-Kameras fließen in CameraAgent-Prozesse, die YOLO-Erkennung und Audio-Trigger nutzen, um Aufnahmen per Packet-Copy zu schreiben. Fertige Aufnahmen laufen durch eine KI-Post-Processing-Pipeline (Vision-Modell, Whisper, Gesichtserkennung) und landen durchsuchbar im Web-Dashboard.</desc>
+          <title>Overview of the IDguard PRO pipeline</title>
+          <desc>RTMP cameras feed into CameraAgent processes that use YOLO detection and audio triggers to write recordings via packet copy. Finished recordings run through an AI post-processing pipeline (vision model, Whisper, face recognition) and end up searchable in the web dashboard.</desc>
           <defs>
             <marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -177,7 +177,7 @@
           </defs>
           <!-- Row 1: cameras -->
           <g font-family="monospace" font-size="11" fill="#6b7180">
-            <text x="40" y="30">RTMP-Quellen</text>
+            <text x="40" y="30">RTMP sources</text>
           </g>
           <g fill="#1d222d" stroke="#2a3040" stroke-width="1">
             <rect x="40" y="42" width="120" height="34" rx="6"/>
@@ -187,22 +187,22 @@
           </g>
           <g font-family="sans-serif" font-size="12.5" fill="#e7e6e1" text-anchor="middle">
             <text x="100" y="63">Entrance</text>
-            <text x="230" y="63">Bedroom</text>
-            <text x="360" y="63">Living</text>
-            <text x="490" y="63">Dining</text>
+            <text x="230" y="63">Backdoor</text>
+            <text x="360" y="63">Garden</text>
+            <text x="490" y="63">Carport</text>
           </g>
           <line x1="265" y1="76" x2="265" y2="110" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar)"/>
 
           <!-- Row 2: CameraAgent -->
           <rect x="80" y="112" width="370" height="70" rx="10" fill="#1e3d38" stroke="#4fd1b5" stroke-width="1"/>
-          <text x="265" y="140" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="500" fill="#dff5ee">CameraAgent-Prozess (×4)</text>
-          <text x="265" y="160" text-anchor="middle" font-family="monospace" font-size="11" fill="#9fd8c8">recorder_pipeline.py — je 1 pro Kamera</text>
+          <text x="265" y="140" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="500" fill="#dff5ee">CameraAgent process (×4)</text>
+          <text x="265" y="160" text-anchor="middle" font-family="monospace" font-size="11" fill="#9fd8c8">recorder_pipeline.py — one per camera</text>
           <line x1="265" y1="182" x2="265" y2="216" stroke="#4fd1b5" stroke-width="1.2" marker-end="url(#ar)"/>
 
           <!-- Row 3: two branches - detection/state machine and recording -->
           <rect x="80" y="218" width="175" height="56" rx="8" fill="#1d222d" stroke="#2a3040"/>
           <text x="167" y="240" text-anchor="middle" font-size="13" font-weight="500" fill="#e7e6e1" font-family="sans-serif">YOLO + Audio (CLAP)</text>
-          <text x="167" y="257" text-anchor="middle" font-size="11" fill="#a8adba" font-family="sans-serif">Erkennung, State-Machine</text>
+          <text x="167" y="257" text-anchor="middle" font-size="11" fill="#a8adba" font-family="sans-serif">Detection, state machine</text>
 
           <rect x="275" y="218" width="175" height="56" rx="8" fill="#1d222d" stroke="#2a3040"/>
           <text x="362" y="240" text-anchor="middle" font-size="13" font-weight="500" fill="#e7e6e1" font-family="sans-serif">Packet-Copy Recording</text>
@@ -221,12 +221,12 @@
 
           <!-- Post-processing -->
           <rect x="562" y="240" width="230" height="184" rx="10" fill="#3d3320" stroke="#e8b04d" stroke-width="1"/>
-          <text x="677" y="266" text-anchor="middle" font-size="14" font-weight="500" fill="#fbe9c9" font-family="sans-serif">Post-Processing (GPU-Lock)</text>
+          <text x="677" y="266" text-anchor="middle" font-size="14" font-weight="500" fill="#fbe9c9" font-family="sans-serif">Post-processing (GPU lock)</text>
           <g font-family="sans-serif" font-size="12" fill="#f0d49c">
-            <text x="590" y="292">→ Vision-KI: Beschreibung + Themen</text>
-            <text x="590" y="316">→ Whisper: Transkription</text>
-            <text x="590" y="340">→ InsightFace: Gesichter</text>
-            <text x="590" y="364">→ DBSCAN: Clustering</text>
+            <text x="590" y="292">→ Vision AI: description + topics</text>
+            <text x="590" y="316">→ Whisper: transcription</text>
+            <text x="590" y="340">→ InsightFace: faces</text>
+            <text x="590" y="364">→ DBSCAN: clustering</text>
             <text x="590" y="396" font-family="monospace" font-size="11" fill="#c9a769">postprocess.py</text>
           </g>
 
@@ -234,7 +234,7 @@
 
           <!-- Storage -->
           <rect x="902" y="278" width="180" height="108" rx="10" fill="#3d2a21" stroke="#e08a6e" stroke-width="1"/>
-          <text x="992" y="304" text-anchor="middle" font-size="14" font-weight="500" fill="#fbe0d2" font-family="sans-serif">Datenhaltung</text>
+          <text x="992" y="304" text-anchor="middle" font-size="14" font-weight="500" fill="#fbe0d2" font-family="sans-serif">Data storage</text>
           <g font-family="monospace" font-size="11" fill="#eec4ac">
             <text x="922" y="326">.ai.json</text>
             <text x="922" y="344">faces.db</text>
@@ -245,11 +245,11 @@
 
           <!-- Web UI -->
           <rect x="1000" y="60" width="220" height="150" rx="10" fill="#2d2740" stroke="#a48cf0" stroke-width="1"/>
-          <text x="1110" y="86" text-anchor="middle" font-size="14" font-weight="500" fill="#e9e2fb" font-family="sans-serif">Web-Dashboard</text>
+          <text x="1110" y="86" text-anchor="middle" font-size="14" font-weight="500" fill="#e9e2fb" font-family="sans-serif">Web dashboard</text>
           <g font-family="sans-serif" font-size="12" fill="#d3c5f5">
-            <text x="1022" y="112">Live-Vorschau</text>
-            <text x="1022" y="134">Aufnahmen + Suche</text>
-            <text x="1022" y="156">Personen / Cluster</text>
+            <text x="1022" y="112">Live preview</text>
+            <text x="1022" y="134">Recordings + search</text>
+            <text x="1022" y="156">People / clusters</text>
             <text x="1022" y="178">Settings</text>
           </g>
           <path d="M1162 332 C1200 332,1200 210,1162 210" fill="none" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar)"/>
@@ -257,9 +257,9 @@
           <line x1="1110" y1="210" x2="1110" y2="235" stroke="#a48cf0" stroke-width="1" opacity="0.4"/>
         </svg>
         <div class="legend">
-          <span><i style="background:#4fd1b5"></i>Kamera-Prozess</span>
-          <span><i style="background:#e8b04d"></i>KI / Post-Processing</span>
-          <span><i style="background:#e08a6e"></i>Datenhaltung</span>
+          <span><i style="background:#4fd1b5"></i>Camera process</span>
+          <span><i style="background:#e8b04d"></i>AI / post-processing</span>
+          <span><i style="background:#e08a6e"></i>Data storage</span>
           <span><i style="background:#a48cf0"></i>Web-UI</span>
         </div>
       </div>
@@ -267,12 +267,12 @@
 
     <!-- 2. INGEST / CAMERA AGENT -->
     <section id="ingest">
-      <h2>2. Kamera-Prozess <span class="tag">recorder_pipeline.py — CameraAgent.run()</span></h2>
-      <p class="lede">Ein eigener Prozess pro Kamera (multiprocessing, spawn-Methode). Verbindungsaufbau, dann eine Endlosschleife, die jedes Paket aus dem RTMP-Stream verarbeitet.</p>
+      <h2>2. Camera process <span class="tag">recorder_pipeline.py — CameraAgent.run()</span></h2>
+      <p class="lede">A dedicated process per camera (multiprocessing, spawn method). Connection setup, then an infinite loop processing every packet from the RTMP stream.</p>
       <div class="panel">
         <svg width="100%" viewBox="0 0 1280 760" role="img">
-          <title>Interner Ablauf eines Kamera-Prozesses</title>
-          <desc>Verbindungsaufbau mit NVDEC-Versuch und Software-Fallback, danach eine Hauptschleife, die jedes demuxte Paket verarbeitet: Video-Pakete werden immer sofort für die Aufnahme eingereiht (unabhängig von der Erkennungs-Drosselung), zusätzlich dekodiert für YOLO-Erkennung, die eine State-Machine (IDLE, RECORDING, POST_ROLL) steuert. Audio-Pakete werden immer eingereiht und zusätzlich für den CLAP-Audio-Trigger dekodiert.</desc>
+          <title>Internal flow of a camera process</title>
+          <desc>Connection setup with an NVDEC attempt and software fallback, followed by a main loop that processes every demuxed packet: video packets are always queued for recording immediately (independent of detection throttling), and additionally decoded for YOLO detection, which drives a state machine (IDLE, RECORDING, POST_ROLL). Audio packets are always queued and additionally decoded for the CLAP audio trigger.</desc>
           <defs>
             <marker id="ar2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -281,14 +281,14 @@
           <g font-family="sans-serif" fill="#e7e6e1">
           <!-- Connection -->
           <rect x="440" y="20" width="240" height="60" rx="8" fill="#1d222d" stroke="#2a3040"/>
-          <text x="560" y="44" text-anchor="middle" font-size="13" font-weight="500">Verbindungsaufbau</text>
-          <text x="560" y="62" text-anchor="middle" font-size="11" fill="#a8adba">NVDEC-Versuch, sonst Software-Decode</text>
+          <text x="560" y="44" text-anchor="middle" font-size="13" font-weight="500">Connection setup</text>
+          <text x="560" y="62" text-anchor="middle" font-size="11" fill="#a8adba">NVDEC attempt, otherwise software decode</text>
           <line x1="560" y1="80" x2="560" y2="110" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar2)"/>
 
           <rect x="410" y="112" width="300" height="46" rx="8" fill="#1e3d38" stroke="#4fd1b5"/>
-          <text x="560" y="140" text-anchor="middle" font-size="13" font-weight="500" fill="#dff5ee">SIGTERM-Handler aktivieren</text>
+          <text x="560" y="140" text-anchor="middle" font-size="13" font-weight="500" fill="#dff5ee">Activate SIGTERM handler</text>
           <line x1="560" y1="158" x2="560" y2="188" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar2)"/>
-          <text x="700" y="150" font-size="10.5" fill="#6b7180" font-family="monospace" text-anchor="start">erst NACH der fragilen Startphase</text>
+          <text x="700" y="150" font-size="10.5" fill="#6b7180" font-family="monospace" text-anchor="start">only AFTER the fragile startup phase</text>
 
           <rect x="380" y="190" width="360" height="46" rx="8" fill="#171b24" stroke="#2a3040" stroke-dasharray="4 3"/>
           <text x="560" y="218" text-anchor="middle" font-size="13" fill="#e7e6e1" font-family="monospace">for packet in container.demux():</text>
@@ -297,80 +297,80 @@
           <!-- Split video/audio -->
           <path d="M560 264 L560 280 L260 280 L260 306" fill="none" stroke="#6b7180" stroke-width="1" marker-end="url(#ar2)"/>
           <path d="M560 264 L560 280 L860 280 L860 306" fill="none" stroke="#6b7180" stroke-width="1" marker-end="url(#ar2)"/>
-          <text x="560" y="256" text-anchor="middle" font-size="11" fill="#a8adba">Pakettyp?</text>
+          <text x="560" y="256" text-anchor="middle" font-size="11" fill="#a8adba">Packet type?</text>
           <text x="260" y="298" text-anchor="middle" font-size="11" fill="#a8adba">video</text>
           <text x="860" y="298" text-anchor="middle" font-size="11" fill="#a8adba">audio</text>
 
           <!-- VIDEO branch -->
           <rect x="80" y="308" width="360" height="56" rx="8" fill="#4fd1b5" fill-opacity="0.15" stroke="#4fd1b5"/>
-          <text x="260" y="330" text-anchor="middle" font-size="12.5" font-weight="500" fill="#dff5ee">Paket sofort einreihen</text>
+          <text x="260" y="330" text-anchor="middle" font-size="12.5" font-weight="500" fill="#dff5ee">Queue packet immediately</text>
           <text x="260" y="348" text-anchor="middle" font-size="10.5" fill="#9fd8c8" font-family="monospace">IDLE → av_buffer · RECORDING/POST_ROLL → queue</text>
-          <text x="450" y="325" font-size="10" fill="#e8b04d" font-family="sans-serif" text-anchor="start">immer — unabhängig</text>
-          <text x="450" y="338" font-size="10" fill="#e8b04d" font-family="sans-serif" text-anchor="start">von jeder Drosselung</text>
-          <text x="450" y="351" font-size="10" fill="#e8b04d" font-family="sans-serif" text-anchor="start">(heutiger Kern-Fix)</text>
+          <text x="450" y="325" font-size="10" fill="#e8b04d" font-family="sans-serif" text-anchor="start">always — independent</text>
+          <text x="450" y="338" font-size="10" fill="#e8b04d" font-family="sans-serif" text-anchor="start">of any throttling</text>
+          <text x="450" y="351" font-size="10" fill="#e8b04d" font-family="sans-serif" text-anchor="start">(today's core fix)</text>
 
           <line x1="260" y1="364" x2="260" y2="392" stroke="#6b7180" stroke-width="1" marker-end="url(#ar2)"/>
           <rect x="80" y="394" width="360" height="46" rx="8" fill="#171b24" stroke="#2a3040" stroke-dasharray="4 3"/>
-          <text x="260" y="422" text-anchor="middle" font-size="12" fill="#e7e6e1" font-family="monospace">Drossel-Check (nur Erkennung)</text>
+          <text x="260" y="422" text-anchor="middle" font-size="12" fill="#e7e6e1" font-family="monospace">Throttle check (detection only)</text>
 
           <line x1="260" y1="440" x2="260" y2="468" stroke="#6b7180" stroke-width="1" marker-end="url(#ar2)"/>
           <rect x="80" y="470" width="170" height="52" rx="8" fill="#1d222d" stroke="#2a3040"/>
-          <text x="165" y="491" text-anchor="middle" font-size="12" font-weight="500">BGR-Decode</text>
-          <text x="165" y="507" text-anchor="middle" font-size="10.5" fill="#a8adba">→ YOLO-Thread</text>
+          <text x="165" y="491" text-anchor="middle" font-size="12" font-weight="500">BGR decode</text>
+          <text x="165" y="507" text-anchor="middle" font-size="10.5" fill="#a8adba">→ YOLO thread</text>
 
           <rect x="270" y="470" width="170" height="52" rx="8" fill="#1d222d" stroke="#2a3040"/>
-          <text x="355" y="491" text-anchor="middle" font-size="12" font-weight="500">Filmstrip-Capture</text>
+          <text x="355" y="491" text-anchor="middle" font-size="12" font-weight="500">Filmstrip capture</text>
           <text x="355" y="507" text-anchor="middle" font-size="10.5" fill="#a8adba">Reservoir Sampling</text>
 
           <line x1="260" y1="522" x2="260" y2="550" stroke="#6b7180" stroke-width="1" marker-end="url(#ar2)"/>
           <rect x="80" y="552" width="360" height="70" rx="8" fill="#e8b04d" fill-opacity="0.13" stroke="#e8b04d"/>
-          <text x="260" y="576" text-anchor="middle" font-size="13" font-weight="500" fill="#fbe9c9">State-Machine</text>
+          <text x="260" y="576" text-anchor="middle" font-size="13" font-weight="500" fill="#fbe9c9">State machine</text>
           <text x="260" y="595" text-anchor="middle" font-size="11" fill="#f0d49c" font-family="monospace">IDLE → RECORDING → POST_ROLL → IDLE</text>
-          <text x="260" y="612" text-anchor="middle" font-size="10.5" fill="#c9a769">Trigger: target_detected (YOLO) oder Audio</text>
+          <text x="260" y="612" text-anchor="middle" font-size="10.5" fill="#c9a769">Trigger: target_detected (YOLO) or audio</text>
 
           <!-- AUDIO branch -->
           <rect x="680" y="308" width="360" height="56" rx="8" fill="#4fd1b5" fill-opacity="0.15" stroke="#4fd1b5"/>
-          <text x="860" y="330" text-anchor="middle" font-size="12.5" font-weight="500" fill="#dff5ee">Paket sofort einreihen</text>
-          <text x="860" y="348" text-anchor="middle" font-size="10.5" fill="#9fd8c8" font-family="monospace">keine Drosselung — nie betroffen gewesen</text>
+          <text x="860" y="330" text-anchor="middle" font-size="12.5" font-weight="500" fill="#dff5ee">Queue packet immediately</text>
+          <text x="860" y="348" text-anchor="middle" font-size="10.5" fill="#9fd8c8" font-family="monospace">no throttling — never affected</text>
 
           <line x1="860" y1="364" x2="860" y2="392" stroke="#6b7180" stroke-width="1" marker-end="url(#ar2)"/>
           <rect x="770" y="394" width="180" height="52" rx="8" fill="#1d222d" stroke="#2a3040"/>
-          <text x="860" y="415" text-anchor="middle" font-size="12" font-weight="500">PCM-Decode</text>
-          <text x="860" y="431" text-anchor="middle" font-size="10.5" fill="#a8adba">→ CLAP-Audio-Trigger</text>
+          <text x="860" y="415" text-anchor="middle" font-size="12" font-weight="500">PCM decode</text>
+          <text x="860" y="431" text-anchor="middle" font-size="10.5" fill="#a8adba">→ CLAP audio trigger</text>
 
           <line x1="860" y1="446" x2="860" y2="474" stroke="#6b7180" stroke-width="1" marker-end="url(#ar2)"/>
           <rect x="700" y="476" width="320" height="52" rx="8" fill="#1d222d" stroke="#2a3040"/>
-          <text x="860" y="497" text-anchor="middle" font-size="12" font-weight="500">Kategorien-Klassifikation</text>
-          <text x="860" y="513" text-anchor="middle" font-size="10.5" fill="#a8adba" font-family="monospace">z.B. "curtain closing", "glass breaking"</text>
+          <text x="860" y="497" text-anchor="middle" font-size="12" font-weight="500">Category classification</text>
+          <text x="860" y="513" text-anchor="middle" font-size="10.5" fill="#a8adba" font-family="monospace">e.g. "curtain closing", "glass breaking"</text>
 
           <path d="M700 502 L470 502 L470 587" fill="none" stroke="#6b7180" stroke-width="1" marker-end="url(#ar2)"/>
-          <text x="580" y="495" font-size="10.5" fill="#a8adba">löst state ebenfalls aus</text>
+          <text x="580" y="495" font-size="10.5" fill="#a8adba">also triggers state</text>
 
           <!-- Drain queue -->
           <line x1="260" y1="622" x2="260" y2="650" stroke="#6b7180" stroke-width="1" marker-end="url(#ar2)"/>
           <rect x="80" y="652" width="360" height="60" rx="8" fill="#171b24" stroke="#2a3040" stroke-dasharray="4 3"/>
           <text x="260" y="676" text-anchor="middle" font-size="12.5" fill="#e7e6e1" font-family="monospace">_drain_encode_queue()</text>
-          <text x="260" y="694" text-anchor="middle" font-size="10.5" fill="#a8adba">max. 8 Pakete/Durchlauf → Abschnitt 3</text>
+          <text x="260" y="694" text-anchor="middle" font-size="10.5" fill="#a8adba">max. 8 packets/pass → section 3</text>
           </g>
         </svg>
         <div class="legend">
-          <span><i style="background:#4fd1b5"></i>immer, ungedrosselt (Aufnahme-Integrität)</span>
-          <span><i style="background:#e8b04d"></i>gedrosselt (nur Erkennung/Vorschau)</span>
+          <span><i style="background:#4fd1b5"></i>always, unthrottled (recording integrity)</span>
+          <span><i style="background:#e8b04d"></i>throttled (detection/preview only)</span>
         </div>
         <div class="note">
-          Kernbefund der heutigen Fehlersuche: die Drossel (<code class="inline">frame_interval</code>, senkt YOLO-Last) lief früher <em>vor</em> dem Einreihen — ein übersprungenes Video-Paket riss dadurch eine Lücke in die H.264-Referenzkette (P-/B-Frames referenzieren Vorgänger) und erzeugte Artefakte. Jetzt: Einreihen immer zuerst, Drossel wirkt nur noch auf Erkennung/Vorschau/Filmstrip.
+          Core finding from today's debugging session: the throttle (<code class="inline">frame_interval</code>, reduces YOLO load) used to run <em>before</em> queueing — a skipped video packet tore a gap into the H.264 reference chain (P-/B-frames reference prior frames) and produced artifacts. Now: queueing always happens first, the throttle only affects detection/preview/filmstrip.
         </div>
       </div>
     </section>
 
     <!-- 3. RECORDING / PACKET-COPY -->
     <section id="recording">
-      <h2>3. Aufnahme (Packet-Copy) <span class="tag">kein Neu-Encoding mehr</span></h2>
-      <p class="lede">Statt jedes Frame neu zu encodieren, werden die bereits komprimierten Pakete direkt in die Ausgabedatei kopiert — ~1000× schneller pro Frame, Qualität = exakt die der Kamera.</p>
+      <h2>3. Recording (packet copy) <span class="tag">no more re-encoding</span></h2>
+      <p class="lede">Instead of re-encoding every frame, the already-compressed packets are copied straight into the output file — ~1000× faster per frame, quality = exactly what the camera produces.</p>
       <div class="panel">
         <svg width="100%" viewBox="0 0 1280 520" role="img">
-          <title>Packet-Copy Aufnahme-Mechanismus</title>
-          <desc>Ein Pre-Roll-Puffer sammelt Pakete im IDLE-Zustand. Beim Trigger wird rückwärts der nächste Keyframe gesucht, die PTS-Werte auf einen neuen Nullpunkt verschoben, und alle Pakete per Remux (ohne Neu-Encoding) in die Ausgabedatei geschrieben — Pre-Roll gefolgt von live eintreffenden Paketen während der Aufnahme.</desc>
+          <title>Packet-copy recording mechanism</title>
+          <desc>A pre-roll buffer collects packets while IDLE. On trigger, the nearest preceding keyframe is located, PTS values are shifted to a new zero point, and all packets are written to the output file via remux (no re-encoding) — pre-roll followed by packets arriving live during recording.</desc>
           <defs>
             <marker id="ar3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -378,70 +378,70 @@
           </defs>
           <g font-family="sans-serif" fill="#e7e6e1">
 
-          <text x="40" y="30" font-size="11.5" fill="#a8adba">Zustand: IDLE — vor dem Trigger</text>
+          <text x="40" y="30" font-size="11.5" fill="#a8adba">State: IDLE — before the trigger</text>
           <rect x="40" y="42" width="560" height="60" rx="8" fill="#171b24" stroke="#2a3040" stroke-dasharray="4 3"/>
           <text x="320" y="66" text-anchor="middle" font-size="13" font-weight="500" font-family="monospace">av_buffer (deque)</text>
-          <text x="320" y="86" text-anchor="middle" font-size="11" fill="#a8adba">letzte PRE_ROLL_SEC Pakete, laufend getrimmt</text>
+          <text x="320" y="86" text-anchor="middle" font-size="11" fill="#a8adba">last PRE_ROLL_SEC packets, continuously trimmed</text>
 
           <line x1="620" y1="72" x2="680" y2="72" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar3)"/>
           <text x="650" y="60" text-anchor="middle" font-size="10.5" fill="#a8adba">Trigger</text>
 
           <rect x="682" y="42" width="280" height="60" rx="8" fill="#e8b04d" fill-opacity="0.15" stroke="#e8b04d"/>
-          <text x="822" y="66" text-anchor="middle" font-size="13" font-weight="500" fill="#fbe9c9">Keyframe-Suche rückwärts</text>
-          <text x="822" y="86" text-anchor="middle" font-size="10.5" fill="#c9a769">nächster I-Frame vor dem Trigger</text>
+          <text x="822" y="66" text-anchor="middle" font-size="13" font-weight="500" fill="#fbe9c9">Keyframe search backward</text>
+          <text x="822" y="86" text-anchor="middle" font-size="10.5" fill="#c9a769">nearest I-frame before the trigger</text>
 
           <line x1="822" y1="102" x2="822" y2="130" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar3)"/>
           <rect x="682" y="132" width="280" height="60" rx="8" fill="#e8b04d" fill-opacity="0.15" stroke="#e8b04d"/>
-          <text x="822" y="156" text-anchor="middle" font-size="13" font-weight="500" fill="#fbe9c9">PTS-Rebase (lazy)</text>
-          <text x="822" y="176" text-anchor="middle" font-size="10.5" fill="#c9a769" font-family="monospace">pts_offset = erstes Paket, nicht 0</text>
+          <text x="822" y="156" text-anchor="middle" font-size="13" font-weight="500" fill="#fbe9c9">PTS rebase (lazy)</text>
+          <text x="822" y="176" text-anchor="middle" font-size="10.5" fill="#c9a769" font-family="monospace">pts_offset = first packet, not 0</text>
 
           <line x1="822" y1="192" x2="822" y2="220" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar3)"/>
           <rect x="682" y="222" width="280" height="60" rx="8" fill="#1e3d38" stroke="#4fd1b5"/>
-          <text x="822" y="246" text-anchor="middle" font-size="13" font-weight="500" fill="#dff5ee">Remux (kein Encode)</text>
+          <text x="822" y="246" text-anchor="middle" font-size="13" font-weight="500" fill="#dff5ee">Remux (no encode)</text>
           <text x="822" y="266" text-anchor="middle" font-size="10.5" fill="#9fd8c8" font-family="monospace">add_stream_from_template()</text>
 
           <path d="M682 252 L500 252 L500 400 L560 400" fill="none" stroke="#6b7180" stroke-width="1" marker-end="url(#ar3)"/>
 
           <!-- live packets arriving during recording -->
-          <text x="40" y="330" font-size="11.5" fill="#a8adba">Zustand: RECORDING / POST_ROLL — währenddessen</text>
+          <text x="40" y="330" font-size="11.5" fill="#a8adba">State: RECORDING / POST_ROLL — meanwhile</text>
           <rect x="40" y="342" width="450" height="60" rx="8" fill="#4fd1b5" fill-opacity="0.15" stroke="#4fd1b5"/>
           <text x="265" y="366" text-anchor="middle" font-size="13" font-weight="500" fill="#dff5ee" font-family="monospace">pending_encode_queue</text>
-          <text x="265" y="386" text-anchor="middle" font-size="10.5" fill="#9fd8c8">live eintreffende Pakete, jedes einzelne</text>
+          <text x="265" y="386" text-anchor="middle" font-size="10.5" fill="#9fd8c8">packets arriving live, every single one</text>
 
           <line x1="490" y1="372" x2="508" y2="372" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar3)"/>
 
           <rect x="510" y="342" width="152" height="60" rx="8" fill="#1d222d" stroke="#2a3040" stroke-dasharray="4 3"/>
           <text x="586" y="364" text-anchor="middle" font-size="11.5" font-family="monospace">_drain_encode_</text>
           <text x="586" y="378" text-anchor="middle" font-size="11.5" font-family="monospace">queue()</text>
-          <text x="586" y="394" text-anchor="middle" font-size="10" fill="#a8adba">8 Pakete/Durchlauf</text>
+          <text x="586" y="394" text-anchor="middle" font-size="10" fill="#a8adba">8 packets/pass</text>
 
           <line x1="662" y1="372" x2="712" y2="340" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar3)"/>
 
           <rect x="682" y="334" width="280" height="70" rx="8" fill="#3d2a21" stroke="#e08a6e"/>
           <text x="822" y="358" text-anchor="middle" font-size="13" font-weight="500" fill="#fbe0d2" font-family="monospace">alerts/*.mp4</text>
-          <text x="822" y="378" text-anchor="middle" font-size="10.5" fill="#eec4ac">Pre-Roll + Live, chronologisch</text>
-          <text x="822" y="394" text-anchor="middle" font-size="10.5" fill="#eec4ac">Qualität = exakt Kamera-Rohqualität</text>
+          <text x="822" y="378" text-anchor="middle" font-size="10.5" fill="#eec4ac">Pre-roll + live, chronological</text>
+          <text x="822" y="394" text-anchor="middle" font-size="10.5" fill="#eec4ac">Quality = exactly camera raw quality</text>
 
           <line x1="822" y1="404" x2="822" y2="432" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar3)"/>
           <rect x="700" y="434" width="250" height="52" rx="8" fill="#171b24" stroke="#2a3040" stroke-dasharray="4 3"/>
           <text x="825" y="455" text-anchor="middle" font-size="12" font-family="monospace">close_writer()</text>
-          <text x="825" y="472" text-anchor="middle" font-size="10.5" fill="#a8adba">Queue vollständig geleert vor Prozessende</text>
+          <text x="825" y="472" text-anchor="middle" font-size="10.5" fill="#a8adba">Queue fully drained before process exit</text>
           </g>
         </svg>
         <div class="note">
-          Gemessen: 0,7&nbsp;ms (Remux) vs. 785,9&nbsp;ms (echtes Neu-Encoding) für 150 Frames. Kein <code class="inline">.venv</code>-NVENC-Setup mehr nötig für die Aufnahme selbst — GPU wird nur noch für YOLO und die KI-Modelle gebraucht.
+          Measured: 0.7&nbsp;ms (remux) vs. 785.9&nbsp;ms (real re-encoding) for 150 frames. No more <code class="inline">.venv</code> NVENC setup needed for recording itself — the GPU is now only needed for YOLO and the AI models.
         </div>
       </div>
     </section>
 
     <!-- 4. FILMSTRIP & PREVIEW -->
     <section id="filmstrip">
-      <h2>4. Filmstrip &amp; Live-Vorschau <span class="tag">Reservoir Sampling + Hintergrund-Threads</span></h2>
-      <p class="lede">Zwei unabhängige Hintergrund-Schreibvorgänge, beide entkoppelt vom zeitkritischen Aufnahme-Loop — nur ein günstiger Array-Copy passiert live, das eigentliche Schreiben läuft asynchron.</p>
+      <h2>4. Filmstrip &amp; live preview <span class="tag">reservoir sampling + background threads</span></h2>
+      <p class="lede">Two independent background write paths, both decoupled from the time-critical recording loop — only a cheap array copy happens live, the actual writing runs asynchronously.</p>
       <div class="panel">
         <svg width="100%" viewBox="0 0 1280 480" role="img">
-          <title>Filmstrip-Erzeugung und Live-Vorschau</title>
-          <desc>Filmstrip nutzt Reservoir Sampling über die gesamte Aufnahmedauer mit garantiertem Endslot, Resize und Schreiben laufen erst bei Aufnahmeende in einem Hintergrund-Thread, dessen Warteschlange vor Prozessende garantiert geleert wird. Live-Vorschau schreibt periodisch ein Thumbnail-JPEG mit konfigurierbarer Bildrate, ebenfalls über einen Hintergrund-Thread.</desc>
+          <title>Filmstrip generation and live preview</title>
+          <desc>Filmstrip uses reservoir sampling across the entire recording duration with a guaranteed end slot; resizing and writing happen only at recording end, in a background thread whose queue is guaranteed to be drained before process exit. Live preview periodically writes a thumbnail JPEG at a configurable frame rate, also via a background thread.</desc>
           <defs>
             <marker id="ar4" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -450,78 +450,78 @@
           <g font-family="sans-serif" fill="#e7e6e1">
 
           <!-- FILMSTRIP -->
-          <text x="40" y="28" font-size="12.5" font-weight="500" fill="#e7e6e1">Filmstrip (für KI-Analyse)</text>
+          <text x="40" y="28" font-size="12.5" font-weight="500" fill="#e7e6e1">Filmstrip (for AI analysis)</text>
           <rect x="40" y="40" width="260" height="66" rx="8" fill="#1d222d" stroke="#2a3040"/>
           <text x="170" y="64" text-anchor="middle" font-size="12.5" font-weight="500">capture_filmstrip()</text>
-          <text x="170" y="82" text-anchor="middle" font-size="10.5" fill="#a8adba">alle ~2s, jeder Frame ist Kandidat</text>
-          <text x="170" y="98" text-anchor="middle" font-size="10.5" fill="#a8adba">nur Array-Copy, kein I/O</text>
+          <text x="170" y="82" text-anchor="middle" font-size="10.5" fill="#a8adba">every ~2s, every frame is a candidate</text>
+          <text x="170" y="98" text-anchor="middle" font-size="10.5" fill="#a8adba">array copy only, no I/O</text>
 
           <line x1="300" y1="73" x2="340" y2="73" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar4)"/>
 
           <rect x="342" y="40" width="280" height="66" rx="8" fill="#e8b04d" fill-opacity="0.15" stroke="#e8b04d"/>
-          <text x="482" y="60" text-anchor="middle" font-size="12.5" font-weight="500" fill="#fbe9c9">Reservoir Sampling (Algorithm R)</text>
-          <text x="482" y="78" text-anchor="middle" font-size="10.5" fill="#c9a769">gleichmäßig über GANZE Dauer</text>
-          <text x="482" y="94" text-anchor="middle" font-size="10.5" fill="#c9a769">+ garantierter Endslot (letzter Frame)</text>
+          <text x="482" y="60" text-anchor="middle" font-size="12.5" font-weight="500" fill="#fbe9c9">Reservoir sampling (Algorithm R)</text>
+          <text x="482" y="78" text-anchor="middle" font-size="10.5" fill="#c9a769">evenly across the ENTIRE duration</text>
+          <text x="482" y="94" text-anchor="middle" font-size="10.5" fill="#c9a769">+ guaranteed end slot (last frame)</text>
 
           <line x1="482" y1="106" x2="482" y2="134" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar4)"/>
-          <text x="510" y="122" font-size="10" fill="#6b7180">bei Aufnahmeende</text>
+          <text x="510" y="122" font-size="10" fill="#6b7180">at recording end</text>
 
           <rect x="342" y="136" width="280" height="60" rx="8" fill="#1d222d" stroke="#2a3040"/>
           <text x="482" y="158" text-anchor="middle" font-size="12.5" font-weight="500">flush_filmstrip()</text>
-          <text x="482" y="176" text-anchor="middle" font-size="10.5" fill="#a8adba">Resize + Box-Annotation, jetzt erst</text>
-          <text x="482" y="190" text-anchor="middle" font-size="10.5" fill="#a8adba">(Aufnahme schon fertig, Zeit egal)</text>
+          <text x="482" y="176" text-anchor="middle" font-size="10.5" fill="#a8adba">Resize + box annotation, only now</text>
+          <text x="482" y="190" text-anchor="middle" font-size="10.5" fill="#a8adba">(recording already done, timing doesn't matter)</text>
 
           <line x1="482" y1="196" x2="482" y2="224" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar4)"/>
           <rect x="342" y="226" width="280" height="52" rx="8" fill="#1e3d38" stroke="#4fd1b5"/>
           <text x="482" y="248" text-anchor="middle" font-size="12" font-family="monospace" fill="#dff5ee">_filmstrip_write_queue</text>
-          <text x="482" y="266" text-anchor="middle" font-size="10.5" fill="#9fd8c8">Daemon-Thread, .join() vor Exit</text>
+          <text x="482" y="266" text-anchor="middle" font-size="10.5" fill="#9fd8c8">Daemon thread, .join() before exit</text>
 
           <line x1="482" y1="278" x2="482" y2="306" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar4)"/>
           <rect x="342" y="308" width="280" height="52" rx="8" fill="#3d2a21" stroke="#e08a6e"/>
           <text x="482" y="330" text-anchor="middle" font-size="12" font-family="monospace" fill="#fbe0d2">.thumbs/&lt;video&gt;/{small,large}/</text>
-          <text x="482" y="348" text-anchor="middle" font-size="10.5" fill="#eec4ac">bis zu 64 Bilder, + timestamps.json</text>
+          <text x="482" y="348" text-anchor="middle" font-size="10.5" fill="#eec4ac">up to 64 images, + timestamps.json</text>
 
-          <text x="482" y="382" text-anchor="middle" font-size="10.5" fill="#e8b04d">✓ heutiger Fix: .join() garantiert</text>
-          <text x="482" y="398" text-anchor="middle" font-size="10.5" fill="#e8b04d">vollständiges Schreiben vor Prozessende</text>
+          <text x="482" y="382" text-anchor="middle" font-size="10.5" fill="#e8b04d">✓ today's fix: .join() guarantees</text>
+          <text x="482" y="398" text-anchor="middle" font-size="10.5" fill="#e8b04d">complete writing before process exit</text>
 
           <!-- LIVE PREVIEW -->
-          <text x="720" y="28" font-size="12.5" font-weight="500" fill="#e7e6e1">Live-Vorschau (fürs Dashboard-Grid)</text>
+          <text x="720" y="28" font-size="12.5" font-weight="500" fill="#e7e6e1">Live preview (for the dashboard grid)</text>
           <rect x="720" y="40" width="280" height="66" rx="8" fill="#1d222d" stroke="#2a3040"/>
           <text x="860" y="64" text-anchor="middle" font-size="12.5" font-weight="500" font-family="monospace">write_shared_frame()</text>
-          <text x="860" y="82" text-anchor="middle" font-size="10.5" fill="#a8adba">jeder Frame ist Kandidat</text>
-          <text x="860" y="98" text-anchor="middle" font-size="10.5" fill="#a8adba">Rate aus THUMBNAIL_FPS-Setting</text>
+          <text x="860" y="82" text-anchor="middle" font-size="10.5" fill="#a8adba">every frame is a candidate</text>
+          <text x="860" y="98" text-anchor="middle" font-size="10.5" fill="#a8adba">rate from THUMBNAIL_FPS setting</text>
 
           <line x1="860" y1="106" x2="860" y2="134" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar4)"/>
           <rect x="720" y="136" width="280" height="52" rx="8" fill="#1e3d38" stroke="#4fd1b5"/>
           <text x="860" y="158" text-anchor="middle" font-size="12" font-family="monospace" fill="#dff5ee">_shared_frame_write_queue</text>
-          <text x="860" y="176" text-anchor="middle" font-size="10.5" fill="#9fd8c8">eigener Daemon-Thread</text>
+          <text x="860" y="176" text-anchor="middle" font-size="10.5" fill="#9fd8c8">own daemon thread</text>
 
           <line x1="860" y1="188" x2="860" y2="216" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar4)"/>
           <rect x="720" y="218" width="280" height="52" rx="8" fill="#3d2a21" stroke="#e08a6e"/>
           <text x="860" y="240" text-anchor="middle" font-size="12" font-family="monospace" fill="#fbe0d2">preview/&lt;cam&gt;.jpg</text>
-          <text x="860" y="258" text-anchor="middle" font-size="10.5" fill="#eec4ac">1 Datei, laufend überschrieben</text>
+          <text x="860" y="258" text-anchor="middle" font-size="10.5" fill="#eec4ac">1 file, continuously overwritten</text>
 
           <line x1="860" y1="270" x2="860" y2="298" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar4)"/>
           <rect x="720" y="300" width="280" height="60" rx="8" fill="#2d2740" stroke="#a48cf0"/>
-          <text x="860" y="322" text-anchor="middle" font-size="12.5" font-weight="500" fill="#e9e2fb">Dashboard-Grid pollt</text>
+          <text x="860" y="322" text-anchor="middle" font-size="12.5" font-weight="500" fill="#e9e2fb">Dashboard grid polls</text>
           <text x="860" y="340" text-anchor="middle" font-size="10.5" fill="#d3c5f5" font-family="monospace">/thumbnail/&lt;cam&gt;?t=...</text>
-          <text x="860" y="355" text-anchor="middle" font-size="10.5" fill="#d3c5f5">Rate live nachziehbar bei Settings-Änderung</text>
+          <text x="860" y="355" text-anchor="middle" font-size="10.5" fill="#d3c5f5">Rate updates live on settings change</text>
           </g>
         </svg>
         <div class="note">
-          Beide Warteschlangen sind bewusst <strong style="color:#a8adba;font-weight:500">Daemon-Threads</strong> — sterben sofort mit dem Prozess. Ohne <code class="inline">.join()</code> vor dem Shutdown könnten noch nicht geschriebene Filmstrip-Bilder verloren gehen — genau der heute gefundene und behobene Bug.
+          Both queues are deliberately <strong style="color:#a8adba;font-weight:500">daemon threads</strong> — they die instantly with the process. Without <code class="inline">.join()</code> before shutdown, not-yet-written filmstrip images could be lost — exactly the bug found and fixed today.
         </div>
       </div>
     </section>
 
     <!-- 5. POST-PROCESSING / AI -->
     <section id="postprocess">
-      <h2>5. Post-Processing / KI-Modelle <span class="tag">postprocess.py — GPU-serialisiert</span></h2>
-      <p class="lede">Sobald eine Aufnahme fertig ist, startet <code class="inline">web_ui.py</code> <code class="inline">postprocess.py</code> als eigenen Prozess. Ein Datei-Lock serialisiert alle GPU-Zugriffe, damit sich mehrere Kameras nicht gegenseitig blockieren.</p>
+      <h2>5. Post-processing / AI models <span class="tag">postprocess.py — GPU-serialized</span></h2>
+      <p class="lede">As soon as a recording finishes, <code class="inline">web_ui.py</code> starts <code class="inline">postprocess.py</code> as its own process. A file lock serializes all GPU access so multiple cameras don't block each other.</p>
       <div class="panel">
         <svg width="100%" viewBox="0 0 1280 900" role="img">
-          <title>Post-Processing-Pipeline mit vier KI-Modellen</title>
-          <desc>Ein GPU-Lock serialisiert vier nacheinander laufende Schritte: Vision-Modell für Beschreibung und Themen-Klassifikation über Ollama, Whisper für Transkription, InsightFace für Gesichtserkennung, und optional DBSCAN-Clustering für unbenannte Gesichter. Alle Ergebnisse werden in einer gemeinsamen ai.json-Datei durch Lesen-Mergen-Schreiben zusammengeführt.</desc>
+          <title>Post-processing pipeline with four AI models</title>
+          <desc>A GPU lock serializes four sequential steps: a vision model for description and topic classification via Ollama, Whisper for transcription, InsightFace for face recognition, and optional DBSCAN clustering for unnamed faces. All results are merged into a shared ai.json file via read-merge-write.</desc>
           <defs>
             <marker id="ar5" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
               <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -530,43 +530,43 @@
           <g font-family="sans-serif" fill="#e7e6e1">
 
           <rect x="440" y="20" width="240" height="46" rx="8" fill="#171b24" stroke="#2a3040" stroke-dasharray="4 3"/>
-          <text x="560" y="48" text-anchor="middle" font-size="12.5" font-family="monospace">GPU-Lock erwerben (flock)</text>
+          <text x="560" y="48" text-anchor="middle" font-size="12.5" font-family="monospace">Acquire GPU lock (flock)</text>
           <line x1="560" y1="66" x2="560" y2="94" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar5)"/>
 
           <!-- STAGE 1: Vision -->
           <rect x="120" y="96" width="720" height="196" rx="10" fill="#3d3320" stroke="#e8b04d" stroke-width="1"/>
-          <text x="146" y="122" font-size="14" font-weight="500" fill="#fbe9c9">1 · ai_analyze.py — Vision-Modell (Ollama)</text>
+          <text x="146" y="122" font-size="14" font-weight="500" fill="#fbe9c9">1 · ai_analyze.py — vision model (Ollama)</text>
 
           <rect x="146" y="136" width="220" height="72" rx="8" fill="#171b24" stroke="#2a3040"/>
           <text x="256" y="158" text-anchor="middle" font-size="12" font-weight="500">_pick_frames()</text>
-          <text x="256" y="175" text-anchor="middle" font-size="10.5" fill="#a8adba">bis zu 64 Filmstrip-Bilder,</text>
-          <text x="256" y="190" text-anchor="middle" font-size="10.5" fill="#a8adba">chronologisch, gleichmäßig verteilt</text>
+          <text x="256" y="175" text-anchor="middle" font-size="10.5" fill="#a8adba">up to 64 filmstrip images,</text>
+          <text x="256" y="190" text-anchor="middle" font-size="10.5" fill="#a8adba">chronological, evenly distributed</text>
 
           <line x1="366" y1="172" x2="404" y2="172" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar5)"/>
 
           <rect x="406" y="136" width="240" height="72" rx="8" fill="#171b24" stroke="#2a3040"/>
-          <text x="526" y="155" text-anchor="middle" font-size="12" font-weight="500">Dynamischer Prompt</text>
-          <text x="526" y="172" text-anchor="middle" font-size="10.5" fill="#a8adba">gewichtet nach YOLO-Klassen</text>
-          <text x="526" y="187" text-anchor="middle" font-size="10.5" fill="#a8adba">+ konfigurierte Topics</text>
+          <text x="526" y="155" text-anchor="middle" font-size="12" font-weight="500">Dynamic prompt</text>
+          <text x="526" y="172" text-anchor="middle" font-size="10.5" fill="#a8adba">weighted by YOLO classes</text>
+          <text x="526" y="187" text-anchor="middle" font-size="10.5" fill="#a8adba">+ configured topics</text>
 
           <line x1="646" y1="172" x2="684" y2="172" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar5)"/>
 
           <rect x="686" y="136" width="140" height="72" rx="8" fill="#1e3d38" stroke="#4fd1b5"/>
           <text x="756" y="164" text-anchor="middle" font-size="12" font-weight="500" fill="#dff5ee">Ollama</text>
-          <text x="756" y="182" text-anchor="middle" font-size="10" fill="#9fd8c8" font-family="monospace">Qwen3-basiert</text>
-          <text x="756" y="196" text-anchor="middle" font-size="10" fill="#9fd8c8">iq4_xs quantisiert</text>
+          <text x="756" y="182" text-anchor="middle" font-size="10" fill="#9fd8c8" font-family="monospace">Qwen3-based</text>
+          <text x="756" y="196" text-anchor="middle" font-size="10" fill="#9fd8c8">iq4_xs quantized</text>
 
           <line x1="256" y1="208" x2="256" y2="236" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar5)"/>
           <rect x="146" y="238" width="220" height="42" rx="8" fill="#171b24" stroke="#2a3040" stroke-dasharray="4 3"/>
-          <text x="256" y="264" text-anchor="middle" font-size="11.5" font-family="monospace">Retry: Overflow → halbieren</text>
+          <text x="256" y="264" text-anchor="middle" font-size="11.5" font-family="monospace">Retry: overflow → halve</text>
 
           <line x1="526" y1="208" x2="526" y2="236" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar5)"/>
           <rect x="406" y="238" width="240" height="42" rx="8" fill="#171b24" stroke="#2a3040" stroke-dasharray="4 3"/>
-          <text x="526" y="264" text-anchor="middle" font-size="11.5" font-family="monospace">"thinking"-Feld als Fallback</text>
+          <text x="526" y="264" text-anchor="middle" font-size="11.5" font-family="monospace">"thinking" field as fallback</text>
 
           <line x1="756" y1="208" x2="756" y2="236" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar5)"/>
           <rect x="686" y="238" width="140" height="42" rx="8" fill="#1e3d38" stroke="#4fd1b5"/>
-          <text x="756" y="264" text-anchor="middle" font-size="11.5" fill="#dff5ee">Themen-Scores</text>
+          <text x="756" y="264" text-anchor="middle" font-size="11.5" fill="#dff5ee">Topic scores</text>
 
           <line x1="560" y1="292" x2="560" y2="320" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar5)"/>
 
@@ -574,9 +574,9 @@
           <rect x="120" y="322" width="720" height="90" rx="10" fill="#3d3320" stroke="#e8b04d" stroke-width="1"/>
           <text x="146" y="348" font-size="14" font-weight="500" fill="#fbe9c9">2 · transcribe_audio.py — Whisper</text>
           <rect x="146" y="360" width="300" height="42" rx="8" fill="#171b24" stroke="#2a3040"/>
-          <text x="296" y="386" text-anchor="middle" font-size="12" font-family="monospace">Audiospur extrahieren + transkribieren</text>
+          <text x="296" y="386" text-anchor="middle" font-size="12" font-family="monospace">Extract audio track + transcribe</text>
           <rect x="466" y="360" width="340" height="42" rx="8" fill="#171b24" stroke="#2a3040"/>
-          <text x="636" y="386" text-anchor="middle" font-size="12" font-family="monospace">liest .ai.json, mergt Transkript rein</text>
+          <text x="636" y="386" text-anchor="middle" font-size="12" font-family="monospace">reads .ai.json, merges transcript in</text>
 
           <line x1="560" y1="412" x2="560" y2="440" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar5)"/>
 
@@ -584,71 +584,71 @@
           <rect x="120" y="442" width="720" height="110" rx="10" fill="#3d3320" stroke="#e8b04d" stroke-width="1"/>
           <text x="146" y="468" font-size="14" font-weight="500" fill="#fbe9c9">3 · face_recognize.py — InsightFace</text>
           <rect x="146" y="480" width="220" height="56" rx="8" fill="#171b24" stroke="#2a3040"/>
-          <text x="256" y="502" text-anchor="middle" font-size="12" font-family="monospace">Gesichter erkennen</text>
-          <text x="256" y="518" text-anchor="middle" font-size="10.5" fill="#a8adba">Embedding je Gesicht</text>
+          <text x="256" y="502" text-anchor="middle" font-size="12" font-family="monospace">Detect faces</text>
+          <text x="256" y="518" text-anchor="middle" font-size="10.5" fill="#a8adba">Embedding per face</text>
 
           <line x1="366" y1="508" x2="404" y2="508" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar5)"/>
           <rect x="406" y="480" width="220" height="56" rx="8" fill="#171b24" stroke="#2a3040"/>
-          <text x="516" y="502" text-anchor="middle" font-size="12" font-family="monospace">Cosine-Vergleich</text>
-          <text x="516" y="518" text-anchor="middle" font-size="10.5" fill="#a8adba">gegen bekannte Personen-Centroide</text>
+          <text x="516" y="502" text-anchor="middle" font-size="12" font-family="monospace">Cosine comparison</text>
+          <text x="516" y="518" text-anchor="middle" font-size="10.5" fill="#a8adba">against known people centroids</text>
 
           <line x1="626" y1="508" x2="664" y2="508" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar5)"/>
           <rect x="666" y="480" width="160" height="56" rx="8" fill="#3d2a21" stroke="#e08a6e"/>
           <text x="746" y="502" text-anchor="middle" font-size="12" fill="#fbe0d2" font-family="monospace">faces.db</text>
-          <text x="746" y="518" text-anchor="middle" font-size="10.5" fill="#eec4ac">Embedding + Crop-Pfad</text>
+          <text x="746" y="518" text-anchor="middle" font-size="10.5" fill="#eec4ac">Embedding + crop path</text>
 
           <line x1="560" y1="552" x2="560" y2="580" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar5)"/>
 
           <!-- STAGE 4: Clustering (separate button) -->
           <rect x="120" y="582" width="720" height="90" rx="10" fill="#171b24" stroke="#2a3040" stroke-dasharray="4 3"/>
-          <text x="146" y="608" font-size="13" font-weight="500" fill="#e7e6e1">4 · cluster_faces.py — nur auf Klick "Re-cluster"</text>
+          <text x="146" y="608" font-size="13" font-weight="500" fill="#e7e6e1">4 · cluster_faces.py — only on "Re-cluster" click</text>
           <rect x="146" y="620" width="330" height="42" rx="8" fill="#1d222d" stroke="#2a3040"/>
-          <text x="311" y="646" text-anchor="middle" font-size="12" font-family="monospace">DBSCAN über unbenannte Embeddings</text>
+          <text x="311" y="646" text-anchor="middle" font-size="12" font-family="monospace">DBSCAN over unnamed embeddings</text>
           <rect x="496" y="620" width="320" height="42" rx="8" fill="#1d222d" stroke="#2a3040"/>
-          <text x="656" y="646" text-anchor="middle" font-size="12" font-family="monospace">Known-Person-Threshold-Abgleich zuerst</text>
+          <text x="656" y="646" text-anchor="middle" font-size="12" font-family="monospace">Known-person threshold match first</text>
 
           <line x1="560" y1="672" x2="560" y2="700" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar5)"/>
 
           <rect x="400" y="702" width="320" height="52" rx="8" fill="#2d2740" stroke="#a48cf0"/>
-          <text x="560" y="724" text-anchor="middle" font-size="13" fill="#e9e2fb">search_index.py — Embedding indexieren</text>
-          <text x="560" y="741" text-anchor="middle" font-size="10.5" fill="#d3c5f5" font-family="monospace">Beschreibung + Topics + Transkript</text>
+          <text x="560" y="724" text-anchor="middle" font-size="13" fill="#e9e2fb">search_index.py — index embedding</text>
+          <text x="560" y="741" text-anchor="middle" font-size="10.5" fill="#d3c5f5" font-family="monospace">Description + topics + transcript</text>
 
           <line x1="560" y1="754" x2="560" y2="782" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar5)"/>
           <rect x="440" y="784" width="240" height="46" rx="8" fill="#171b24" stroke="#2a3040" stroke-dasharray="4 3"/>
-          <text x="560" y="812" text-anchor="middle" font-size="12.5" font-family="monospace">GPU-Lock freigeben</text>
+          <text x="560" y="812" text-anchor="middle" font-size="12.5" font-family="monospace">Release GPU lock</text>
           </g>
         </svg>
         <div class="note">
-          Alle Schritte schreiben in dieselbe <code class="inline">.ai.json</code> — jeder Schritt liest zuerst, mergt, schreibt dann, statt blind zu überschreiben (heutiger Fix: <code class="inline">ai_analyze.py</code> hat das anfangs nicht getan und dabei Transkripte gelöscht).
+          All steps write into the same <code class="inline">.ai.json</code> — every step reads first, merges, then writes, instead of blindly overwriting (today's fix: <code class="inline">ai_analyze.py</code> initially didn't do this and wiped out transcripts as a result).
         </div>
       </div>
     </section>
 
     <!-- 6. STORAGE -->
     <section id="storage">
-      <h2>6. Datenhaltung <span class="tag">Dateisystem + zwei SQLite-Datenbanken</span></h2>
-      <p class="lede">Keine zentrale Datenbank für Videos selbst — jede Aufnahme lebt als Datei mit Geschwister-Sidecars. Nur Gesichter und der Suchindex haben eigene SQLite-Datenbanken.</p>
+      <h2>6. Data storage <span class="tag">filesystem + two SQLite databases</span></h2>
+      <p class="lede">No central database for videos themselves — each recording lives as a file with sibling sidecar files. Only faces and the search index have their own SQLite databases.</p>
       <div class="panel">
         <svg width="100%" viewBox="0 0 1280 620" role="img">
-          <title>Dateisystem- und Datenbank-Layout</title>
-          <desc>Jede Aufnahme liegt als MP4 mit Geschwister-Sidecar-Dateien (Trigger-Screenshot, KI-Metadaten, Filmstrip-Ordner) im Recent- oder Archiv-Verzeichnis. Zwei separate SQLite-Datenbanken verwalten Gesichter/Personen sowie den Volltext- und semantischen Suchindex. Konfigurationsdateien steuern Kameras, Einstellungen und Live-Vorschau-Overrides.</desc>
+          <title>Filesystem and database layout</title>
+          <desc>Every recording lives as an MP4 with sibling sidecar files (trigger screenshot, AI metadata, filmstrip folder) in the recent or archive directory. Two separate SQLite databases manage faces/people and the full-text/semantic search index. Configuration files control cameras, settings, and live-preview overrides.</desc>
           <g font-family="sans-serif" fill="#e7e6e1">
 
           <!-- alerts/ container -->
           <rect x="40" y="20" width="560" height="280" rx="14" fill="#1e3d38" fill-opacity="0.5" stroke="#4fd1b5" stroke-width="1"/>
           <text x="60" y="46" font-size="14" font-weight="500" fill="#dff5ee" font-family="monospace">alerts/</text>
-          <text x="60" y="64" font-size="11" fill="#9fd8c8">Recent — noch nicht archiviert</text>
+          <text x="60" y="64" font-size="11" fill="#9fd8c8">Recent — not yet archived</text>
 
           <rect x="60" y="76" width="230" height="210" rx="10" fill="#171b24" stroke="#2a3040"/>
           <text x="175" y="98" text-anchor="middle" font-size="12" font-weight="500" font-family="monospace">Cam_EVENT_ts.mp4</text>
           <g font-family="monospace" font-size="10.5" fill="#a8adba">
-            <text x="80" y="120">.jpg — Trigger-Screenshot</text>
-            <text x="80" y="140">.trigger.json — Meta</text>
-            <text x="80" y="160">.ai.json — Beschreibung,</text>
-            <text x="94" y="176">Topics, Transkript</text>
-            <text x="80" y="196">.mp4.xmp — Immich-Sidecar</text>
-            <text x="80" y="216">.recording — nur während</text>
-            <text x="94" y="232">aktiver Aufnahme</text>
+            <text x="80" y="120">.jpg — trigger screenshot</text>
+            <text x="80" y="140">.trigger.json — metadata</text>
+            <text x="80" y="160">.ai.json — description,</text>
+            <text x="94" y="176">topics, transcript</text>
+            <text x="80" y="196">.mp4.xmp — Immich sidecar</text>
+            <text x="80" y="216">.recording — only during</text>
+            <text x="94" y="232">active recording</text>
           </g>
 
           <rect x="310" y="76" width="270" height="210" rx="10" fill="#171b24" stroke="#2a3040" stroke-dasharray="4 3"/>
@@ -659,16 +659,16 @@
             <text x="330" y="164">timestamps.json</text>
             <text x="330" y="186">faces/&lt;crop&gt;.jpg</text>
           </g>
-          <text x="330" y="220" font-size="10.5" fill="#e8b04d">small = Hover-Scrub, large = für</text>
-          <text x="330" y="236" font-size="10.5" fill="#e8b04d">Vision-Modell-Eingabe</text>
+          <text x="330" y="220" font-size="10.5" fill="#e8b04d">small = hover-scrub, large = for</text>
+          <text x="330" y="236" font-size="10.5" fill="#e8b04d">vision model input</text>
 
           <line x1="240" y1="300" x2="240" y2="330" stroke="#6b7180" stroke-width="1" opacity="0.4"/>
           <text x="240" y="316" text-anchor="middle" font-size="10" fill="#6b7180" font-family="monospace">move</text>
 
           <rect x="40" y="332" width="560" height="70" rx="14" fill="#3d2a21" fill-opacity="0.5" stroke="#e08a6e" stroke-width="1"/>
           <text x="60" y="358" font-size="14" font-weight="500" fill="#fbe0d2" font-family="monospace">alerts/archive/</text>
-          <text x="60" y="378" font-size="11" fill="#eec4ac">Manuell verschoben — nie während laufender Aufnahme</text>
-          <text x="60" y="394" font-size="10.5" fill="#a8adba">dieselben Sidecar-Dateien wandern mit</text>
+          <text x="60" y="378" font-size="11" fill="#eec4ac">Moved manually — never while a recording is in progress</text>
+          <text x="60" y="394" font-size="10.5" fill="#a8adba">the same sidecar files move along</text>
 
           <!-- faces.db -->
           <rect x="640" y="20" width="290" height="180" rx="10" fill="#2d2740" stroke="#a48cf0"/>
@@ -689,19 +689,19 @@
           <g font-family="monospace" font-size="10.5" fill="#d3c5f5">
             <text x="660" y="262">filename, base_dir</text>
             <text x="660" y="280">description, topics, transcript</text>
-            <text x="660" y="298">embedding (semantisch)</text>
-            <text x="660" y="320">Volltext + Cosine-Ähnlichkeit</text>
+            <text x="660" y="298">embedding (semantic)</text>
+            <text x="660" y="320">Full text + cosine similarity</text>
           </g>
 
           <!-- Config files -->
           <rect x="640" y="356" width="600" height="150" rx="10" fill="#171b24" stroke="#2a3040" stroke-dasharray="4 3"/>
-          <text x="660" y="382" font-size="13.5" font-weight="500" fill="#e7e6e1">Konfiguration (JSON-Dateien im Projekt-Root)</text>
+          <text x="660" y="382" font-size="13.5" font-weight="500" fill="#e7e6e1">Configuration (JSON files in the project root)</text>
           <g font-family="monospace" font-size="11" fill="#a8adba">
-            <text x="660" y="408">streams.json — Kameras, URLs, enabled/audio_enabled</text>
-            <text x="660" y="430">pipeline_settings.json — alle Settings-Werte</text>
-            <text x="660" y="452">stream_overrides.json — NUR Live-Vorschau-Pause,</text>
-            <text x="674" y="468">getrennt von "enabled" (heutiger Bug-Fund)</text>
-            <text x="660" y="490">pipeline.pid — Master-Prozess-PID für stop.sh</text>
+            <text x="660" y="408">streams.json — cameras, URLs, enabled/audio_enabled</text>
+            <text x="660" y="430">pipeline_settings.json — all settings values</text>
+            <text x="660" y="452">stream_overrides.json — ONLY live-preview pause,</text>
+            <text x="674" y="468">separate from "enabled" (today's bug find)</text>
+            <text x="660" y="490">pipeline.pid — master process PID for stop.sh</text>
           </g>
           </g>
         </svg>
@@ -710,12 +710,12 @@
 
     <!-- 7. WEB UI -->
     <section id="webui">
-      <h2>7. Web-UI (Flask) <span class="tag">web_ui.py</span></h2>
-      <p class="lede">Ein Flask-Prozess bedient das Dashboard, alle API-Routen und orchestriert Pipeline-Neustarts. Läuft unabhängig vom Aufnahme-Master-Prozess.</p>
+      <h2>7. Web UI (Flask) <span class="tag">web_ui.py</span></h2>
+      <p class="lede">A Flask process serves the dashboard, all API routes, and orchestrates pipeline restarts. Runs independently of the recording master process.</p>
       <div class="panel">
         <svg width="100%" viewBox="0 0 1280 460" role="img">
-          <title>Routen-Gruppen des Web-UI-Prozesses</title>
-          <desc>web_ui.py bündelt sechs Routen-Gruppen: Dashboard-Rendering, Live-Vorschau und HLS-Streaming, Ereignis-Verwaltung mit Suche und Filter, Personen- und Gesichts-Verwaltung, Einstellungen, sowie Pipeline-Steuerung, die auf stop.sh und start_detached.sh zurückgreift.</desc>
+          <title>Route groups of the web UI process</title>
+          <desc>web_ui.py bundles six route groups: dashboard rendering, live preview and HLS streaming, event management with search and filters, people and face management, settings, and pipeline control which relies on stop.sh and start_detached.sh.</desc>
           <g font-family="sans-serif" fill="#e7e6e1">
 
           <rect x="480" y="20" width="320" height="50" rx="10" fill="#2d2740" stroke="#a48cf0" stroke-width="1.2"/>
@@ -726,37 +726,37 @@
             <rect x="40" y="110" width="220" height="90" rx="8" fill="#1d222d" stroke="#2a3040"/>
             <text x="150" y="132" text-anchor="middle" font-size="12.5" font-weight="500">Dashboard</text>
             <text x="150" y="152" text-anchor="middle" font-size="10.5" fill="#a8adba" font-family="monospace">GET /</text>
-            <text x="150" y="168" text-anchor="middle" font-size="10.5" fill="#a8adba">rendert Kamera-Grid,</text>
-            <text x="150" y="184" text-anchor="middle" font-size="10.5" fill="#a8adba">Recent + Archiv-Listen</text>
+            <text x="150" y="168" text-anchor="middle" font-size="10.5" fill="#a8adba">renders camera grid,</text>
+            <text x="150" y="184" text-anchor="middle" font-size="10.5" fill="#a8adba">recent + archive lists</text>
           </g>
 
           <g>
             <rect x="280" y="110" width="220" height="90" rx="8" fill="#1d222d" stroke="#2a3040"/>
-            <text x="390" y="132" text-anchor="middle" font-size="12.5" font-weight="500">Live &amp; Vorschau</text>
+            <text x="390" y="132" text-anchor="middle" font-size="12.5" font-weight="500">Live &amp; preview</text>
             <text x="390" y="152" text-anchor="middle" font-size="10.5" fill="#a8adba" font-family="monospace">/thumbnail/&lt;cam&gt;</text>
             <text x="390" y="168" text-anchor="middle" font-size="10.5" fill="#a8adba" font-family="monospace">/api/live_start (HLS)</text>
-            <text x="390" y="184" text-anchor="middle" font-size="10.5" fill="#a8adba">ffmpeg-Subprozess, NVENC</text>
+            <text x="390" y="184" text-anchor="middle" font-size="10.5" fill="#a8adba">ffmpeg subprocess, NVENC</text>
           </g>
 
           <g>
             <rect x="520" y="110" width="220" height="90" rx="8" fill="#1d222d" stroke="#2a3040"/>
-            <text x="630" y="132" text-anchor="middle" font-size="12.5" font-weight="500">Ereignisse</text>
+            <text x="630" y="132" text-anchor="middle" font-size="12.5" font-weight="500">Events</text>
             <text x="630" y="152" text-anchor="middle" font-size="10.5" fill="#a8adba" font-family="monospace">/api/search, /archive,</text>
             <text x="630" y="168" text-anchor="middle" font-size="10.5" fill="#a8adba" font-family="monospace">/export, /analyze</text>
-            <text x="630" y="184" text-anchor="middle" font-size="10.5" fill="#a8adba">blockiert bei .recording</text>
+            <text x="630" y="184" text-anchor="middle" font-size="10.5" fill="#a8adba">blocked while .recording</text>
           </g>
 
           <g>
             <rect x="760" y="110" width="220" height="90" rx="8" fill="#1d222d" stroke="#2a3040"/>
-            <text x="870" y="132" text-anchor="middle" font-size="12.5" font-weight="500">Personen &amp; Gesichter</text>
+            <text x="870" y="132" text-anchor="middle" font-size="12.5" font-weight="500">People &amp; faces</text>
             <text x="870" y="152" text-anchor="middle" font-size="10.5" fill="#a8adba" font-family="monospace">/api/people_data</text>
             <text x="870" y="168" text-anchor="middle" font-size="10.5" fill="#a8adba" font-family="monospace">/api/recluster_faces</text>
-            <text x="870" y="184" text-anchor="middle" font-size="10.5" fill="#a8adba">Ignorieren, Umbenennen</text>
+            <text x="870" y="184" text-anchor="middle" font-size="10.5" fill="#a8adba">Ignore, rename</text>
           </g>
 
           <g>
             <rect x="1000" y="110" width="220" height="90" rx="8" fill="#1d222d" stroke="#2a3040"/>
-            <text x="1110" y="132" text-anchor="middle" font-size="12.5" font-weight="500">Einstellungen</text>
+            <text x="1110" y="132" text-anchor="middle" font-size="12.5" font-weight="500">Settings</text>
             <text x="1110" y="152" text-anchor="middle" font-size="10.5" fill="#a8adba" font-family="monospace">/save_settings</text>
             <text x="1110" y="168" text-anchor="middle" font-size="10.5" fill="#a8adba" font-family="monospace">/save_streams</text>
             <text x="1110" y="184" text-anchor="middle" font-size="10.5" fill="#a8adba">→ pipeline_settings.json</text>
@@ -764,19 +764,19 @@
 
           <g>
             <rect x="400" y="220" width="440" height="90" rx="8" fill="#4fd1b5" fill-opacity="0.15" stroke="#4fd1b5"/>
-            <text x="620" y="242" text-anchor="middle" font-size="12.5" font-weight="500" fill="#dff5ee">Pipeline-Steuerung</text>
+            <text x="620" y="242" text-anchor="middle" font-size="12.5" font-weight="500" fill="#dff5ee">Pipeline control</text>
             <text x="620" y="262" text-anchor="middle" font-size="10.5" fill="#9fd8c8" font-family="monospace">_restart_pipeline_background()</text>
-            <text x="620" y="280" text-anchor="middle" font-size="10.5" fill="#9fd8c8">→ Abschnitt 8: stop.sh + start_detached.sh</text>
-            <text x="620" y="296" text-anchor="middle" font-size="10.5" fill="#9fd8c8">nur bei kamera-relevanten Änderungen</text>
+            <text x="620" y="280" text-anchor="middle" font-size="10.5" fill="#9fd8c8">→ section 8: stop.sh + start_detached.sh</text>
+            <text x="620" y="296" text-anchor="middle" font-size="10.5" fill="#9fd8c8">only on camera-relevant changes</text>
           </g>
 
           <line x1="150" y1="200" x2="150" y2="220" stroke="#6b7180" stroke-width="0.8" opacity="0.3"/>
           <line x1="1110" y1="200" x2="1110" y2="220" stroke="#6b7180" stroke-width="0.8" opacity="0.3"/>
 
           <rect x="200" y="332" width="840" height="90" rx="10" fill="#171b24" stroke="#2a3040" stroke-dasharray="4 3"/>
-          <text x="620" y="356" text-anchor="middle" font-size="13" font-weight="500" fill="#e7e6e1">Periodischer Status-Poll (alle 3s, Frontend-JS)</text>
+          <text x="620" y="356" text-anchor="middle" font-size="13" font-weight="500" fill="#e7e6e1">Periodic status poll (every 3s, frontend JS)</text>
           <text x="620" y="378" text-anchor="middle" font-size="10.5" fill="#a8adba" font-family="monospace">/api/status → recording_states, disk, ollama_status,</text>
-          <text x="620" y="396" text-anchor="middle" font-size="10.5" fill="#a8adba" font-family="monospace">thumbnail_interval_ms (live nachziehbar)</text>
+          <text x="620" y="396" text-anchor="middle" font-size="10.5" fill="#a8adba" font-family="monospace">thumbnail_interval_ms (updates live)</text>
           </g>
         </svg>
       </div>
@@ -784,12 +784,12 @@
 
     <!-- 8. ORCHESTRATION -->
     <section id="orchestration">
-      <h2>8. Prozess-Orchestrierung <span class="tag">Master-Prozess, Start/Stop, Docker vs. Bare-Metal</span></h2>
-      <p class="lede">Ein Master-Prozess liest die Kamera-Konfiguration und startet je einen <code class="inline">CameraAgent</code>-Kindprozess pro aktivierter Kamera. Zwei Deployment-Arten laufen mit demselben Code.</p>
+      <h2>8. Process orchestration <span class="tag">master process, start/stop, Docker vs. bare metal</span></h2>
+      <p class="lede">A master process reads the camera configuration and starts one <code class="inline">CameraAgent</code> child process per enabled camera. Two deployment types run with the same code.</p>
       <div class="panel">
         <svg width="100%" viewBox="0 0 1280 560" role="img">
-          <title>Master-Prozess und Deployment-Varianten</title>
-          <desc>start_detached.sh startet recorder_pipeline.py als Master-Prozess, merkt sich dessen PID, und der Master liest streams.json um für jede aktivierte Kamera einen eigenen CameraAgent-Kindprozess zu starten. stop.sh nutzt die gemerkte PID, um gezielt auch die Kindprozesse über die echte Eltern-Kind-Beziehung zu beenden, nicht nur per Kommandozeilen-Muster. Zwei Deployment-Varianten - Bare-Metal mit venv und Docker mit systemweitem Python - laufen mit identischem Code.</desc>
+          <title>Master process and deployment variants</title>
+          <desc>start_detached.sh launches recorder_pipeline.py as the master process, remembers its PID, and the master reads streams.json to start a dedicated CameraAgent child process for each enabled camera. stop.sh uses the remembered PID to also terminate child processes via the real parent-child relationship, not just a command-line pattern. Two deployment variants — bare metal with a venv, and Docker with system-wide Python — run identical code.</desc>
           <g font-family="sans-serif" fill="#e7e6e1">
 
           <rect x="440" y="20" width="240" height="46" rx="8" fill="#1d222d" stroke="#2a3040"/>
@@ -798,23 +798,23 @@
           <line x1="560" y1="66" x2="560" y2="94" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar5)"/>
 
           <rect x="380" y="96" width="360" height="70" rx="8" fill="#1e3d38" stroke="#4fd1b5"/>
-          <text x="560" y="120" text-anchor="middle" font-size="13" font-weight="500" fill="#dff5ee">.venv vorhanden?</text>
-          <text x="450" y="142" text-anchor="middle" font-size="10.5" fill="#9fd8c8">ja → .venv/bin/python</text>
-          <text x="670" y="142" text-anchor="middle" font-size="10.5" fill="#9fd8c8">nein → System-python3</text>
-          <text x="560" y="158" text-anchor="middle" font-size="10" fill="#e8b04d">bedient Bare-Metal UND Docker mit derselben Datei</text>
+          <text x="560" y="120" text-anchor="middle" font-size="13" font-weight="500" fill="#dff5ee">.venv present?</text>
+          <text x="450" y="142" text-anchor="middle" font-size="10.5" fill="#9fd8c8">yes → .venv/bin/python</text>
+          <text x="670" y="142" text-anchor="middle" font-size="10.5" fill="#9fd8c8">no → system python3</text>
+          <text x="560" y="158" text-anchor="middle" font-size="10" fill="#e8b04d">serves bare metal AND Docker with the same file</text>
 
           <line x1="560" y1="166" x2="560" y2="194" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar5)"/>
 
           <rect x="380" y="196" width="360" height="60" rx="8" fill="#1d222d" stroke="#2a3040"/>
           <text x="560" y="220" text-anchor="middle" font-size="12.5" font-weight="500" font-family="monospace">recorder_pipeline.py (Master)</text>
-          <text x="560" y="240" text-anchor="middle" font-size="10.5" fill="#a8adba">PID → pipeline.pid geschrieben</text>
+          <text x="560" y="240" text-anchor="middle" font-size="10.5" fill="#a8adba">PID → written to pipeline.pid</text>
 
           <line x1="560" y1="256" x2="560" y2="284" stroke="#6b7180" stroke-width="1.2" marker-end="url(#ar5)"/>
 
           <rect x="340" y="286" width="440" height="66" rx="8" fill="#171b24" stroke="#2a3040" stroke-dasharray="4 3"/>
           <text x="560" y="310" text-anchor="middle" font-size="12.5" font-family="monospace">for stream in STREAMS: if enabled → spawn</text>
-          <text x="560" y="330" text-anchor="middle" font-size="10.5" fill="#e8b04d">streams.json enabled — NICHT stream_overrides.json</text>
-          <text x="560" y="344" text-anchor="middle" font-size="10.5" fill="#e8b04d">(heutiger Bug: die zwei wurden vermischt)</text>
+          <text x="560" y="330" text-anchor="middle" font-size="10.5" fill="#e8b04d">streams.json enabled — NOT stream_overrides.json</text>
+          <text x="560" y="344" text-anchor="middle" font-size="10.5" fill="#e8b04d">(today's bug: the two were conflated)</text>
 
           <line x1="450" y1="352" x2="260" y2="390" stroke="#6b7180" stroke-width="1" marker-end="url(#ar5)"/>
           <line x1="560" y1="352" x2="560" y2="390" stroke="#6b7180" stroke-width="1" marker-end="url(#ar5)"/>
@@ -827,7 +827,7 @@
           </g>
           <g font-family="monospace" font-size="11.5" fill="#dff5ee" text-anchor="middle">
             <text x="260" y="420">CameraAgent(Entrance)</text>
-            <text x="560" y="420">CameraAgent(Bedroom)</text>
+            <text x="560" y="420">CameraAgent(Backdoor)</text>
             <text x="860" y="420">CameraAgent(…)</text>
           </g>
 
@@ -837,15 +837,15 @@
 
           <rect x="340" y="468" width="440" height="72" rx="8" fill="#3d2a21" stroke="#e08a6e"/>
           <text x="560" y="490" text-anchor="middle" font-size="12.5" font-weight="500" fill="#fbe0d2">pkill -P &lt;master_pid&gt;</text>
-          <text x="560" y="508" text-anchor="middle" font-size="10.5" fill="#eec4ac">echte Eltern-Kind-Beziehung, nicht Text-Muster</text>
-          <text x="560" y="526" text-anchor="middle" font-size="10.5" fill="#eec4ac">(heutiger Bug: altes Muster traf Kinder nie)</text>
+          <text x="560" y="508" text-anchor="middle" font-size="10.5" fill="#eec4ac">real parent-child relationship, not a text pattern</text>
+          <text x="560" y="526" text-anchor="middle" font-size="10.5" fill="#eec4ac">(today's bug: old pattern never matched children)</text>
           </g>
         </svg>
         <div class="legend">
-          <span><i style="background:#4fd1b5"></i>heute gefundene und behobene Bugs im Fluss markiert</span>
+          <span><i style="background:#4fd1b5"></i>bugs found and fixed today, marked in the flow</span>
         </div>
         <div class="note">
-          Docker-Deployment nutzt <code class="inline">network_mode: host</code>, bindmountet <code class="inline">streams.json</code>, <code class="inline">alerts/</code>, <code class="inline">config.py</code> direkt vom Host — beide Umgebungen teilen sich dieselben Konfigurationsdateien, laufen aber als komplett getrennte Prozesse mit eigenem Python-Interpreter.
+          The Docker deployment uses <code class="inline">network_mode: host</code>, bind-mounting <code class="inline">streams.json</code>, <code class="inline">alerts/</code>, and <code class="inline">config.py</code> directly from the host — both environments share the same configuration files but run as completely separate processes with their own Python interpreter.
         </div>
       </div>
     </section>
