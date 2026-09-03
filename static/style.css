@@ -1205,8 +1205,29 @@ input:checked + .slider:before { transform: translateX(21px); background: var(--
     padding: 14px;
     cursor: pointer;
     transition: border-color 0.15s;
+    position: relative;
 }
 .cluster-summary-card:hover { border-color: var(--primary); }
+.cluster-ignore-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    width: 26px;
+    height: 26px;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+.cluster-summary-card:hover .cluster-ignore-btn { opacity: 1; }
+.cluster-ignore-btn:hover { color: var(--primary); border-color: var(--primary); }
 .cluster-preview-stack {
     display: flex;
 }

@@ -985,6 +985,32 @@ def api_recluster_faces():
     except Exception as e:
         return json.dumps({'ok': False, 'error': str(e)})
 
+@app.route('/api/ignore_cluster', methods=['POST'])
+@requires_auth
+def api_ignore_cluster():
+    _verify_csrf()
+    if faces_db is None:
+        return json.dumps({'ok': False, 'error': 'Face recognition module not available.'})
+    try:
+        cluster_id = int(request.form.get('cluster_id', ''))
+    except (TypeError, ValueError):
+        return json.dumps({'ok': False, 'error': 'Invalid cluster_id.'})
+    ok = faces_db.ignore_cluster(cluster_id)
+    return json.dumps({'ok': ok})
+
+@app.route('/api/unignore_cluster', methods=['POST'])
+@requires_auth
+def api_unignore_cluster():
+    _verify_csrf()
+    if faces_db is None:
+        return json.dumps({'ok': False, 'error': 'Face recognition module not available.'})
+    try:
+        cluster_id = int(request.form.get('cluster_id', ''))
+    except (TypeError, ValueError):
+        return json.dumps({'ok': False, 'error': 'Invalid cluster_id.'})
+    ok = faces_db.unignore_cluster(cluster_id)
+    return json.dumps({'ok': ok})
+
 @app.route('/api/cleanup_orphaned_faces', methods=['POST'])
 @requires_auth
 def api_cleanup_orphaned_faces():

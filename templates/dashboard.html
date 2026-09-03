@@ -667,7 +667,10 @@
                 <h4 style="margin: 0 0 10px 0; font-size: 0.9rem; color: var(--text-muted);">Named people</h4>
                 <div id="peopleGrid" class="people-grid"><p class="settings-hint">Loading…</p></div>
 
-                <h4 style="margin: 24px 0 10px 0; font-size: 0.9rem; color: var(--text-muted);">Unlabeled groups</h4>
+                <h4 style="margin: 24px 0 10px 0; font-size: 0.9rem; color: var(--text-muted); display:flex; align-items:center; justify-content:space-between;">
+                    Unlabeled groups
+                    <button type="button" id="toggleIgnoredClustersBtn" class="btn-select-all" onclick="toggleShowIgnoredClusters()" style="display:none; font-size:0.85rem; padding:4px 10px;"></button>
+                </h4>
                 <div id="clustersGrid" class="clusters-grid"></div>
             </div>
         </details>
@@ -1328,6 +1331,8 @@
         let peopleLoaded = false;
         let currentPeople = [];
         let currentClusters = {};
+        let currentClusterIgnored = {};   // cluster_id -> bool, separat statt die vielen bestehenden Stellen umzubauen
+        let showIgnoredClusters = false;
 
         function loadPeopleData() {
             peopleLoaded = true;
@@ -1335,7 +1340,18 @@
                 .then(r => r.json())
                 .then(data => {
                     currentPeople = data.people || [];
-                    currentClusters = data.clusters || {};
+                    // Backend liefert pro Cluster {faces, ignored} -- hier auf die
+                    // bisherige flache Array-Form zurückführen (currentClusters[cid]
+                    // ist an vielen Stellen im bestehenden Code direkt das Array),
+                    // ignored getrennt gemerkt.
+                    const rawClusters = data.clusters || {};
+                    currentClusters = {};
+                    currentClusterIgnored = {};
+                    Object.keys(rawClusters).forEach(cid => {
+                        const entry = rawClusters[cid];
+                        currentClusters[cid] = Array.isArray(entry) ? entry : (entry.faces || []);
+                        currentClusterIgnored[cid] = Array.isArray(entry) ? false : !!entry.ignored;
+                    });
                     renderPeopleGrid();
                     renderClustersGrid();
                     const personSel = document.getElementById('filterPerson');
@@ -1372,9 +1388,22 @@
 
         function renderClustersGrid() {
             const container = document.getElementById('clustersGrid');
-            const clusterIds = Object.keys(currentClusters);
+            const allClusterIds = Object.keys(currentClusters);
+            const clusterIds = allClusterIds.filter(cid =>
+                showIgnoredClusters ? currentClusterIgnored[cid] : !currentClusterIgnored[cid]
+            );
+            const ignoredCount = allClusterIds.filter(cid => currentClusterIgnored[cid]).length;
+            const toggleBtn = document.getElementById('toggleIgnoredClustersBtn');
+            if (toggleBtn) {
+                toggleBtn.style.display = (ignoredCount > 0 || showIgnoredClusters) ? 'inline-flex' : 'none';
+                toggleBtn.innerHTML = showIgnoredClusters
+                    ? '<i class="fa-solid fa-eye"></i> Show active clusters'
+                    : `<i class="fa-solid fa-eye-slash"></i> Show ignored clusters (${ignoredCount})`;
+            }
             if (!clusterIds.length) {
-                container.innerHTML = '<p class="settings-hint">No unlabeled groups right now. Run "Re-cluster" after new recordings come in with faces in them.</p>';
+                container.innerHTML = showIgnoredClusters
+                    ? '<p class="settings-hint">No ignored groups.</p>'
+                    : '<p class="settings-hint">No unlabeled groups right now. Run "Re-cluster" after new recordings come in with faces in them.</p>';
                 return;
             }
             container.innerHTML = clusterIds.map(cid => {
@@ -1385,13 +1414,34 @@
                 const preview = faces.slice(0, 3).map(f =>
                     `<img src="/face_crop/${f.id}" class="cluster-preview-thumb" alt="" onclick="event.stopPropagation(); zoomFace('/face_crop/${f.id}')">`
                 ).join('');
+                const ignoreBtn = showIgnoredClusters
+                    ? `<button type="button" class="cluster-ignore-btn" onclick="event.stopPropagation(); toggleClusterIgnored('${cid}', false)" title="Show this group again"><i class="fa-solid fa-eye"></i></button>`
+                    : `<button type="button" class="cluster-ignore-btn" onclick="event.stopPropagation(); toggleClusterIgnored('${cid}', true)" title="Hide this group (not deleted, just hidden)"><i class="fa-solid fa-eye-slash"></i></button>`;
                 return `
                     <div class="cluster-summary-card" onclick="openClusterLightbox('${cid}')">
+                        ${ignoreBtn}
                         <div class="cluster-preview-stack">${preview}</div>
                         <div class="cluster-summary-count">${faces.length} face${faces.length === 1 ? '' : 's'} — click to review</div>
                     </div>
                 `;
             }).join('');
+        }
+
+        function toggleClusterIgnored(cid, ignored) {
+            const url = ignored ? '/api/ignore_cluster' : '/api/unignore_cluster';
+            _postForm(url, { cluster_id: cid }).then(res => {
+                if (res.ok) {
+                    currentClusterIgnored[cid] = ignored;
+                    renderClustersGrid();
+                } else {
+                    showToast('⚠️ Failed: ' + (res.error || 'unknown error'), 6000);
+                }
+            });
+        }
+
+        function toggleShowIgnoredClusters() {
+            showIgnoredClusters = !showIgnoredClusters;
+            renderClustersGrid();
         }
 
         // Merkt sich, welche Lightbox-Ansicht gerade offen ist (Person oder

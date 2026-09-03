@@ -46,6 +46,12 @@ def _connect():
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_faces_person ON faces(person_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_faces_cluster ON faces(cluster_id)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ignored_clusters (
+            cluster_id INTEGER PRIMARY KEY,
+            ignored_at REAL
+        )
+    """)
     return conn
 
 
@@ -400,7 +406,11 @@ def set_cluster_ids(face_cluster_map):
 
 
 def list_clusters():
-    """Alle aktuellen (unbenannten) Cluster mit ihren Gesichtern, gruppiert."""
+    """Alle aktuellen (unbenannten) Cluster mit ihren Gesichtern, gruppiert.
+    Jeder Cluster trägt zusätzlich ein 'ignored'-Flag -- ignorierte Cluster
+    werden NICHT weggelassen (das Frontend entscheidet per Standard-Filter
+    + "Show ignored clusters"-Umschalter, was angezeigt wird), damit ein
+    einziger Aufruf für beide Ansichten reicht."""
     try:
         conn = _connect()
         rows = conn.execute(
@@ -408,16 +418,51 @@ def list_clusters():
             "WHERE cluster_id IS NOT NULL AND person_id IS NULL AND rejected = 0 "
             "ORDER BY cluster_id"
         ).fetchall()
+        ignored_ids = {r[0] for r in conn.execute("SELECT cluster_id FROM ignored_clusters").fetchall()}
         conn.close()
         clusters = {}
         for face_id, cluster_id, filename, base_dir, crop_path in rows:
-            clusters.setdefault(cluster_id, []).append({
+            if cluster_id not in clusters:
+                clusters[cluster_id] = {"faces": [], "ignored": cluster_id in ignored_ids}
+            clusters[cluster_id]["faces"].append({
                 "id": face_id, "filename": filename, "base_dir": base_dir, "crop_path": crop_path
             })
         return clusters
     except Exception as e:
         print(f"⚠️ Konnte Cluster nicht laden: {e}")
         return {}
+
+
+def ignore_cluster(cluster_id):
+    """Blendet einen Cluster aus der Standardansicht aus (nur noch über
+    'Show ignored clusters' sichtbar) -- löscht keine Gesichter, rein
+    kosmetisch/organisatorisch, jederzeit über unignore_cluster() rückgängig
+    zu machen."""
+    try:
+        conn = _connect()
+        import time
+        conn.execute(
+            "INSERT OR REPLACE INTO ignored_clusters (cluster_id, ignored_at) VALUES (?, ?)",
+            (cluster_id, time.time())
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"⚠️ Konnte Cluster {cluster_id} nicht ignorieren: {e}")
+        return False
+
+
+def unignore_cluster(cluster_id):
+    try:
+        conn = _connect()
+        conn.execute("DELETE FROM ignored_clusters WHERE cluster_id = ?", (cluster_id,))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"⚠️ Konnte Cluster {cluster_id} nicht zurückholen: {e}")
+        return False
 
 
 def list_people():
