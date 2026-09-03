@@ -33,4 +33,5 @@ fi
 
 nohup "$PYTHON_EXE" recorder_pipeline.py >> "$LOG_FILE" 2>&1 &
 PID=$!
+echo "$PID" > ./pipeline.pid
 echo "✅ Pipeline started with PID: $PID" | tee -a "$LOG_FILE"
