@@ -2213,12 +2213,12 @@
                 const analyzeBtn = showAnalyzeBtn
                     ? `<button type="button" class="btn-analyze" title="${ev.ai_description ? 'Re-analyze' : 'Analyze'}" onclick="event.stopPropagation(); analyzeEvent('${fn}', ${isArchived})"><i class="fa-solid fa-wand-magic-sparkles"></i></button>`
                     : '';
-                const exportBtn = EXPORT_ENABLED
+                const exportBtn = (EXPORT_ENABLED && !ev.is_recording)
                     ? `<button type="button" class="btn-export" title="Export to configured folder" onclick="event.stopPropagation(); exportEvent('${fn}', ${isArchived})"><i class="fa-solid fa-file-export"></i></button>`
                     : '';
                 const actions = (isArchived
                     ? `<button type="button" class="btn-delete" title="Permanently delete video" onclick="event.stopPropagation(); deleteEvent('${fn}', true)"><i class="fa-solid fa-trash-can"></i></button>`
-                    : `<button type="button" class="btn-archive" title="Archive video" onclick="event.stopPropagation(); archiveEvent('${fn}')"><i class="fa-solid fa-box-archive"></i></button>
+                    : `${ev.is_recording ? '' : `<button type="button" class="btn-archive" title="Archive video" onclick="event.stopPropagation(); archiveEvent('${fn}')"><i class="fa-solid fa-box-archive"></i></button>`}
                        <button type="button" class="btn-delete" title="Delete video" onclick="event.stopPropagation(); deleteEvent('${fn}', false)"><i class="fa-solid fa-trash-can"></i></button>`) + analyzeBtn + exportBtn;
                 let aiLine = '';
                 if (ev.ai_pending) {
@@ -2561,11 +2561,11 @@
             }
             renderLightboxMetadata(ev);
 
-            document.getElementById('lightboxArchiveBtn').style.display = archived ? 'none' : 'inline-flex';
+            document.getElementById('lightboxArchiveBtn').style.display = (archived || (ev && ev.is_recording)) ? 'none' : 'inline-flex';
             document.getElementById('lightboxDeleteBtn').innerHTML = archived
                 ? '<i class="fa-solid fa-trash-can"></i> Delete permanently'
                 : '<i class="fa-solid fa-trash-can"></i> Delete';
-            document.getElementById('lightboxExportBtn').style.display = EXPORT_ENABLED ? 'inline-flex' : 'none';
+            document.getElementById('lightboxExportBtn').style.display = (EXPORT_ENABLED && !(ev && ev.is_recording)) ? 'inline-flex' : 'none';
 
             videoPlayer.onloadeddata = () => {
                 loader.style.display = 'none';

@@ -711,6 +711,9 @@ def _run_export(src_dir, filename, dest_root):
             return False, str(e)
 
 def _export_route_handler(src_dir, filename):
+    src_path = os.path.join(src_dir, filename)
+    if os.path.exists(os.path.splitext(src_path)[0] + '.recording'):
+        return json.dumps({'ok': False, 'error': 'Recording still in progress — wait until it finishes.'})
     settings = load_settings()
     export_dir = (settings.get('EXPORT_DIR') or '').strip()
     if not export_dir:
@@ -1527,6 +1530,13 @@ def archive_video(filename: str):
     if not (src_path.startswith(os.path.abspath(ALERTS_DIR)) and os.path.isfile(src_path)
             and os.path.dirname(src_path) == os.path.abspath(ALERTS_DIR)):
         return json.dumps({'ok': False, 'error': 'Video not found.'})
+    if os.path.exists(os.path.splitext(src_path)[0] + '.recording'):
+        # Noch aktiv aufgezeichnet -- der Recorder-Prozess hat den Dateipfad
+        # noch offen und erwartet ihn dort für die eigene Ende-Bereinigung
+        # (Marker entfernen etc.). Ein Verschieben mittendrin würde diese
+        # Pfad-Erwartung zerstören, auch wenn der offene Dateihandle selbst
+        # unter Linux technisch gültig bliebe.
+        return json.dumps({'ok': False, 'error': 'Recording still in progress — wait until it finishes.'})
     try:
         shutil.move(src_path, os.path.join(ARCHIVE_DIR, os.path.basename(src_path)))
     except Exception as e:
