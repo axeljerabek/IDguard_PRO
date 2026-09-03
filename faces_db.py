@@ -444,9 +444,12 @@ def list_people():
         for r in rows:
             person_id, name, rep_face_id, crop_path, base_dir, face_count = r
             full_path = os.path.join(base_dir, crop_path) if (base_dir and crop_path) else None
-            if full_path and not os.path.exists(full_path):
-                # Titelbild-Datei fehlt -- nächstes noch existierendes Gesicht
-                # derselben Person suchen.
+            needs_fallback = (not full_path) or (not os.path.exists(full_path))
+            if needs_fallback:
+                # Titelbild-Datei fehlt ODER representative_face_id zeigt auf
+                # eine Face-ID, die in der faces-Tabelle gar nicht mehr existiert
+                # (z.B. komplett entfernt statt nur rejected) -- in BEIDEN Fällen
+                # nächstes noch existierendes Gesicht derselben Person suchen.
                 candidates = conn.execute(
                     "SELECT id, crop_path, base_dir FROM faces WHERE person_id = ? AND rejected = 0",
                     (person_id,)
