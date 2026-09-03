@@ -533,6 +533,7 @@ def get_detailed_system_status():
         'recording_states': _read_recording_states(),
         'disk': _get_disk_status(),
         'ollama_status': _check_ollama_status(),
+        'thumbnail_interval_ms': int(round(1000 / (load_settings().get('THUMBNAIL_FPS', 1) or 1))),
     }
 
 def _load_streams_display():

@@ -797,7 +797,7 @@
         const INITIAL_ARCHIVED = {{ archived_events | tojson }};
         const CAMERA_NAMES = {{ streams | tojson }};
         const AI_TOPICS_LIST = {{ settings.get('AI_TOPICS', []) | tojson }};
-        const THUMBNAIL_INTERVAL_MS = {{ thumbnail_interval_ms }};
+        let THUMBNAIL_INTERVAL_MS = {{ thumbnail_interval_ms }};
         const DEFAULT_TITLE = document.title;
         const EXPORT_ENABLED = {{ 'true' if settings.get('EXPORT_DIR') else 'false' }};
 
@@ -1049,7 +1049,8 @@
         });
 
         const STREAM_OVERRIDES = {{ overrides | tojson }};
-        setInterval(() => {
+        let gridThumbInterval = setInterval(pollGridThumbnails, THUMBNAIL_INTERVAL_MS);
+        function pollGridThumbnails() {
             const streams = {{ streams | tojson }};
             streams.forEach(stream => {
                 const img = document.getElementById('thumb-' + stream);
@@ -1060,7 +1061,31 @@
                 }
                 img.src = '/thumbnail/' + stream + '?t=' + new Date().getTime();
             });
-        }, THUMBNAIL_INTERVAL_MS);
+        }
+
+        // Live nachziehbar, falls THUMBNAIL_FPS in den Settings geändert wird —
+        // THUMBNAIL_INTERVAL_MS wurde bisher nur EINMAL beim Seitenladen aus den
+        // Settings berechnet. Eine Änderung griff serverseitig zwar sofort
+        // (recorder_pipeline.py liest die Schreibrate alle 5s neu), aber das
+        // Frontend pollte weiter mit der alten, beim Laden fixierten Rate, bis
+        // die Seite neu geladen wurde — fühlte sich "langsamer als eingestellt"
+        // an. Wird von der periodischen Status-Abfrage weiter unten aufgerufen,
+        // sobald sich thumbnail_interval_ms vom aktuellen Wert unterscheidet.
+        function updateThumbnailPollRate(newIntervalMs) {
+            if (!newIntervalMs || newIntervalMs === THUMBNAIL_INTERVAL_MS) return;
+            THUMBNAIL_INTERVAL_MS = newIntervalMs;
+            clearInterval(gridThumbInterval);
+            gridThumbInterval = setInterval(pollGridThumbnails, THUMBNAIL_INTERVAL_MS);
+            if (livePreviewInterval) {
+                clearInterval(livePreviewInterval);
+                livePreviewInterval = setInterval(() => {
+                    if (!hlsStarted && currentLiveCamera) {
+                        document.getElementById('livePreviewImage').src =
+                            '/thumbnail/' + currentLiveCamera + '?t=' + Date.now();
+                    }
+                }, THUMBNAIL_INTERVAL_MS);
+            }
+        }
 
         const liveLightbox = document.getElementById('live-lightbox');
 
@@ -2294,6 +2319,9 @@
                             if (isRec) anyRecording = true;
                         });
                         document.title = anyRecording ? '🔴 REC · IDguard PRO' : DEFAULT_TITLE;
+                    }
+                    if (data.thumbnail_interval_ms) {
+                        updateThumbnailPollRate(data.thumbnail_interval_ms);
                     }
                     if (data.ollama_status) {
                         const badge = document.getElementById('ollamaStatus');
