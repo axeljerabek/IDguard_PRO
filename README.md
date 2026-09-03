@@ -4,6 +4,10 @@ IDguard PRO watches your cameras, decides what's actually worth recording, saves
 
 Parts of this code was written with AI (Google Gemini, Claude, Claude Code, and local models). But the architecture — deciding how the pieces should fit together, and the work of actually making it all run reliably — was still a person's job.
 
+![Architecture Overview](architecture_overview.png)
+
+[→ Full detailed architecture](ARCHITECTURE.html)
+
 ## Why IDguard PRO, instead of Motion or Frigate?
 
 Short answer: it depends what you want, and it's worth being honest about that up front rather than oversell.
