@@ -231,17 +231,11 @@ class CameraAgent(multiprocessing.Process):
             self.logger = logging.getLogger(self.name)
             YOLO_VERSION = "v10"  # Fallback
 
-        # Fix 2: SIGTERM (Standard-Signal von `pkill`/`kill`, siehe stop.sh) hat
-        # ohne eigenen Handler die Default-Disposition "sofort beenden" — das
-        # überspringt jeden Python-Code inkl. finally-Blöcken. Ohne diesen
-        # Handler wird eine laufende Aufnahme beim Stoppen NIE sauber
-        # geschlossen (kein Flush, potenziell kaputte MP4-Datei).
+        # SIGTERM-Handler wird bewusst SPÄTER registriert (siehe kurz vor dem
+        # Eintritt in den Hauptloop) — nicht hier, direkt am Anfang. Details dort.
         def _handle_signal(signum, frame):
             self._stop_event.set()
             raise GracefulShutdown()
-
-        signal.signal(signal.SIGTERM, _handle_signal)
-        signal.signal(signal.SIGINT, _handle_signal)
 
         print(f"🚀 [Process Start] Initializing agent: {self.name} (Using YOLO {YOLO_VERSION})")
 
@@ -822,6 +816,22 @@ class CameraAgent(multiprocessing.Process):
                             container = None
                             time.sleep(5)
                             continue
+
+                # Erst JETZT den SIGTERM-Handler aktivieren — nicht schon ganz am
+                # Anfang von run(). Bis hierher lief NVENC-Probe, Modell-Laden und
+                # der Verbindungsaufbau: alles native, fragile ffmpeg/CUDA-C-Code.
+                # Ein SIGTERM währenddessen würde mit dem alten, früh registrierten
+                # Handler eine Python-Exception MITTEN in diesem C-Code auslösen —
+                # genau das Muster, das zu "terminate called without an active
+                # exception" führen kann (beobachtet bei Axel, exakt während der
+                # frühen Initialisierungsphase einer Kamera). Bis hierher nutzt ein
+                # SIGTERM also bewusst Pythons sicheres Standardverhalten (sofortiges
+                # Beenden, kein Python-Exception-Einwurf in laufenden C-Aufrufen) —
+                # es gibt ohnehin noch keine laufende Aufnahme zu retten. Ab hier,
+                # im stabilen Hauptloop, übernimmt der eigentliche Graceful-Shutdown-
+                # Handler, damit eine Aufnahme beim Stoppen sauber geflusht wird.
+                signal.signal(signal.SIGTERM, _handle_signal)
+                signal.signal(signal.SIGINT, _handle_signal)
 
                 try:
                     for packet in container.demux():
