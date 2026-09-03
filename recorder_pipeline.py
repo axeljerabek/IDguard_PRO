@@ -1178,6 +1178,19 @@ class CameraAgent(multiprocessing.Process):
             self.logger.error(f"💥 Process Crash [{self.name}]: {e}")
         finally:
             close_writer()
+            # Filmstrip-Schreib-Thread ist bewusst ein Daemon-Thread (stirbt
+            # sofort mit dem Prozess, ohne selbst zu blockieren) -- das heißt
+            # aber auch: OHNE explizites Warten hier könnten noch nicht
+            # geschriebene Bilder aus der Queue (close_writer() -> flush_
+            # filmstrip() reiht die gerade erst ein) beim Prozessende verloren
+            # gehen. queue.Queue.join() blockiert, bis JEDES eingereihte Item
+            # tatsächlich geschrieben wurde (task_done() im Writer-Loop) --
+            # ohne das könnten manche Filmstrip-Slots einer Aufnahme fehlen,
+            # gerade bei der letzten Aufnahme vor einem Neustart/Shutdown.
+            try:
+                _filmstrip_write_queue.join()
+            except Exception:
+                pass
             av_buffer.clear()  # dieselbe Absicherung wie beim Reconnect-Pfad
             _detector_stop_event.set()
             if audio_trigger is not None:
