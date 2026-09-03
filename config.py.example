@@ -137,7 +137,7 @@ if not os.path.exists(MODEL_PATH) or os.path.getsize(MODEL_PATH) < MODEL_MIN_BYT
 STREAMS_F = os.path.join(PROJECT_ROOT, "streams.json")
 
 STREAMS = [
-    {"name": "Example_Camera", "url": "rtmp://192.168.1.50/live/stream", "enabled": False, "type": "VIDEO"}
+    {"name": "Example_Camera", "url": "rtmp://192.168.1.50/live/stream", "enabled": False, "audio_enabled": True, "type": "VIDEO"}
 ]
 if os.path.exists(STREAMS_F):
     try:
@@ -148,17 +148,19 @@ if os.path.exists(STREAMS_F):
     except Exception as e:
         print(f"Streams-Konfigurationsfehler: {e}")
 
-# Web-UI Stream Overrides anwenden (Ein/Aus-Umschalter pro Kamera im
-# Dashboard, unabhängig von der vollen Kamera-Bearbeitung oben)
-if os.path.exists(OVERRIDE_F):
-    try:
-        with open(OVERRIDE_F, 'r') as f:
-            overrides = json.load(f)
-            for stream in STREAMS:
-                if stream["name"] in overrides:
-                    stream["enabled"] = (overrides[stream["name"]] == "ON")
-    except Exception as e:
-        print(f"Config Override Fehler: {e}")
+# WICHTIG: stream_overrides.json NIEMALS in "enabled" mischen. overrides.json
+# ist ausschließlich die Dashboard-eigene Live-Vorschau-Pause (rein
+# kosmetisch, betrifft nur ob die Kachel im Dashboard ein Bild zeigt) — ein
+# komplett separates Konzept von "enabled" (steuert, ob überhaupt ein
+# CameraAgent-Prozess gestartet wird UND aufnimmt, siehe run_pipeline()
+# weiter unten: "if stream.get('enabled', False):"). Diese Datei hatte
+# genau diese Vermischung früher hier — eine im Dashboard abgewählte Kamera
+# (streams.json korrekt enabled=False) bekam trotzdem einen Prozess, weil
+# der (meist auf "ON" stehende) Vorschau-Override das enabled-Feld wieder
+# auf True zurückgesetzt hat, BEVOR der Spawn-Loop überhaupt lief. Derselbe
+# Fehler wurde in web_ui.py (_load_streams_display, reine Anzeige) schon
+# einmal gefunden und behoben — hier war die Ursache für tatsächlich
+# unerwünscht laufende Aufnahme-Prozesse.
 
 # Standard Processing Parameters
 PRE_ROLL_SEC  = 10
@@ -166,6 +168,28 @@ POST_ROLL_SEC = 30
 TARGET_FPS    = 30
 CONFIDENCE_THRESHOLD = 0.5
 DETECTION_CLASSES = [0]
+
+# Zentrale COCO-Klassen-Namen — von web_ui.py (Settings-Dropdown) UND
+# ai_analyze.py (dynamischer Beschreibungs-Prompt) genutzt, damit es nur
+# eine Quelle der Wahrheit gibt statt zweier Kopien, die auseinanderlaufen
+# könnten.
+COCO_CLASS_NAMES = {
+    0: "Person", 1: "Bicycle", 2: "Car", 3: "Motorcycle", 4: "Airplane", 5: "Bus",
+    6: "Train", 7: "Truck", 8: "Boat", 9: "Traffic light", 10: "Fire hydrant", 11: "Stop sign",
+    12: "Parking meter", 13: "Bench", 14: "Bird", 15: "Cat", 16: "Dog", 17: "Horse",
+    18: "Sheep", 19: "Cow", 20: "Elephant", 21: "Bear", 22: "Zebra", 23: "Giraffe",
+    24: "Backpack", 25: "Umbrella", 26: "Handbag", 27: "Tie", 28: "Suitcase",
+    29: "Frisbee", 30: "Skis", 31: "Snowboard", 32: "Sports ball", 33: "Kite",
+    34: "Baseballschläger", 35: "Baseball glove", 36: "Skateboard", 37: "Surfboard",
+    38: "Tennis racquet", 39: "Bottle", 40: "Wine glass", 41: "Cup", 42: "Fork",
+    43: "Knife", 44: "Spoon", 45: "Bowl", 46: "Banana", 47: "Apple", 48: "Sandwich",
+    49: "Orange", 50: "Broccoli", 51: "Carrot", 52: "Hotdog", 53: "Pizza", 54: "Donut",
+    55: "Cake", 56: "Chair", 57: "Couch", 58: "Potted plant", 59: "Bed", 60: "Dining table",
+    61: "Toilet", 62: "Television", 63: "Laptop", 64: "Mouse", 65: "Remote control",
+    66: "Keyboard", 67: "Mobile phone", 68: "Microwave", 69: "Oven", 70: "Toaster",
+    71: "Sink", 72: "Refrigerator", 73: "Book", 74: "Clock", 75: "Vase", 76: "Scissors",
+    77: "Teddy bear", 78: "Hair dryer", 79: "Toothbrush"
+}
 
 # Web-UI Pipeline Settings vollständig anwenden
 if os.path.exists(SETTINGS_F):
