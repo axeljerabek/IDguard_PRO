@@ -1451,7 +1451,7 @@ def save_streams():
 
     overrides = load_overrides()
     display_streams = [
-        {'name': s['name'], 'override_on': overrides.get(s['name'], 'ON') == 'ON'}
+        {'name': s['name'], 'override_on': overrides.get(s['name'], 'ON') == 'ON', 'enabled': s.get('enabled', False)}
         for s in new_streams
     ]
     return json.dumps({'ok': True, 'restarted': restarted, 'streams': display_streams})

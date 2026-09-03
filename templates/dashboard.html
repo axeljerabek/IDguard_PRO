@@ -39,7 +39,8 @@
             </summary>
             <div class="collapse-body">
                 <div class="streams-grid" id="streamsGrid">
-                    {% for stream in streams %}
+                    {% for stream_obj in streams_full %}
+                    {% set stream = stream_obj.name %}
                     <div class="stream-container" data-camera="{{ stream }}">
                         <div class="stream-header">
                             <span class="stream-name-wrap">
@@ -57,7 +58,7 @@
                                 <i class="fa-solid fa-eye-slash"></i> Preview hidden
                             </div>
                             {% if overrides.get(stream, 'ON') == 'ON' %}<span class="thumb-live-dot" title="Active"></span>{% endif %}
-                            <span class="thumb-rec-badge" id="rec-{{ stream }}" style="display:none;"><span class="rec-dot"></span>REC</span>
+                            {% if stream_obj.get('enabled', False) %}<span class="thumb-rec-badge" id="rec-{{ stream }}" style="display:none;"><span class="rec-dot"></span>REC</span>{% endif %}
                         </div>
                         <button type="button" class="stream-live-toggle" onclick="openLiveView('{{ stream }}')" title="Live view (HLS, with audio)"><i class="fa-solid fa-satellite-dish"></i> Live</button>
                     </div>
@@ -974,7 +975,7 @@
                             <i class="fa-solid fa-eye-slash"></i> Preview hidden
                         </div>
                         ${s.override_on ? '<span class="thumb-live-dot" title="Active"></span>' : ''}
-                        <span class="thumb-rec-badge" id="rec-${s.name}" style="display:none;"><span class="rec-dot"></span>REC</span>
+                        ${s.enabled ? `<span class="thumb-rec-badge" id="rec-${s.name}" style="display:none;"><span class="rec-dot"></span>REC</span>` : ''}
                     </div>
                     <button type="button" class="stream-live-toggle" onclick="openLiveView('${s.name}')" title="Live view (HLS, with audio)"><i class="fa-solid fa-satellite-dish"></i> Live</button>
                 </div>
