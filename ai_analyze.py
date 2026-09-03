@@ -12,6 +12,7 @@ blockiert also NICHT den Detection-Loop):
 import sys
 import os
 import json
+import re
 import glob
 import base64
 import time
@@ -262,17 +263,28 @@ def _classify_topics(images_b64, topics):
                 result = json.loads(resp.read().decode("utf-8"))
             raw = result.get("response", "").strip()
             if not raw:
-                # Leere Antwort bei "format": "json" — in der Praxis oft ein
-                # WEITERES Symptom desselben Kontext-Overflows (das Modell
-                # bricht die strukturierte Ausgabe einfach ab), auch wenn
-                # Ollama hier KEINEN sauberen 400er mit Fehlerdetails liefert
-                # wie beim Haupt-Beschreibungs-Request. Genau der Fall, der
-                # tatsächlich beobachtet wurde ("Expecting value: line 1
-                # column 1"). Bewusst als Overflow behandelt (weniger Bilder,
-                # erneut versuchen), da eine leere Response hier praktisch
-                # nie etwas anderes bedeutet.
-                raise ValueError("empty response from Ollama (likely context overflow)")
-            parsed = json.loads(raw)
+                # Reasoning-Modelle wie Qwen3 (Basis dieses Modells) legen ihre
+                # Antwort bei "format": "json" manchmal in den "thinking"-Kanal
+                # statt in "response" -- beobachtet und verifiziert bei Axel
+                # (response war leer, thinking enthielt die korrekte JSON-
+                # Antwort). Als Fallback dort suchen, BEVOR das als Kontext-
+                # Overflow behandelt wird -- eine echte leere Antwort in BEIDEN
+                # Feldern bleibt weiterhin ein plausibles Overflow-Symptom.
+                thinking = result.get("thinking", "").strip()
+                if thinking:
+                    raw = thinking
+                if not raw:
+                    raise ValueError("empty response from Ollama (likely context overflow)")
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                # "thinking" kann zusätzlichen Fließtext ums eigentliche JSON
+                # herum enthalten (Gedankengang vor der Antwort) -- das erste
+                # {...}-Objekt darin suchen, statt sofort aufzugeben.
+                match = re.search(r"\{[^{}]*\}", raw, re.DOTALL)
+                if not match:
+                    raise ValueError("empty response from Ollama (likely context overflow)")
+                parsed = json.loads(match.group(0))
             if not isinstance(parsed, dict):
                 raise ValueError(f"Erwartete ein JSON-Objekt, bekam: {type(parsed)}")
             break
