@@ -692,6 +692,13 @@
                 <i class="fa-solid fa-chevron-down chevron"></i>
             </summary>
             <div class="collapse-body">
+                <div class="search-bar">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <input type="text" id="archiveSearchInput" placeholder="Search archived descriptions, topics, transcripts, people..." onkeydown="if(event.key==='Enter') runArchiveSearch()">
+                    <button type="button" onclick="runArchiveSearch()">Search</button>
+                    <button type="button" id="archiveSearchClearBtn" onclick="clearArchiveSearch()" style="display:none;" title="Clear search"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div id="archiveSearchStatus" style="display:none;"></div>
                 <div class="filter-bar">
                     <select class="filter-camera" onchange="applyFilters(this)"><option value="">All cameras</option></select>
                     <select class="filter-person" onchange="applyFilters(this)"><option value="">All people</option></select>
@@ -2080,6 +2087,40 @@
             updateSystemStatus();
         }
 
+        // Eigene Archiv-Suche — nutzt denselben /api/search-Endpunkt (durchsucht
+        // ohnehin Description+Topics+Transkript+Personen über Recent UND Archiv
+        // hinweg), filtert hier aber gezielt auf archivierte Treffer und rendert
+        // NUR in archived-event-list, unabhängig von der globalen Suche oben.
+        let archiveSearchActive = false;
+        function runArchiveSearch() {
+            const q = document.getElementById('archiveSearchInput').value.trim();
+            if (!q) return;
+            if (filterActive) clearFilters();
+            const statusEl = document.getElementById('archiveSearchStatus');
+            statusEl.style.display = 'block';
+            statusEl.textContent = 'Searching...';
+            fetch('/api/search?q=' + encodeURIComponent(q))
+                .then(r => r.json())
+                .then(data => {
+                    archiveSearchActive = true;
+                    document.getElementById('archiveSearchClearBtn').style.display = 'inline-flex';
+                    const results = (data.results || []).filter(ev => ev.archived);
+                    statusEl.textContent = data.error
+                        ? ('Search error: ' + data.error)
+                        : `${results.length} result${results.length === 1 ? '' : 's'} for "${q}"`;
+                    document.getElementById('archived-event-list').innerHTML = renderEvents(results, true);
+                    document.getElementById('archive-count').innerText = results.length;
+                })
+                .catch(() => { statusEl.textContent = 'Search failed.'; });
+        }
+        function clearArchiveSearch() {
+            archiveSearchActive = false;
+            document.getElementById('archiveSearchInput').value = '';
+            document.getElementById('archiveSearchStatus').style.display = 'none';
+            document.getElementById('archiveSearchClearBtn').style.display = 'none';
+            updateSystemStatus();
+        }
+
         function renderEvents(events, archived) {
             if (!events || events.length === 0) {
                 const icon = archived ? 'fa-box-open' : 'fa-film';
@@ -2369,7 +2410,7 @@
                         document.getElementById('recent-event-list').innerHTML = renderEvents(merged, false) + moreButtonHtml('recent');
                         document.getElementById('event-count').innerText = merged.length;
                     }
-                    if (data.archived_events && !filterActive) {
+                    if (data.archived_events && !archiveSearchActive && !filterActive) {
                         const merged = data.archived_events.concat(extraEvents.archived);
                         document.getElementById('archived-event-list').innerHTML = renderEvents(merged, true) + moreButtonHtml('archived');
                         document.getElementById('archive-count').innerText = merged.length;
@@ -2453,6 +2494,7 @@
                 return;
             }
             if (searchActive) clearSearch();
+            if (archiveSearchActive) clearArchiveSearch();
             document.querySelectorAll('.filter-status').forEach(el => {
                 el.style.display = 'block';
                 el.textContent = 'Filtering…';
