@@ -449,7 +449,7 @@ def get_detailed_system_status():
     # UND multiprocessing 'spawn' erzeugt neben den echten Worker-Kindern
     # noch einen "resource_tracker"-Hilfsprozess, der hier explizit
     # ausgeschlossen wird.
-    enabled_streams = [s["name"] for s in STREAMS if s.get("enabled", False)]
+    enabled_streams = [s["name"] for s in _load_streams_display() if s.get("enabled", False)]
     worker_procs = []
     try:
         master_candidates = [
