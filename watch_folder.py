@@ -53,15 +53,79 @@ class GracefulShutdown(BaseException):
     pass
 
 
+def _video_codec_name(path, logger=print):
+    """Liefert den Codec-Namen der ersten Videospur, oder None falls das
+    nicht ermittelt werden kann (z.B. keine Videospur, Datei kaputt)."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=codec_name", "-of", "csv=p=0", path],
+            capture_output=True, text=True, timeout=30
+        )
+        name = result.stdout.strip()
+        return name or None
+    except Exception as e:
+        logger(f"⚠️ [Watchfolder] Codec-Erkennung fehlgeschlagen für {path}: {e}")
+        return None
+
+
+# Browser-Wiedergabe im Dashboard ist mit diesen Video-Codecs zuverlässig
+# kompatibel (H.264 praktisch überall, VP9/AV1 in aktuellen Chrome/Firefox-
+# Versionen) -- alles andere (allen voran HEVC/H.265: technisch einwandfrei,
+# aber die meisten Chrome/Firefox-Builds unter Windows/Linux haben aus
+# Lizenzgründen schlicht keinen HEVC-Decoder eingebaut) wird zu H.264
+# transkodiert, damit die Wiedergabe im Dashboard nicht nur Ton ohne Bild
+# zeigt -- genau das beobachtete Symptom bei einem HEVC-Import.
+BROWSER_COMPATIBLE_CODECS = {"h264", "vp9", "av1"}
+
+
+def _transcode_video_to_h264(src_path, logger=print):
+    """Nur die Videospur zu H.264 transkodieren, Audio bleibt Copy (AAC ist
+    ohnehin universell abspielbar, keine Notwendigkeit das anzufassen).
+    NVENC-Versuch zuerst (passt zur GPU-Beschleunigung im Rest des Systems),
+    Software-Fallback falls NVENC nicht verfügbar oder fehlschlägt."""
+    tmp_out = os.path.splitext(src_path)[0] + "__transcode.mp4"
+    for video_codec in ("h264_nvenc", "libx264"):
+        try:
+            result = subprocess.run(
+                ["ffmpeg", "-y", "-i", src_path,
+                 "-c:v", video_codec, "-c:a", "copy", tmp_out],
+                capture_output=True, text=True, timeout=1800
+            )
+            if result.returncode == 0 and os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 0:
+                if video_codec == "libx264":
+                    logger(f"ℹ️ [Watchfolder] NVENC nicht verfügbar, Software-Encoding (libx264) genutzt für {src_path}")
+                return tmp_out
+            logger(f"⚠️ [Watchfolder] Transkodierung mit {video_codec} fehlgeschlagen, versuche nächste Option: {result.stderr[-300:]}")
+        except Exception as e:
+            logger(f"⚠️ [Watchfolder] Transkodierungs-Fehler mit {video_codec}: {e}")
+    return None
+
+
 def _ensure_mp4(src_path, logger=print):
-    """Falls die Quelldatei nicht schon .mp4 ist: Container per ffmpeg
-    umverpacken (-c copy, KEIN Neu-Encoding — dieselbe Packet-Copy-Philosophie
-    wie beim Rest des Systems), sonst würde alles Nachgelagerte (Dauer-
-    Anzeige, Filmstrip-Erzeugung, Player-Kompatibilität im Dashboard) auf
-    einer Datei mit falscher Endung aufsetzen. Bei bereits-.mp4 keine
-    Kopie/Umwandlung nötig, Originaldatei wird direkt weiterverwendet."""
-    if src_path.lower().endswith(".mp4"):
+    """Stellt sicher, dass die Datei (a) im .mp4-Container vorliegt und (b)
+    einen im Dashboard-Player zuverlässig abspielbaren Video-Codec nutzt.
+
+    Zwei getrennte Sorgen, zwei getrennte Kosten:
+    - Container falsch (z.B. .mkv, .avi) -> günstiger Copy-Remux (kein
+      Neu-Encoding, dieselbe Packet-Copy-Philosophie wie beim Rest des
+      Systems).
+    - Video-Codec inkompatibel (z.B. HEVC) -> echtes Transkodieren NUR der
+      Videospur nötig, das kostet tatsächlich Zeit/GPU — aber ohne das würde
+      die Datei im Dashboard nur Ton ohne Bild zeigen (genau das beobachtete
+      Symptom bei einem per DaVinci Resolve exportierten HEVC-Import)."""
+    codec = _video_codec_name(src_path, logger)
+    needs_container_fix = not src_path.lower().endswith(".mp4")
+    needs_transcode = codec is not None and codec not in BROWSER_COMPATIBLE_CODECS
+
+    if not needs_container_fix and not needs_transcode:
         return src_path
+
+    if needs_transcode:
+        logger(f"🎞️ [Watchfolder] Video-Codec '{codec}' ist im Browser unzuverlässig abspielbar, transkodiere zu H.264: {src_path}")
+        return _transcode_video_to_h264(src_path, logger)
+
+    # Nur Container falsch, Codec bereits kompatibel -- günstiger Copy-Remux.
     tmp_out = os.path.splitext(src_path)[0] + "__remux.mp4"
     try:
         result = subprocess.run(
