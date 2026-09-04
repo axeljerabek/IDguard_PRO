@@ -18,6 +18,12 @@ from datetime import datetime
 
 # Stellt sicher, dass das Arbeitsverzeichnis und der Import-Pfad passen
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(SCRIPT_DIR)
+try:
+    import ai_analyze
+except Exception as e:
+    ai_analyze = None
+    print(f"⚠️ ai_analyze-Modul konnte nicht importiert werden, eigene Notizen können nicht in die XMP-Sidecar geschrieben werden: {e}")
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 os.chdir(SCRIPT_DIR)
@@ -181,6 +187,7 @@ def _event_from_file(f):
         top_topic, top_topic_conf = None, None
         detected_topics = []
         transcript = None
+        user_note = ''
         ai_path = os.path.splitext(f)[0] + '.ai.json'
         if os.path.exists(ai_path):
             try:
@@ -191,6 +198,7 @@ def _event_from_file(f):
                 top_topic_conf = ai_meta.get('top_topic_confidence')
                 detected_topics = ai_meta.get('detected_topics') or []
                 transcript = ai_meta.get('transcript')
+                user_note = ai_meta.get('user_note', '')
             except Exception:
                 pass
         ai_pending = os.path.exists(os.path.splitext(f)[0] + '.ai.pending')
@@ -237,6 +245,7 @@ def _event_from_file(f):
             'top_topic_confidence': top_topic_conf,
             'detected_topics': detected_topics,
             'transcript': transcript,
+            'user_note': user_note,
             'trigger_confidence': trigger_conf,
             'trigger_class': trigger_cls,
             'manual': is_manual,
@@ -631,6 +640,56 @@ def _trigger_analysis(base_dir, filename):
 def analyze_video(filename: str):
     _verify_csrf()
     ok, err = _trigger_analysis(ALERTS_DIR, filename)
+    return json.dumps({'ok': ok, 'error': err})
+
+def _save_note(base_dir, filename):
+    note = request.form.get('note', '')
+    basename = os.path.splitext(filename)[0]
+    meta_path = os.path.join(base_dir, f"{basename}.ai.json")
+    meta = {}
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path) as f:
+                meta = json.load(f)
+        except Exception:
+            meta = {}
+    meta['user_note'] = note
+    try:
+        with open(meta_path, 'w', encoding='utf-8') as f:
+            json.dump(meta, f)
+    except Exception as e:
+        return False, str(e)
+
+    # XMP-Sidecar direkt mitaktualisieren -- ohne die komplette KI-Analyse
+    # neu laufen zu lassen, nur die Notiz in die schon vorhandene
+    # Beschreibung/Themen-Struktur einhängen.
+    if ai_analyze is not None:
+        try:
+            qualifying_topics = {
+                t: s for t, s in (meta.get('topics') or {}).items()
+                if s >= ai_analyze.AI_TOPICS_THRESHOLD
+            }
+            ai_analyze.write_xmp_sidecar(
+                basename, base_dir, meta.get('description', ''),
+                qualifying_topics, note
+            )
+        except Exception as e:
+            print(f"⚠️ XMP-Sidecar konnte bei Notiz-Speicherung nicht aktualisiert werden: {e}")
+    _event_cache.clear()
+    return True, None
+
+@app.route('/api/note/<filename>', methods=['POST'])
+@requires_auth
+def save_note(filename: str):
+    _verify_csrf()
+    ok, err = _save_note(ALERTS_DIR, filename)
+    return json.dumps({'ok': ok, 'error': err})
+
+@app.route('/api/note/archive/<filename>', methods=['POST'])
+@requires_auth
+def save_note_archived(filename: str):
+    _verify_csrf()
+    ok, err = _save_note(ARCHIVE_DIR, filename)
     return json.dumps({'ok': ok, 'error': err})
 
 @app.route('/analyze/archive/<filename>', methods=['POST'])

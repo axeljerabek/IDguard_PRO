@@ -785,6 +785,12 @@
                 <summary><i class="fa-solid fa-wand-magic-sparkles"></i> AI Description</summary>
                 <p id="lightboxAiDescText"></p>
             </details>
+            <details class="lightbox-ai-desc" id="lightboxNoteSection" open>
+                <summary><i class="fa-solid fa-note-sticky"></i> Your Note</summary>
+                <textarea id="lightboxNoteText" placeholder="Add your own note about this recording (e.g. 'false alarm, just the neighbor')..." rows="2" style="width:100%; resize:vertical; font-family:inherit; font-size:0.9rem; padding:8px; border-radius:var(--radius-sm); border:1px solid var(--border); background:var(--card-bg-inset); color:var(--text);"></textarea>
+                <button type="button" class="btn-select-all" id="lightboxNoteSaveBtn" onclick="saveLightboxNote()" style="margin-top:8px;"><i class="fa-solid fa-check"></i> Save note</button>
+                <span id="lightboxNoteStatus" style="font-size:0.85rem; color:var(--text-muted); margin-left:8px;"></span>
+            </details>
             <div id="lightboxMeta" class="lightbox-meta"></div>
             <div class="lightbox-actions" id="lightboxActions">
                 <button type="button" class="lightbox-btn-archive" id="lightboxArchiveBtn" onclick="archiveEvent(currentLightboxFilename)"><i class="fa-solid fa-box-archive"></i> Archive</button>
@@ -1752,6 +1758,26 @@
             });
         }
 
+        function saveLightboxNote() {
+            if (!currentLightboxFilename) return;
+            const note = document.getElementById('lightboxNoteText').value;
+            const url = (currentLightboxArchived ? '/api/note/archive/' : '/api/note/') + currentLightboxFilename;
+            const statusEl = document.getElementById('lightboxNoteStatus');
+            statusEl.textContent = 'Saving...';
+            _postForm(url, { note: note }).then(res => {
+                if (res.ok) {
+                    if (eventDataMap[currentLightboxFilename]) {
+                        eventDataMap[currentLightboxFilename].user_note = note;
+                    }
+                    statusEl.textContent = 'Saved ✓';
+                    setTimeout(() => { statusEl.textContent = ''; }, 2000);
+                } else {
+                    statusEl.textContent = '';
+                    showToast('⚠️ Could not save note: ' + (res.error || 'unknown error'), 6000);
+                }
+            });
+        }
+
         function archiveEvent(fn) {
             _postForm('/archive/' + fn, {}).then(res => {
                 if (res.ok) {
@@ -2601,6 +2627,8 @@
 
             const ev = eventDataMap[filename];
             const descBox = document.getElementById('lightboxAiDesc');
+            document.getElementById('lightboxNoteText').value = (ev && ev.user_note) ? ev.user_note : '';
+            document.getElementById('lightboxNoteStatus').textContent = '';
             if (ev && ev.ai_description) {
                 document.getElementById('lightboxAiDescText').textContent = ev.ai_description;
                 descBox.style.display = 'block';

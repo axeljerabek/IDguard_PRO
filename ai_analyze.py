@@ -174,6 +174,45 @@ def _xml_escape(s):
              .replace('"', "&quot;").replace("'", "&apos;"))
 
 
+def write_xmp_sidecar(video_basename, base_dir, description, qualifying_topics=None, user_note=""):
+    """Schreibt/aktualisiert die XMP-Sidecar-Datei — wiederverwendbar, damit
+    sowohl die normale Analyse als auch ein nachträgliches Bearbeiten der
+    eigenen Notiz (ohne die ganze KI-Analyse neu laufen zu lassen) dieselbe,
+    konsistente XMP-Struktur erzeugen. user_note wird in dieselbe
+    dc:description eingehängt (durch eine Leerzeile getrennt) statt in ein
+    separates XMP-Feld -- dc:description ist das bestätigt in Immich sichtbare
+    Feld, ein Zusatzfeld hätte ungewisse Sichtbarkeit."""
+    qualifying_topics = qualifying_topics or {}
+    xmp_path = os.path.join(base_dir, f"{video_basename}.mp4.xmp")
+    subject_block = ""
+    if qualifying_topics:
+        tags_xml = "".join(f"<rdf:li>{_xml_escape(t)}</rdf:li>" for t in qualifying_topics)
+        subject_block = f"""
+   <dc:subject>
+    <rdf:Bag>
+     {tags_xml}
+    </rdf:Bag>
+   </dc:subject>"""
+    full_description = description or ""
+    if user_note and user_note.strip():
+        full_description = f"{full_description}\n\nNote: {user_note.strip()}"
+    xmp = f"""<?xpacket begin="\ufeff" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/">
+   <dc:description>
+    <rdf:Alt>
+     <rdf:li xml:lang="x-default">{_xml_escape(full_description)}</rdf:li>
+    </rdf:Alt>
+   </dc:description>{subject_block}
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>
+<?xpacket end="w"?>"""
+    with open(xmp_path, "w", encoding="utf-8") as f:
+        f.write(xmp)
+
+
 def _pick_frames(frame_dir, max_frames):
     files = glob.glob(os.path.join(frame_dir, "*.jpg"))
     # Reservoir Sampling (recorder_pipeline.py) vergibt Slot-Nummern nicht mehr
@@ -456,34 +495,15 @@ def _analyze_inner(video_basename, base_dir):
         print(f"❌ Konnte {meta_path} nicht schreiben: {e}")
 
     # 2) XMP-Sidecar für Immich (dc:description + dc:subject für Themen)
-    xmp_path = os.path.join(base_dir, f"{video_basename}.mp4.xmp")
-    subject_block = ""
     qualifying_topics = {t: s for t, s in topics_result.items() if s >= AI_TOPICS_THRESHOLD}
-    if qualifying_topics:
-        tags_xml = "".join(f"<rdf:li>{_xml_escape(t)}</rdf:li>" for t in qualifying_topics)
-        subject_block = f"""
-   <dc:subject>
-    <rdf:Bag>
-     {tags_xml}
-    </rdf:Bag>
-   </dc:subject>"""
-    xmp = f"""<?xpacket begin="\ufeff" id="W5M0MpCehiHzreSzNTczkc9d"?>
-<x:xmpmeta xmlns:x="adobe:ns:meta/">
- <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
-  <rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/">
-   <dc:description>
-    <rdf:Alt>
-     <rdf:li xml:lang="x-default">{_xml_escape(description)}</rdf:li>
-    </rdf:Alt>
-   </dc:description>{subject_block}
-  </rdf:Description>
- </rdf:RDF>
-</x:xmpmeta>
-<?xpacket end="w"?>"""
     try:
-        with open(xmp_path, "w", encoding="utf-8") as f:
-            f.write(xmp)
+        existing_note = ""
+        if os.path.exists(meta_path):
+            with open(meta_path) as f:
+                existing_note = json.load(f).get("user_note", "")
+        write_xmp_sidecar(video_basename, base_dir, description, qualifying_topics, existing_note)
     except Exception as e:
+        xmp_path = os.path.join(base_dir, f"{video_basename}.mp4.xmp")
         print(f"❌ Konnte {xmp_path} nicht schreiben: {e}")
 
     if search_index is not None:
