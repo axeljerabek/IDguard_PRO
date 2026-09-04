@@ -174,14 +174,18 @@ def _xml_escape(s):
              .replace('"', "&quot;").replace("'", "&apos;"))
 
 
-def write_xmp_sidecar(video_basename, base_dir, description, qualifying_topics=None, user_note=""):
+def write_xmp_sidecar(video_basename, base_dir, description, qualifying_topics=None, user_note="", rating=None):
     """Schreibt/aktualisiert die XMP-Sidecar-Datei — wiederverwendbar, damit
     sowohl die normale Analyse als auch ein nachträgliches Bearbeiten der
-    eigenen Notiz (ohne die ganze KI-Analyse neu laufen zu lassen) dieselbe,
-    konsistente XMP-Struktur erzeugen. user_note wird in dieselbe
+    eigenen Notiz/Bewertung (ohne die ganze KI-Analyse neu laufen zu lassen)
+    dieselbe, konsistente XMP-Struktur erzeugen. user_note wird in dieselbe
     dc:description eingehängt (durch eine Leerzeile getrennt) statt in ein
     separates XMP-Feld -- dc:description ist das bestätigt in Immich sichtbare
-    Feld, ein Zusatzfeld hätte ungewisse Sichtbarkeit."""
+    Feld, ein Zusatzfeld hätte ungewisse Sichtbarkeit. rating (0-5) schreibt
+    xmp:Rating -- das ist laut offizieller Immich-Doku das einzige
+    unterstützte Bewertungs-Feld (lesend UND schreibend); ein separates
+    "Favorite"-Feld existiert dort nicht, Rating=5 kann als Kurzform dafür
+    dienen."""
     qualifying_topics = qualifying_topics or {}
     xmp_path = os.path.join(base_dir, f"{video_basename}.mp4.xmp")
     subject_block = ""
@@ -193,18 +197,25 @@ def write_xmp_sidecar(video_basename, base_dir, description, qualifying_topics=N
      {tags_xml}
     </rdf:Bag>
    </dc:subject>"""
+    rating_block = ""
+    if rating is not None:
+        try:
+            rating_int = max(0, min(5, int(rating)))
+            rating_block = f"\n   <xmp:Rating>{rating_int}</xmp:Rating>"
+        except (TypeError, ValueError):
+            pass
     full_description = description or ""
     if user_note and user_note.strip():
         full_description = f"{full_description}\n\nNote: {user_note.strip()}"
     xmp = f"""<?xpacket begin="\ufeff" id="W5M0MpCehiHzreSzNTczkc9d"?>
 <x:xmpmeta xmlns:x="adobe:ns:meta/">
  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
-  <rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:xmp="http://ns.adobe.com/xap/1.0/">
    <dc:description>
     <rdf:Alt>
      <rdf:li xml:lang="x-default">{_xml_escape(full_description)}</rdf:li>
     </rdf:Alt>
-   </dc:description>{subject_block}
+   </dc:description>{subject_block}{rating_block}
   </rdf:Description>
  </rdf:RDF>
 </x:xmpmeta>
@@ -497,11 +508,13 @@ def _analyze_inner(video_basename, base_dir):
     # 2) XMP-Sidecar für Immich (dc:description + dc:subject für Themen)
     qualifying_topics = {t: s for t, s in topics_result.items() if s >= AI_TOPICS_THRESHOLD}
     try:
-        existing_note = ""
+        existing_note, existing_rating = "", None
         if os.path.exists(meta_path):
             with open(meta_path) as f:
-                existing_note = json.load(f).get("user_note", "")
-        write_xmp_sidecar(video_basename, base_dir, description, qualifying_topics, existing_note)
+                _existing_meta = json.load(f)
+            existing_note = _existing_meta.get("user_note", "")
+            existing_rating = _existing_meta.get("rating")
+        write_xmp_sidecar(video_basename, base_dir, description, qualifying_topics, existing_note, existing_rating)
     except Exception as e:
         xmp_path = os.path.join(base_dir, f"{video_basename}.mp4.xmp")
         print(f"❌ Konnte {xmp_path} nicht schreiben: {e}")
