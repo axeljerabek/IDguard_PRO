@@ -31,6 +31,7 @@ Aufruf (von recorder_pipeline.py per subprocess.Popen, fire-and-forget):
 import sys
 import os
 import fcntl
+import signal
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(DIR)
@@ -40,6 +41,28 @@ import transcribe_audio
 import face_recognize
 
 GPU_LOCK_PATH = os.path.join(DIR, '.postprocess.lock')
+
+# Not-Obergrenze für die KOMPLETTE Nachbearbeitung eines einzelnen Videos.
+# Die einzelnen Ollama-HTTP-Aufrufe haben zwar schon eigene Timeouts (180s,
+# siehe ai_analyze.py), aber die schützen nur vor einem hängenden NETZWERK-
+# Aufruf. Sie schützen NICHT davor, dass ein instabiles Ollama die GPU in
+# einen Zustand versetzt, in dem unsere EIGENEN, rein lokalen Schritte
+# (Whisper, InsightFace -- kein HTTP, kein Timeout-Konzept) hängenbleiben,
+# weil sie auf GPU-Ressourcen warten, die Ollama nicht sauber freigibt. Genau
+# dieses Muster hat Axel beobachtet: drei Videos "liefen nicht", ein Ollama-
+# Neustart hat es behoben -- das GPU-Lock wäre in diesem Fall NIE von selbst
+# freigegeben worden, jedes nachfolgende Video hätte ewig gewartet. Dieser
+# Watchdog erzwingt nach einer großzügigen Obergrenze den Abbruch, statt die
+# komplette Warteschlange auf unbestimmte Zeit zu blockieren.
+POSTPROCESS_MAX_SECONDS = 20 * 60  # 20 Minuten für EIN Video, alle drei Schritte zusammen
+
+
+class PostprocessTimeout(Exception):
+    pass
+
+
+def _watchdog_handler(signum, frame):
+    raise PostprocessTimeout("Nachbearbeitung hat die Not-Obergrenze überschritten")
 
 
 def acquire_gpu_lock():
@@ -104,8 +127,17 @@ if __name__ == "__main__":
             else:
                 print(f"⚠️ {video_filename} wurde während der GPU-Wartezeit gelöscht — Nachbearbeitung übersprungen.")
                 sys.exit(0)
-        ai_analyze.analyze(video_basename, base_dir)
-        transcribe_audio.transcribe(video_basename, base_dir)
-        face_recognize.recognize(video_basename, base_dir)
+        signal.signal(signal.SIGALRM, _watchdog_handler)
+        signal.alarm(POSTPROCESS_MAX_SECONDS)
+        try:
+            ai_analyze.analyze(video_basename, base_dir)
+            transcribe_audio.transcribe(video_basename, base_dir)
+            face_recognize.recognize(video_basename, base_dir)
+        finally:
+            signal.alarm(0)  # Watchdog deaktivieren, egal ob normal fertig oder ausgelöst
+    except PostprocessTimeout:
+        print(f"🚨 [Watchdog] Nachbearbeitung für {video_basename} hat {POSTPROCESS_MAX_SECONDS}s überschritten "
+              f"(vermutlich hängendes Ollama/GPU-Kontention) — abgebrochen, GPU-Lock wird freigegeben, "
+              f"nächstes Video kann weiterlaufen.")
     finally:
         release_gpu_lock(lock_fd)
