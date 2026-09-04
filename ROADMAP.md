@@ -4,13 +4,8 @@ Laufende, priorisierte Liste. Wird Stück für Stück abgearbeitet, nicht alles 
 
 ---
 
-## Tier 0 — In Arbeit / direkt als Nächstes
-
-- [ ] **Favorite/Rating-Export nach Immich** — `xmp:Rating` (offiziell von Immich unterstütztes Feld, bestätigt in deren aktueller Doku). "Favorite" existiert bei Immich nicht als eigenes XMP-Feld — als Kurzform könnte ein "Favorite"-Button `Rating=5` setzen statt ein nicht unterstütztes Feld zu erfinden.
-
 ## Tier 1 — Kleine, schnelle Gewinne
 
-- [ ] **Tages-/Wochen-Zusammenfassung per LLM** — nutzt Ollama (schon vorhanden), reine Text-Aufgabe über die gesammelten Einzel-Beschreibungen des Zeitraums. Kein neues Modell, keine neue Infrastruktur.
 - [ ] **Home Assistant Anbindung via MQTT** — Events (Aufnahme gestartet/fertig, Topic erkannt) an einen MQTT-Broker publishen, HA unterstützt MQTT Discovery nativ. Kleiner, isolierter Baustein.
 
 ## Tier 2 — Anomalie-Erkennung (Weg A zuerst, Weg B zurückgestellt)
@@ -46,4 +41,4 @@ Laufende, priorisierte Liste. Wird Stück für Stück abgearbeitet, nicht alles 
 
 ## Bereits erledigt (heute)
 
-RTMP+RTSP, MJPEG/USB-Encode-Pfad, Watchfolder-Import (Modus 2), HEVC-Retranscode (GPU-beschleunigt), Prozess-Orchestrierung-Fixes (Neustart-Erkennung, systemd-Service, Worker-Benennung), Postprocess-Watchdog (hängendes Ollama/GPU blockiert nicht mehr die ganze Warteschlange), eigenes Notizfeld (XMP-Export), Export-Unterordner für Sammelexporte, Export-Auswahl-Checkboxen (Video/Metadaten/Thumbs), Löschen-nach-Export-Option.
+RTMP+RTSP, MJPEG/USB-Encode-Pfad, Watchfolder-Import (Modus 2), HEVC-Retranscode (GPU-beschleunigt), Prozess-Orchestrierung-Fixes (Neustart-Erkennung, systemd-Service, Worker-Benennung), Postprocess-Watchdog (hängendes Ollama/GPU blockiert nicht mehr die ganze Warteschlange), eigenes Notizfeld (XMP-Export), Export-Unterordner für Sammelexporte, Export-Auswahl-Checkboxen (Video/Metadaten/Thumbs), Löschen-nach-Export-Option, Favorite/Sterne-Bewertung (xmp:Rating), Tages-/Wochen-Zusammenfassung per LLM (inkl. Dashboard-Karte + Cronjob-Beispiel).
