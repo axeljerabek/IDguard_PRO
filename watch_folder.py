@@ -85,20 +85,38 @@ def _transcode_video_to_h264(src_path, logger=print):
     NVENC-Versuch zuerst (passt zur GPU-Beschleunigung im Rest des Systems),
     Software-Fallback falls NVENC nicht verfügbar oder fehlschlägt."""
     tmp_out = os.path.splitext(src_path)[0] + "__transcode.mp4"
-    for video_codec in ("h264_nvenc", "libx264"):
-        try:
-            result = subprocess.run(
-                ["ffmpeg", "-y", "-i", src_path,
-                 "-c:v", video_codec, "-c:a", "copy", tmp_out],
-                capture_output=True, text=True, timeout=1800
-            )
-            if result.returncode == 0 and os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 0:
-                if video_codec == "libx264":
-                    logger(f"ℹ️ [Watchfolder] NVENC nicht verfügbar, Software-Encoding (libx264) genutzt für {src_path}")
-                return tmp_out
-            logger(f"⚠️ [Watchfolder] Transkodierung mit {video_codec} fehlgeschlagen, versuche nächste Option: {result.stderr[-300:]}")
-        except Exception as e:
-            logger(f"⚠️ [Watchfolder] Transkodierungs-Fehler mit {video_codec}: {e}")
+    # NVENC-Versuch: -hwaccel cuda VOR der Eingabe sorgt dafür, dass auch das
+    # Dekodieren der Quelle auf der GPU läuft, nicht nur das Encodieren.
+    # Ohne das lief bisher nur -c:v h264_nvenc auf der GPU, während das
+    # Dekodieren einer z.B. einstündigen HEVC-Quelle in Software auf der CPU
+    # passierte -- bei Axel beobachtet: NVENC lief tatsächlich schon, aber
+    # trotzdem 400%+ CPU-Last durchs Software-Decodieren der Eingabe.
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-hwaccel", "cuda", "-i", src_path,
+             "-c:v", "h264_nvenc", "-c:a", "copy", tmp_out],
+            capture_output=True, text=True, timeout=1800
+        )
+        if result.returncode == 0 and os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 0:
+            return tmp_out
+        logger(f"⚠️ [Watchfolder] GPU-Transkodierung fehlgeschlagen, versuche Software-Fallback: {result.stderr[-300:]}")
+    except Exception as e:
+        logger(f"⚠️ [Watchfolder] GPU-Transkodierungs-Fehler: {e}")
+
+    # Software-Fallback bewusst ohne -hwaccel -- fehlt NVENC/CUDA für die
+    # Kodierung, ist meist auch kein verlässlicher Hardware-Decode-Pfad da.
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-i", src_path,
+             "-c:v", "libx264", "-c:a", "copy", tmp_out],
+            capture_output=True, text=True, timeout=1800
+        )
+        if result.returncode == 0 and os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 0:
+            logger(f"ℹ️ [Watchfolder] NVENC nicht verfügbar, Software-Encoding (libx264) genutzt für {src_path}")
+            return tmp_out
+        logger(f"⚠️ [Watchfolder] Software-Transkodierung ebenfalls fehlgeschlagen: {result.stderr[-300:]}")
+    except Exception as e:
+        logger(f"⚠️ [Watchfolder] Software-Transkodierungs-Fehler: {e}")
     return None
 
 
