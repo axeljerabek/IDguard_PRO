@@ -763,6 +763,21 @@
                     <button type="button" class="btn-select-all" onclick="generateSummary('week')" id="genWeekSummaryBtn"><i class="fa-solid fa-calendar-week"></i> Summarize This Week</button>
                 </div>
                 <div id="summariesList">Loading…</div>
+                <details style="margin-top:16px;">
+                    <summary style="cursor:pointer; color:var(--text-muted); font-size:0.9rem;"><i class="fa-solid fa-clock"></i> Automate with a cronjob instead of clicking the buttons</summary>
+                    <p class="settings-hint" style="margin-top:8px; margin-bottom:8px;">
+                        Add to your crontab (<code>crontab -e</code>) — generates today's summary shortly
+                        after midnight, and a weekly one every Monday, both waiting in this card next time
+                        you open the dashboard:
+                    </p>
+                    <pre class="log-view" style="white-space:pre-wrap;">5 0 * * *  cd /path/to/IDguard_PRO && ./.venv/bin/python daily_summary.py --period day
+10 0 * * 1 cd /path/to/IDguard_PRO && ./.venv/bin/python daily_summary.py --period week</pre>
+                    <p class="settings-hint" style="margin-top:8px;">
+                        Replace <code>/path/to/IDguard_PRO</code> with your actual install path. Uses the
+                        same virtual environment and Ollama settings as the rest of the pipeline — nothing
+                        extra to configure.
+                    </p>
+                </details>
             </div>
         </details>
 
