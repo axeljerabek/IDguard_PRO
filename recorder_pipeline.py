@@ -774,11 +774,35 @@ class CameraAgent(multiprocessing.Process):
         NVDEC_FAIL_THRESHOLD = 5
         using_nvdec = False
 
+        def _build_open_options(url):
+            """Baut protokoll-passende ffmpeg-Optionen. rtmp_live war bisher
+            unconditional gesetzt, unabhängig vom tatsächlichen Protokoll —
+            ffmpeg ignoriert protokollfremde Optionen zwar meist
+            stillschweigend, aber sauber ist anders, und RTSP braucht eigene,
+            sinnvolle Optionen statt gar keine."""
+            scheme = url.split("://", 1)[0].lower() if "://" in url else ""
+            if scheme == "rtsp":
+                return {
+                    # TCP statt des ffmpeg-Standards UDP -- robuster gegen
+                    # Paketverlust, der bei UDP zu sichtbaren Bildfehlern
+                    # führen würde, kostet dafür etwas Latenz. Für ein
+                    # Aufnahme-/Erkennungssystem (kein Live-Gaming) klar die
+                    # richtige Abwägung.
+                    "rtsp_transport": "tcp",
+                    "rw_timeout": "5000000",
+                }
+            elif scheme == "rtmp":
+                return {"rtmp_live": "live", "rw_timeout": "5000000"}
+            else:
+                # http(s) (z.B. MJPEG) und alles andere -- generische,
+                # protokoll-neutrale Option.
+                return {"rw_timeout": "5000000"}
+
         try:
             while not self._stop_event.is_set():
                 if container is None:
-                    self.logger.info(f"🔗 Attempting connection to RTMP: {self.url}")
-                    open_options = {"rtmp_live": "live", "rw_timeout": "5000000"}
+                    self.logger.info(f"🔗 Attempting connection to: {self.url}")
+                    open_options = _build_open_options(self.url)
                     using_nvdec = False
                     try:
                         if hw_device is not None:
