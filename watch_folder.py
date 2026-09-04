@@ -29,11 +29,12 @@ import multiprocessing
 DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(DIR)
 try:
-    from config import ALERTS_DIR, SETTINGS_F, DETECTION_CLASSES
+    from config import ALERTS_DIR, SETTINGS_F, DETECTION_CLASSES, BROWSER_COMPATIBLE_VIDEO_CODECS
 except ImportError:
     ALERTS_DIR = "./alerts"
     SETTINGS_F = "pipeline_settings.json"
     DETECTION_CLASSES = [0]
+    BROWSER_COMPATIBLE_VIDEO_CODECS = {"h264", "vp9", "av1"}
 
 import backfill_filmstrips
 
@@ -70,13 +71,10 @@ def _video_codec_name(path, logger=print):
 
 
 # Browser-Wiedergabe im Dashboard ist mit diesen Video-Codecs zuverlässig
-# kompatibel (H.264 praktisch überall, VP9/AV1 in aktuellen Chrome/Firefox-
-# Versionen) -- alles andere (allen voran HEVC/H.265: technisch einwandfrei,
-# aber die meisten Chrome/Firefox-Builds unter Windows/Linux haben aus
-# Lizenzgründen schlicht keinen HEVC-Decoder eingebaut) wird zu H.264
-# transkodiert, damit die Wiedergabe im Dashboard nicht nur Ton ohne Bild
-# zeigt -- genau das beobachtete Symptom bei einem HEVC-Import.
-BROWSER_COMPATIBLE_CODECS = {"h264", "vp9", "av1"}
+# kompatibel -- jetzt zentral in config.py (BROWSER_COMPATIBLE_VIDEO_CODECS),
+# damit recorder_pipeline.py dieselbe Einschätzung nutzt. Alias hier, damit
+# der Rest dieser Datei nicht umbenannt werden muss.
+BROWSER_COMPATIBLE_CODECS = BROWSER_COMPATIBLE_VIDEO_CODECS
 
 
 def _transcode_video_to_h264(src_path, logger=print):

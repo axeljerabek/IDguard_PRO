@@ -10,6 +10,7 @@ import queue
 import datetime
 import multiprocessing
 from collections import deque
+from fractions import Fraction  # nur für den Encode-Modus (MJPEG/USB-Kameras) gebraucht
 
 try:
     from audio_trigger import AudioTrigger
@@ -40,7 +41,7 @@ try:
     from config import (
         STREAMS, ALERTS_DIR, MODEL_PATH, PRE_ROLL_SEC, SETTINGS_F,
         POST_ROLL_SEC, TARGET_FPS, DETECTION_CLASSES, CONFIDENCE_THRESHOLD,
-        get_stream_logger, system_logger, YOLO_VERSION
+        get_stream_logger, system_logger, YOLO_VERSION, BROWSER_COMPATIBLE_VIDEO_CODECS
     )
 except ImportError as e:
     print(f"❌ CRITICAL ERROR: Could not load config.py: {e}")
@@ -546,6 +547,8 @@ class CameraAgent(multiprocessing.Process):
         out_audio = None
         recording_start_time = 0
         pts_offset = None  # None = "noch nicht gesetzt", wird lazy beim ersten Paket der Aufnahme berechnet
+        video_frame_count = 0  # nur im Encode-Modus genutzt (MJPEG/USB/HEVC-Kameras)
+        last_pts = -1  # nur im Encode-Modus genutzt
 
         # Filmstrip (Hover-Scrub-Vorschau + AI-taugliche Großbilder): pro
         # Recording neu gesetzt, siehe RECORDING-Start weiter unten.
@@ -565,18 +568,27 @@ class CameraAgent(multiprocessing.Process):
         filmstrip_pending = {}
 
         def close_writer():
-            nonlocal out_container, out_video, out_audio, pts_offset
+            nonlocal out_container, out_video, out_audio, pts_offset, video_frame_count, last_pts
             if out_container:
                 try:
                     # Restliche Warteschlange komplett abarbeiten — sonst
-                    # gingen evtl. noch nicht gemuxte Pakete (Pre-Roll-Rest,
-                    # oder normale Pakete kurz vor Aufnahmeende) beim
-                    # Schließen verloren.
+                    # gingen evtl. noch nicht gemuxte/encodierte Pakete
+                    # (Pre-Roll-Rest, oder normale Pakete kurz vor
+                    # Aufnahmeende) beim Schließen verloren.
                     _drain_encode_queue_fully()
 
-                    # Kein Encoder-Flush mehr nötig — Packet-Copy hat kein
-                    # Lookahead/Encoder-internes Buffering wie NVENC/libx264,
-                    # das explizit mit encode(None) geleert werden müsste.
+                    # Encoder-Flush nur im Encode-Modus nötig -- NVENC/libx264
+                    # haben internes Lookahead-Buffering, das explizit mit
+                    # encode(None) geleert werden muss, sonst gehen die letzten
+                    # paar Frames verloren. Packet-Copy hat kein solches
+                    # Buffering (jedes Paket wird sofort gemuxt).
+                    if recording_mode == "encode" and out_video:
+                        try:
+                            for packet in out_video.encode(None):
+                                out_container.mux(packet)
+                        except Exception as e:
+                            self.logger.warning(f"⚠️ [{self.name}] Encoder-Flush-Fehler: {e}")
+
                     out_container.close()
                 except Exception as e:
                     self.logger.error(f"❌ Error closing output file: {e}")
@@ -592,6 +604,8 @@ class CameraAgent(multiprocessing.Process):
                     out_video = None
                     out_audio = None
                     pts_offset = None
+                    video_frame_count = 0
+                    last_pts = -1
                     av_buffer.clear()
                     pending_encode_queue.clear()
 
@@ -722,8 +736,35 @@ class CameraAgent(multiprocessing.Process):
                 pass
 
 
+        def encode_video_frame(img_bgr, ts=None):
+            """Nur im Encode-Modus genutzt (Kamera liefert keinen browser-
+            kompatiblen Codec) — echtes Encoding statt Packet-Copy, bringt das
+            bewährte Wall-Clock-PTS-Verhalten von vor dem Packet-Copy-Umbau
+            zurück, aber isoliert auf genau die Kameras beschränkt, die es
+            wirklich brauchen."""
+            nonlocal video_frame_count, last_pts
+            if not out_container or not out_video:
+                return
+            try:
+                t = ts if ts is not None else time.time()
+                elapsed = max(0.0, t - recording_start_time)
+                pts = int(elapsed * TARGET_FPS)
+                if pts <= last_pts:
+                    pts = last_pts + 1
+                last_pts = pts
+                av_frame = av.VideoFrame.from_ndarray(img_bgr, format="bgr24")
+                av_frame.pts = pts
+                video_frame_count += 1
+                for packet in out_video.encode(av_frame):
+                    out_container.mux(packet)
+            except Exception as e:
+                self.logger.error(f"❌ [{self.name}] Video-Encoding-Fehler: {e}")
+
         def write_buffered_item(item_type, data, ts=None):
-            remux_packet(data, ts)
+            if item_type == "video" and recording_mode == "encode":
+                encode_video_frame(data, ts)
+            else:
+                remux_packet(data, ts)
 
         def _drain_encode_queue(max_items=8):
             """Arbeitet höchstens max_items aus der Warteschlange ab, statt
@@ -773,6 +814,7 @@ class CameraAgent(multiprocessing.Process):
         nvdec_fail_streak = 0
         NVDEC_FAIL_THRESHOLD = 5
         using_nvdec = False
+        recording_mode = "copy"  # Standardannahme, wird nach jedem (Re-)Connect neu bestimmt
 
         def _build_open_options(url):
             """Baut protokoll-passende ffmpeg-Optionen. rtmp_live war bisher
@@ -793,10 +835,25 @@ class CameraAgent(multiprocessing.Process):
                 }
             elif scheme == "rtmp":
                 return {"rtmp_live": "live", "rw_timeout": "5000000"}
+            elif url.startswith("/dev/video"):
+                # USB-Webcam über V4L2 -- framerate/Auflösung optional
+                # anforderbar, ffmpeg fällt sonst auf das zurück, was die
+                # Kamera als Standard liefert.
+                return {"framerate": str(TARGET_FPS)}
             else:
                 # http(s) (z.B. MJPEG) und alles andere -- generische,
                 # protokoll-neutrale Option.
                 return {"rw_timeout": "5000000"}
+
+        def _build_input_format(url):
+            """Ein reiner Gerätepfad wie /dev/video0 (USB-Webcam über V4L2)
+            hat kein Protokoll-Präfix, aus dem ffmpeg das Format selbst
+            erkennen könnte (anders als bei rtmp://, rtsp://, http://) --
+            muss hier explizit angegeben werden. None = ffmpeg soll selbst
+            erkennen (alle anderen Quellen, unverändertes Verhalten)."""
+            return "v4l2" if url.startswith("/dev/video") else None
+
+        input_format = _build_input_format(self.url)
 
         try:
             while not self._stop_event.is_set():
@@ -806,12 +863,12 @@ class CameraAgent(multiprocessing.Process):
                     using_nvdec = False
                     try:
                         if hw_device is not None:
-                            container = av.open(self.url, options=open_options, hwaccel=hw_device)
+                            container = av.open(self.url, options=open_options, hwaccel=hw_device, format=input_format)
                             using_nvdec = True
                             nvdec_fail_streak = 0
                             self.logger.info(f"✅ [CONNECTED] '{self.name}' via NVDEC established stream at {self.url}")
                         else:
-                            container = av.open(self.url, options=open_options)
+                            container = av.open(self.url, options=open_options, format=input_format)
                             self.logger.info(f"✅ [CONNECTED] '{self.name}' established stream at {self.url} (Software-Decode)")
                     except Exception as e:
                         if hw_device is not None:
@@ -828,7 +885,7 @@ class CameraAgent(multiprocessing.Process):
                                     f"versuche diesen Versuch mit Software-Decode, NVDEC wird beim nächsten Reconnect erneut probiert."
                                 )
                             try:
-                                container = av.open(self.url, options=open_options)
+                                container = av.open(self.url, options=open_options, format=input_format)
                                 self.logger.info(f"✅ [CONNECTED] '{self.name}' established stream at {self.url} (Software-Decode, NVDEC-Fallback)")
                             except Exception as e2:
                                 self.logger.error(f"❌ [CONNECTION FAILED] '{self.name}': {e2}. Retrying in 5s...")
@@ -840,6 +897,28 @@ class CameraAgent(multiprocessing.Process):
                             container = None
                             time.sleep(5)
                             continue
+
+                    # Video-Codec der Quelle bestimmt den Aufnahme-Modus für
+                    # DIESE Verbindung: browser-kompatibel (H.264/VP9/AV1) ->
+                    # Packet-Copy wie bisher, sonst (MJPEG, rohes USB-Material,
+                    # HEVC, ...) -> echtes Encoding nötig, da eine Packet-Copy-
+                    # Aufnahme sonst im Dashboard nicht abspielbar wäre (mit
+                    # Chromium konkret verifiziert bei MJPEG und HEVC). Neu
+                    # bestimmt bei jedem Reconnect, falls sich mal die Quelle
+                    # ändert (z.B. Kamera-Firmware-Update).
+                    try:
+                        in_video_for_codec = next(s for s in container.streams if s.type == 'video')
+                        source_codec = in_video_for_codec.codec_context.name
+                        recording_mode = "copy" if source_codec in BROWSER_COMPATIBLE_VIDEO_CODECS else "encode"
+                        if recording_mode == "encode":
+                            self.logger.warning(
+                                f"🎞️ [{self.name}] Quell-Codec '{source_codec}' ist im Dashboard-Player "
+                                f"unzuverlässig abspielbar — Aufnahme läuft für diese Kamera per echtem "
+                                f"Encoding statt Packet-Copy (kostet GPU/CPU, ist aber die einzig sichere Option)."
+                            )
+                    except Exception as e:
+                        self.logger.warning(f"⚠️ [{self.name}] Video-Codec konnte nicht bestimmt werden ({e}), nehme sicherheitshalber Encode-Modus an.")
+                        recording_mode = "encode"
 
                 # Erst JETZT den SIGTERM-Handler aktivieren — nicht schon ganz am
                 # Anfang von run(). Bis hierher lief NVENC-Probe, Modell-Laden und
@@ -887,13 +966,14 @@ class CameraAgent(multiprocessing.Process):
                                 # DERSELBEN Iteration schließt dieses Paket über
                                 # av_buffer (gerade eben befüllt) automatisch mit
                                 # ein, wenn der Pre-Roll-Puffer gleich eingereiht wird.
-                                if state == "IDLE" and not packet_video_queued:
-                                    av_buffer.append(("video", packet, now))
-                                    packet_video_queued = True
-                                    trim_buffer()
-                                elif state in ("RECORDING", "POST_ROLL") and not packet_video_queued:
-                                    pending_encode_queue.append(('video', packet, now))
-                                    packet_video_queued = True
+                                if recording_mode == "copy":
+                                    if state == "IDLE" and not packet_video_queued:
+                                        av_buffer.append(("video", packet, now))
+                                        packet_video_queued = True
+                                        trim_buffer()
+                                    elif state in ("RECORDING", "POST_ROLL") and not packet_video_queued:
+                                        pending_encode_queue.append(('video', packet, now))
+                                        packet_video_queued = True
 
                                 # Drosselung jetzt NUR noch für Erkennung/Vorschau/
                                 # Filmstrip — beeinflusst nicht mehr, ob das Paket
@@ -903,6 +983,22 @@ class CameraAgent(multiprocessing.Process):
                                 last_processed_time = now
 
                                 img_bgr = frame.to_ndarray(format='bgr24')
+
+                                # Encode-Modus (Kamera liefert keinen browser-
+                                # kompatiblen Codec, z.B. MJPEG/rohes USB-Material):
+                                # erst HIER einreihen, NACH der Drosselung -- anders
+                                # als beim Copy-Modus ist das hier unproblematisch,
+                                # da jedes eingereihte Bild unabhängig neu encodiert
+                                # wird (keine P-/B-Frame-Referenzkette wie bei
+                                # Packet-Copy, die durch übersprungene Frames reißen
+                                # könnte). Entspricht dem alten, bewährten Verhalten
+                                # von vor dem Packet-Copy-Umbau.
+                                if recording_mode == "encode":
+                                    if state == "IDLE":
+                                        av_buffer.append(("video", img_bgr.copy(), now))
+                                        trim_buffer()
+                                    elif state in ("RECORDING", "POST_ROLL"):
+                                        pending_encode_queue.append(('video', img_bgr, now))
 
                                 # Modell nachladen, falls es beim Start (oder nach einem
                                 # vorherigen Fehlversuch) noch nicht verfügbar war —
@@ -1023,58 +1119,97 @@ class CameraAgent(multiprocessing.Process):
                                         try:
                                             out_container = av.open(video_file_path, mode='w')
 
-                                            # PACKET-COPY statt Neu-Encodieren: die Recherche zu Motion
-                                            # (die dieselbe Pre-Roll-Architektur nutzt) zeigte, dass genau
-                                            # das Neu-Encodieren des Pre-Roll-Bursts das Problem ist, nicht
-                                            # die PTS-Logik. Motion selbst warnt in der eigenen Doku davor,
-                                            # große Pre-Capture-Werte zu nutzen, weil währenddessen keine
-                                            # neuen Frames von der Quelle gelesen werden können. Statt die
-                                            # gepufferten Frames neu zu encodieren, werden hier die bereits
-                                            # komprimierten Pakete direkt in den Container gemuxt (wie
-                                            # "ffmpeg -c:v copy") — grob 1000x schneller pro Frame als ein
-                                            # echter Encode-Durchlauf (gemessen: 0.7ms vs. 786ms für 150
-                                            # Frames). add_stream_from_template kopiert die Codec-Parameter
-                                            # direkt von der Quelle, kein manuelles NVENC/libx264-Setup mehr
-                                            # nötig — die Aufnahme-Qualität entspricht exakt dem, was die
-                                            # Kamera selbst liefert.
-                                            in_video_stream = next(s for s in container.streams if s.type == 'video')
-                                            out_video = out_container.add_stream_from_template(in_video_stream)
+                                            if recording_mode == "encode":
+                                                # Encode-Modus: Kamera liefert keinen browser-
+                                                # kompatiblen Codec (MJPEG, rohes USB-Material,
+                                                # HEVC, ...) -- echtes Encoding nötig, Packet-Copy
+                                                # würde eine im Dashboard nicht abspielbare Datei
+                                                # erzeugen (mit Chromium konkret verifiziert).
+                                                h, w = img_bgr.shape[:2]
+                                                gop_size = str(max(1, TARGET_FPS * 2))
+                                                if nvenc_available:
+                                                    out_video = out_container.add_stream('h264_nvenc', rate=TARGET_FPS)
+                                                    try:
+                                                        out_video.options = {'rc': 'vbr', 'cq': '23', 'gpu': '0', 'g': gop_size}
+                                                    except Exception as opt_err:
+                                                        self.logger.warning(f"⚠️ NVENC-Optionen konnten nicht gesetzt werden ({opt_err}), nutze Encoder-Defaults.")
+                                                else:
+                                                    out_video = out_container.add_stream('libx264', rate=TARGET_FPS)
+                                                    try:
+                                                        out_video.options = {'preset': 'veryfast', 'crf': '23', 'g': gop_size}
+                                                    except Exception:
+                                                        pass
+                                                out_video.width = w
+                                                out_video.height = h
+                                                out_video.pix_fmt = 'yuv420p'
+                                                out_video.time_base = Fraction(1, TARGET_FPS)
 
-                                            audio_in_stream = next((s for s in container.streams if s.type == 'audio'), None)
-                                            if audio_in_stream:
-                                                out_audio = out_container.add_stream_from_template(audio_in_stream)
+                                                audio_in_stream = next((s for s in container.streams if s.type == 'audio'), None)
+                                                if audio_in_stream:
+                                                    # Audio bleibt IMMER Packet-Copy, unabhängig vom
+                                                    # Video-Modus -- AAC ist ohnehin universell
+                                                    # abspielbar, kein Grund das neu zu encodieren.
+                                                    out_audio = out_container.add_stream_from_template(audio_in_stream)
 
-                                            # Keyframe-Suche: ein Video kann nur an einem Keyframe (I-Frame)
-                                            # sauber beginnen — vom Ende des Puffers rückwärts zum letzten
-                                            # Video-Keyframe suchen, alles davor verwerfen. Ohne das wäre
-                                            # die Datei am Anfang nicht dekodierbar.
-                                            keyframe_idx = 0
-                                            found_keyframe = False
-                                            for i in range(len(av_buffer) - 1, -1, -1):
-                                                item_type, pkt, _ts = av_buffer[i]
-                                                if item_type == "video" and pkt.is_keyframe:
-                                                    keyframe_idx = i
-                                                    found_keyframe = True
-                                                    break
-                                            if not found_keyframe and av_buffer:
-                                                # Seltener Randfall: Trigger direkt nach Verbindungsaufbau,
-                                                # bevor der erste Keyframe überhaupt ankam. Puffer beginnt
-                                                # dann zwangsläufig NICHT an einem Keyframe — kann zu einem
-                                                # kurz unsauberen/nicht dekodierbaren Anfang führen. Selten
-                                                # genug, um es nur sichtbar zu machen statt komplex
-                                                # abzufangen (z.B. Pre-Roll für diesen einen Trigger verwerfen).
-                                                self.logger.warning(
-                                                    f"⚠️ [{self.name}] Kein Keyframe im Pre-Roll-Puffer gefunden "
-                                                    f"(vermutlich Trigger kurz nach Verbindungsaufbau) — Aufnahme-"
-                                                    f"Anfang könnte kurz unsauber sein."
-                                                )
-                                            aligned_buffer = list(av_buffer)[keyframe_idx:]
+                                                # Keine Keyframe-Suche nötig -- jedes gepufferte
+                                                # Bild ist unabhängig (kein P-/B-Frame-Referenz-
+                                                # Problem wie bei Packet-Copy), also der komplette
+                                                # Pre-Roll-Puffer auf einmal.
+                                                pending_encode_queue.extend(av_buffer)
 
-                                            # Nicht mehr sofort schreiben — nur einreihen. Der Drain-Schritt
-                                            # (siehe _drain_encode_queue) arbeitet das über die nächsten
-                                            # Loop-Durchläufe verteilt ab. Bei Packet-Copy ist das ohnehin
-                                            # kaum noch nötig (so schnell), bleibt aber als Sicherheitsnetz.
-                                            pending_encode_queue.extend(aligned_buffer)
+                                            else:
+                                                # PACKET-COPY statt Neu-Encodieren: die Recherche zu Motion
+                                                # (die dieselbe Pre-Roll-Architektur nutzt) zeigte, dass genau
+                                                # das Neu-Encodieren des Pre-Roll-Bursts das Problem ist, nicht
+                                                # die PTS-Logik. Motion selbst warnt in der eigenen Doku davor,
+                                                # große Pre-Capture-Werte zu nutzen, weil währenddessen keine
+                                                # neuen Frames von der Quelle gelesen werden können. Statt die
+                                                # gepufferten Frames neu zu encodieren, werden hier die bereits
+                                                # komprimierten Pakete direkt in den Container gemuxt (wie
+                                                # "ffmpeg -c:v copy") — grob 1000x schneller pro Frame als ein
+                                                # echter Encode-Durchlauf (gemessen: 0.7ms vs. 786ms für 150
+                                                # Frames). add_stream_from_template kopiert die Codec-Parameter
+                                                # direkt von der Quelle, kein manuelles NVENC/libx264-Setup mehr
+                                                # nötig — die Aufnahme-Qualität entspricht exakt dem, was die
+                                                # Kamera selbst liefert.
+                                                in_video_stream = next(s for s in container.streams if s.type == 'video')
+                                                out_video = out_container.add_stream_from_template(in_video_stream)
+
+                                                audio_in_stream = next((s for s in container.streams if s.type == 'audio'), None)
+                                                if audio_in_stream:
+                                                    out_audio = out_container.add_stream_from_template(audio_in_stream)
+
+                                                # Keyframe-Suche: ein Video kann nur an einem Keyframe (I-Frame)
+                                                # sauber beginnen — vom Ende des Puffers rückwärts zum letzten
+                                                # Video-Keyframe suchen, alles davor verwerfen. Ohne das wäre
+                                                # die Datei am Anfang nicht dekodierbar.
+                                                keyframe_idx = 0
+                                                found_keyframe = False
+                                                for i in range(len(av_buffer) - 1, -1, -1):
+                                                    item_type, pkt, _ts = av_buffer[i]
+                                                    if item_type == "video" and pkt.is_keyframe:
+                                                        keyframe_idx = i
+                                                        found_keyframe = True
+                                                        break
+                                                if not found_keyframe and av_buffer:
+                                                    # Seltener Randfall: Trigger direkt nach Verbindungsaufbau,
+                                                    # bevor der erste Keyframe überhaupt ankam. Puffer beginnt
+                                                    # dann zwangsläufig NICHT an einem Keyframe — kann zu einem
+                                                    # kurz unsauberen/nicht dekodierbaren Anfang führen. Selten
+                                                    # genug, um es nur sichtbar zu machen statt komplex
+                                                    # abzufangen (z.B. Pre-Roll für diesen einen Trigger verwerfen).
+                                                    self.logger.warning(
+                                                        f"⚠️ [{self.name}] Kein Keyframe im Pre-Roll-Puffer gefunden "
+                                                        f"(vermutlich Trigger kurz nach Verbindungsaufbau) — Aufnahme-"
+                                                        f"Anfang könnte kurz unsauber sein."
+                                                    )
+                                                aligned_buffer = list(av_buffer)[keyframe_idx:]
+
+                                                # Nicht mehr sofort schreiben — nur einreihen. Der Drain-Schritt
+                                                # (siehe _drain_encode_queue) arbeitet das über die nächsten
+                                                # Loop-Durchläufe verteilt ab. Bei Packet-Copy ist das ohnehin
+                                                # kaum noch nötig (so schnell), bleibt aber als Sicherheitsnetz.
+                                                pending_encode_queue.extend(aligned_buffer)
 
                                         except Exception as e:
                                             self.logger.error(f"❌ Failed to initialize video writer: {e}")
