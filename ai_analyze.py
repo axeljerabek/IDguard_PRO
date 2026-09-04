@@ -251,14 +251,18 @@ def _pick_frames(frame_dir, max_frames):
     return files
 
 
-def analyze(video_basename, base_dir):
+def analyze(video_basename, base_dir, topics_override=None):
+    """topics_override: nur von mam_api.py genutzt, für Job-spezifische
+    Themen statt der globalen Settings -- None (Default) bedeutet exaktes
+    bisheriges Verhalten für alle bestehenden Aufrufer (postprocess.py,
+    watch_folder.py)."""
     pending_path = os.path.join(base_dir, f"{video_basename}.ai.pending")
     try:
         open(pending_path, 'w').close()
     except Exception:
         pass
     try:
-        _analyze_inner(video_basename, base_dir)
+        _analyze_inner(video_basename, base_dir, topics_override=topics_override)
     finally:
         if os.path.exists(pending_path):
             try:
@@ -387,7 +391,7 @@ def _encode_images(files):
     return images_b64
 
 
-def _analyze_inner(video_basename, base_dir):
+def _analyze_inner(video_basename, base_dir, topics_override=None):
     frame_dir = os.path.join(base_dir, ".thumbs", video_basename, "large")
     if not os.path.isdir(frame_dir):
         print(f"ℹ️ Kein Filmstrip für {video_basename} vorhanden, überspringe AI-Analyse.")
@@ -462,10 +466,12 @@ def _analyze_inner(video_basename, base_dir):
     topics_result = {}
     top_topic, top_topic_score = None, None
     detected_topics = []  # alle Themen über der Schwelle, absteigend sortiert
-    if AI_TOPICS_ENABLED and AI_TOPICS:
+    active_topics = topics_override if topics_override is not None else AI_TOPICS
+    active_topics_enabled = bool(topics_override) or AI_TOPICS_ENABLED
+    if active_topics_enabled and active_topics:
         # Dieselbe (ggf. schon reduzierte) Bildmenge wiederverwenden, statt
         # unabhängig nochmal denselben Kontext-Overflow zu riskieren.
-        topics_result = _classify_topics(images_b64, AI_TOPICS)
+        topics_result = _classify_topics(images_b64, active_topics)
         qualifying = {t: s for t, s in topics_result.items() if s >= AI_TOPICS_THRESHOLD}
         if qualifying:
             detected_topics = [

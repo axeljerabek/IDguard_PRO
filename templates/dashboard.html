@@ -866,6 +866,28 @@
             </div>
         </details>
 
+        <details class="collapse-card" id="mamCard" ontoggle="if (this.open && !mamKeysLoaded) loadMamKeys();">
+            <summary>
+                <span><i class="fa-solid fa-plug-circle-bolt"></i> External API (MAM)</span>
+                <i class="fa-solid fa-chevron-down chevron"></i>
+            </summary>
+            <div class="collapse-body">
+                <p class="settings-hint" style="margin-top: -4px;">Lets an external system (a media asset manager, another app, your own script) submit video for IDguard PRO to process — through the same pipeline as a live recording (codec handling, filmstrip, AI description, faces), with per-job topics instead of the global setting. See <code>MAM_API.md</code> for the full endpoint reference and example requests.</p>
+                <div style="display:flex; gap:10px; align-items:flex-end; margin-bottom:14px; flex-wrap:wrap;">
+                    <div class="settings-group" style="margin-bottom:0; flex:1; min-width:200px;">
+                        <label>New key label</label>
+                        <input type="text" id="newMamKeyLabel" placeholder="e.g. 'Synology Photos import'">
+                    </div>
+                    <button type="button" class="btn-select-all" onclick="createMamKey()"><i class="fa-solid fa-key"></i> Generate Key</button>
+                </div>
+                <div id="mamNewKeyBox" style="display:none; margin-bottom:14px; padding:12px; border:1px solid var(--warning); border-radius:var(--radius-sm); background:var(--card-bg-inset);">
+                    <p style="margin:0 0 8px; color:var(--warning); font-weight:600;">⚠️ Shown once — copy it now, it can't be retrieved again:</p>
+                    <code id="mamNewKeyValue" style="word-break:break-all; user-select:all;"></code>
+                </div>
+                <div id="mamKeysList">Loading…</div>
+            </div>
+        </details>
+
         <details class="collapse-card" id="logCard" ontoggle="onLogToggle()">
             <summary>
                 <span><i class="fa-solid fa-terminal"></i> Log</span>
@@ -1539,6 +1561,58 @@
         let peopleLoaded = false;
         let summariesLoaded = false;
         let anomalyLoaded = false;
+        let mamKeysLoaded = false;
+
+        function _formatKeyDate(ts) {
+            return ts ? new Date(ts * 1000).toLocaleDateString(undefined, { dateStyle: 'medium' }) : 'never';
+        }
+
+        function renderMamKeys(keys) {
+            const el = document.getElementById('mamKeysList');
+            if (!keys.length) {
+                el.innerHTML = '<p class="settings-hint">No API keys yet — generate one above to start using the external API.</p>';
+                return;
+            }
+            el.innerHTML = keys.map(k => `
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border);">
+                    <span>${escapeHtml(k.label)}<span style="color:var(--text-muted); font-size:0.85rem;"> · created ${escapeHtml(_formatKeyDate(k.created_at))} · last used ${escapeHtml(_formatKeyDate(k.last_used_at))}</span></span>
+                    <button type="button" class="btn-select-all" style="color:var(--danger);" onclick="revokeMamKey('${k.key_hash}')"><i class="fa-solid fa-trash"></i></button>
+                </div>
+            `).join('');
+        }
+
+        function loadMamKeys() {
+            mamKeysLoaded = true;
+            fetch('/api/mam_keys').then(r => r.json()).then(data => {
+                if (!data.available) {
+                    document.getElementById('mamKeysList').innerHTML = '<p class="settings-hint">External API module not available.</p>';
+                    return;
+                }
+                renderMamKeys(data.keys);
+            });
+        }
+
+        function createMamKey() {
+            const label = document.getElementById('newMamKeyLabel').value.trim();
+            _postForm('/api/mam_keys', { label: label }).then(res => {
+                if (!res.ok) {
+                    showToast('⚠️ Could not create key: ' + (res.error || 'unknown error'), 6000);
+                    return;
+                }
+                document.getElementById('mamNewKeyValue').textContent = res.key;
+                document.getElementById('mamNewKeyBox').style.display = 'block';
+                document.getElementById('newMamKeyLabel').value = '';
+                loadMamKeys();
+            });
+        }
+
+        function revokeMamKey(keyHash) {
+            if (!confirm('Revoke this API key? Anything using it will stop working immediately.')) return;
+            _postForm(`/api/mam_keys/${keyHash}/revoke`, {}).then(res => {
+                if (res.ok) { loadMamKeys(); showToast('Key revoked.'); }
+                else showToast('⚠️ Could not revoke key.', 6000);
+            });
+        }
 
         function _formatTrainedAt(ts) {
             if (!ts) return 'never';
@@ -1554,7 +1628,7 @@
             el.innerHTML = cameras.map(c => `
                 <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--border);">
                     <span>${escapeHtml(c.camera)}</span>
-                    <span style="color:var(--text-muted); font-size:0.9rem;">${c.trained ? `trained ${escapeHtml(_formatTrainedAt(c.trained_at))} · ${c.sample_count} events` : 'not trained yet'}</span>
+                    <span style="color:var(--text-muted); font-size:0.9rem;">${c.trained ? `trained ${escapeHtml(_formatTrainedAt(c.trained_at))} · ${c.sample_count} events` : `not trained yet · ${c.available_count}/${c.min_required} events so far`}</span>
                 </div>
             `).join('');
         }

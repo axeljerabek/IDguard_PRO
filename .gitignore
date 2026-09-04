@@ -34,3 +34,6 @@ pipeline_settings.json
 v10/
 streams.json
 search_index.db
+
+api_keys.json
+.mam_jobs/

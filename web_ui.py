@@ -46,6 +46,14 @@ except ImportError:
 
 app = Flask(__name__)
 
+# Externe MAM-API (separate API-Key-Auth, nicht die Dashboard-Session) --
+# eigenes Blueprint statt alles hier reinzupacken, siehe mam_api.py.
+try:
+    from mam_api import mam_bp
+    app.register_blueprint(mam_bp)
+except Exception as e:
+    print(f"⚠️ MAM-API konnte nicht geladen werden, externe API ist nicht verfügbar: {e}")
+
 # Archiv-Unterordner für aufbewahrte Aufnahmen (getrennt von den aktiven Alerts)
 ARCHIVE_DIR = os.path.join(ALERTS_DIR, 'archive')
 SUMMARIES_DIR = os.path.join(ALERTS_DIR, '.summaries')
@@ -84,6 +92,40 @@ def list_summaries():
                 continue
     return json.dumps({'summaries': results})
 
+@app.route('/api/mam_keys', methods=['GET'])
+@requires_auth
+def list_mam_keys():
+    try:
+        import mam_api
+    except ImportError:
+        return json.dumps({'available': False})
+    return json.dumps({'available': True, 'keys': mam_api.list_api_keys()})
+
+@app.route('/api/mam_keys', methods=['POST'])
+@requires_auth
+def create_mam_key():
+    _verify_csrf()
+    try:
+        import mam_api
+    except ImportError:
+        return json.dumps({'ok': False, 'error': 'mam_api module not available.'})
+    label = request.form.get('label', '').strip()
+    raw_key = mam_api.generate_api_key(label)
+    # Der Klartext-Key wird HIER EINMALIG zurückgegeben -- danach ist er aus
+    # IDguard PRO selbst nicht mehr abrufbar (nur der Hash wird gespeichert).
+    return json.dumps({'ok': True, 'key': raw_key})
+
+@app.route('/api/mam_keys/<key_hash>/revoke', methods=['POST'])
+@requires_auth
+def delete_mam_key(key_hash):
+    _verify_csrf()
+    try:
+        import mam_api
+    except ImportError:
+        return json.dumps({'ok': False, 'error': 'mam_api module not available.'})
+    ok = mam_api.revoke_api_key(key_hash)
+    return json.dumps({'ok': ok})
+
 @app.route('/api/anomaly_status')
 @requires_auth
 def anomaly_status():
@@ -95,7 +137,11 @@ def anomaly_status():
     statuses = []
     for camera in cameras:
         status = anomaly_detection.model_status(camera)
-        statuses.append({'camera': camera, 'trained': status is not None, **(status or {})})
+        entry = {'camera': camera, 'trained': status is not None, **(status or {})}
+        if status is None:
+            entry['available_count'] = len(anomaly_detection.gather_embeddings(camera, 30))
+            entry['min_required'] = anomaly_detection.MIN_TRAINING_SAMPLES
+        statuses.append(entry)
     return json.dumps({'available': True, 'cameras': statuses})
 
 @app.route('/api/train_anomaly_models', methods=['POST'])
