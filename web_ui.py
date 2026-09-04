@@ -473,10 +473,21 @@ def get_detailed_system_status():
     worker_procs.sort(key=lambda p: p.create_time())
     processes_data = []
 
+    watch_folder_enabled = bool(load_settings().get("WATCH_FOLDER_ENABLED", False))
+
     for idx, proc in enumerate(worker_procs):
         try:
             if idx < len(enabled_streams):
                 stream_name = enabled_streams[idx]
+            elif watch_folder_enabled and idx == len(enabled_streams):
+                # Master startet den Watchfolder-Prozess (falls aktiviert)
+                # immer NACH allen Kamera-Prozessen -- landet also zuverlässig
+                # genau an dieser Position in der nach Erstellungszeit
+                # sortierten Liste. Eine Unterscheidung anhand der Kommandozeile
+                # selbst ist nicht möglich, multiprocessing.spawn zeigt für
+                # jeden Worker dieselbe generische "--multiprocessing-fork"-
+                # Zeile, unabhängig von der ursprünglichen Prozessklasse.
+                stream_name = "Watchfolder Import"
             else:
                 stream_name = f"Worker #{idx + 1}"
 
