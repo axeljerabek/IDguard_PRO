@@ -91,6 +91,15 @@ The core mission of IDguard PRO is to act as an intelligent edge-computing senti
 * Search results mix current and archived recordings in one list, each still fully actionable (archive/delete/re-analyze/export) from the results themselves.
 * **Archive has its own dedicated search bar**, scoped to archived recordings only, running on the same combined description/topic/transcript/people matching.
 
+### Daily & Weekly Summaries
+* Generates a short, natural-language recap of a day's or week's events ("two packages delivered, the dog let out once, nothing unusual") from the already-existing AI descriptions — a pure text-summarization task, reusing the same Ollama endpoint, no new model or infrastructure.
+* Triggered from the dashboard, or automatable with a cronjob — an example crontab entry is shown directly in the Summaries card.
+
+### Home Assistant / MQTT (optional)
+* Publishes a per-camera "Recording" motion-style sensor (on while a recording is in progress) and a "Last Event" sensor with the AI description, to any MQTT broker.
+* With Home Assistant MQTT Discovery enabled (default), entities appear automatically — no YAML required.
+* Deliberately fire-and-forget: publishing runs on its own background thread, so an unreachable or slow broker never delays or affects recording. Off by default. See [HOME_ASSISTANT.md](./HOME_ASSISTANT.md) for setup and example automations.
+
 ### Export
 * Bundles a recording — video, trigger screenshot, all sidecar metadata (AI description, topics, transcript, XMP), and the full filmstrip folder — into one clearly named folder: `Event_<Camera>_<Timestamp> Topic_<Topic>` (the topic suffix only appears if one was detected).
 * Destination is one setting: a **local path** copies directly, a **remote `user@host:/path`** uses `rsync` instead. Remote export assumes passwordless SSH key access is already set up between the two machines — this can't configure that part for you.
@@ -168,13 +177,15 @@ IDguard PRO lets you switch the detection backend per deployment. Here's how the
 
 ## Installation
 
-Detailed installation steps, including virtual environment setup and dependency management, are provided in the accompanying [INSTALL.md](./INSTALL.md) file. A Docker-based install is also available — see [DOCKER.md](./DOCKER.md).
+Detailed installation steps, including virtual environment setup and dependency management, are provided in the accompanying [INSTALL.md](./INSTALL.md) file. A Docker-based install is also available — see [DOCKER.md](./DOCKER.md). For Home Assistant / MQTT integration, see [HOME_ASSISTANT.md](./HOME_ASSISTANT.md).
 
 ## Project Structure
 
 * `web_ui.py`: Flask web dashboard — routes, settings, camera management, event/thumbnail/filmstrip serving, log/health endpoints, Ollama connectivity check, search API, export, People (face recognition) API.
 * `recorder_pipeline.py`: Core detection and recording logic — one process per camera, GPU-aware startup, packet-copy recording, filmstrip capture, shared live-preview frames, optional detection-box overlays, audio-trigger integration.
 * `watch_folder.py`: Optional folder-based import — its own background process, watches a configured folder for finished video files, transcodes to a browser-compatible codec if needed, and feeds them into the same post-processing pipeline as a live recording.
+* `daily_summary.py`: Optional daily/weekly narrative summary generator — gathers existing AI descriptions for a time period and asks Ollama to summarize them in plain language. Callable from the dashboard or via cron.
+* `mqtt_client.py`: Optional MQTT / Home Assistant integration — publishes per-camera recording state and event summaries, with Home Assistant MQTT Discovery. Fire-and-forget, never blocks the recording pipeline.
 * `postprocess.py`: Entry point for all post-recording processing — runs AI description/topics, transcription, and face recognition sequentially (not in parallel) for a finished recording, specifically so none of them race on the same sidecar metadata file.
 * `ai_analyze.py`: Optional post-recording AI scene analysis and topic classification via Ollama; prompt is built dynamically around configured detection classes and topics; writes dashboard metadata + Immich XMP sidecar; indexes the description and topics for search.
 * `audio_trigger.py`: Optional CLAP-based audio trigger — runs in its own background thread per camera, never blocks recording.
