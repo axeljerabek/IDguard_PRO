@@ -1,6 +1,6 @@
 # IDguard PRO
 
-<img src="idguard-logo.svg" alt="IDguard PRO logo" width="200">
+<img src="idguard-logo.svg" alt="IDguard PRO logo" width="600">
 
 IDguard PRO watches your cameras, decides what's actually worth recording, saves the event, and — if you want — tells you afterwards in plain words what happened in it, who was in it, and what was said, in a way you can later search back through. It does that by chaining several small, specialized models together instead of expecting one AI to handle it all: a YOLO model (v10, v12, or v26 — your choice) watches every frame live and spots the moment something worth recording is happening; an audio model (CLAP) can independently trigger a recording on a sound alone, even with nothing visible in frame; the recording itself then saves the event with a short buffer before and after; a vision-language model (via Ollama) looks at the finished clip afterwards and writes a description of what it saw, plus an optional yes/no read on categories you define yourself; a local Whisper model transcribes anything spoken; a face-recognition model groups and (once you name a few) recognizes who's in frame; and a small text-embedding model makes all of that searchable by meaning, not just exact words. Each model only does the one job it's good at, and the handoff between them is automatic. Everything runs on your own hardware, with GPU acceleration end to end — decoding and detection — no cloud involved.
 
