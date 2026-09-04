@@ -823,6 +823,27 @@ def _run_export(src_dir, filename, dest_root, subfolder=""):
         except Exception as e:
             return False, str(e)
 
+def _delete_video_files(base_dir, filename):
+    """Entfernt ein Video komplett samt aller Nebendateien -- dieselbe Logik
+    wie /delete/<filename> und /delete_archived/<filename>, hier als eigene
+    Funktion, damit der Export-mit-anschließendem-Löschen-Ablauf sie
+    wiederverwenden kann, ohne die bestehenden, bereits funktionierenden
+    Lösch-Routen anzufassen (Risiko vermeiden, nicht duplizieren)."""
+    file_path = os.path.abspath(os.path.join(base_dir, filename))
+    if not (file_path.startswith(os.path.abspath(base_dir)) and os.path.exists(file_path)):
+        return False, "Video not found."
+    try:
+        os.remove(file_path)
+    except Exception as e:
+        return False, str(e)
+    _remove_matching_thumbnail(file_path)
+    if search_index is not None:
+        search_index.remove_event(filename)
+    if faces_db is not None:
+        faces_db.remove_faces_for_video(filename)
+    return True, None
+
+
 def _export_route_handler(src_dir, filename):
     src_path = os.path.join(src_dir, filename)
     if os.path.exists(os.path.splitext(src_path)[0] + '.recording'):
@@ -833,9 +854,21 @@ def _export_route_handler(src_dir, filename):
         return json.dumps({'ok': False, 'error': 'No export folder configured (Settings).'})
     subfolder = request.form.get('subfolder', '')
     ok, result = _run_export(src_dir, filename, export_dir, subfolder)
-    if ok:
-        return json.dumps({'ok': True, 'folder': result})
-    return json.dumps({'ok': False, 'error': result})
+    if not ok:
+        return json.dumps({'ok': False, 'error': result})
+    deleted = False
+    if settings.get('EXPORT_DELETE_AFTER', False):
+        # NUR löschen, nachdem der Export oben bestätigt erfolgreich war —
+        # niemals vorher, niemals wenn _run_export einen Fehler zurückgegeben hat.
+        del_ok, del_err = _delete_video_files(src_dir, filename)
+        if del_ok:
+            deleted = True
+        else:
+            # Export war erfolgreich, nur das Löschen ist fehlgeschlagen — das
+            # dem Nutzer klar getrennt mitteilen, nicht als Export-Fehler
+            # verschleiern, die Datei liegt ja tatsächlich sicher exportiert vor.
+            return json.dumps({'ok': True, 'folder': result, 'deleted': False, 'delete_error': del_err})
+    return json.dumps({'ok': True, 'folder': result, 'deleted': deleted})
 
 @app.route('/export/<filename>', methods=['POST'])
 @requires_auth
@@ -1518,6 +1551,7 @@ def save_pipeline_settings():
         "EXPORT_INCLUDE_METADATA": request.form.get('EXPORT_INCLUDE_METADATA') == 'on',
         "EXPORT_INCLUDE_LARGE_THUMBS": request.form.get('EXPORT_INCLUDE_LARGE_THUMBS') == 'on',
         "EXPORT_INCLUDE_SMALL_THUMBS": request.form.get('EXPORT_INCLUDE_SMALL_THUMBS') == 'on',
+        "EXPORT_DELETE_AFTER": request.form.get('EXPORT_DELETE_AFTER') == 'on',
         "TRANSCRIPTION_ENABLED": request.form.get('TRANSCRIPTION_ENABLED') == 'on',
         "WHISPER_MODEL_SIZE": request.form.get('WHISPER_MODEL_SIZE', 'small') if request.form.get('WHISPER_MODEL_SIZE') in ('tiny', 'base', 'small', 'medium', 'large-v3') else 'small',
         "TRANSCRIPTION_LANGUAGE": request.form.get('TRANSCRIPTION_LANGUAGE', '').strip(),

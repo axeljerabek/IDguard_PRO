@@ -487,6 +487,13 @@
                             </label>
                             <p class="settings-hint" style="margin-top:8px;">Applies to every future export (single or bulk) until changed here again.</p>
                         </div>
+                        <div class="settings-group">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:var(--danger);">
+                                <input type="checkbox" name="EXPORT_DELETE_AFTER" {% if settings.get('EXPORT_DELETE_AFTER', False) %}checked{% endif %} style="width:auto;">
+                                Delete the original from IDguard after a successful export
+                            </label>
+                            <p class="settings-hint" style="margin-top:4px;">Only deletes once the export is confirmed successful — never if the export fails partway through. Off by default; this is permanent, there's no undo.</p>
+                        </div>
                     </div>
 
                     <div class="settings-section">
