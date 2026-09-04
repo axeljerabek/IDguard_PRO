@@ -84,6 +84,39 @@ def list_summaries():
                 continue
     return json.dumps({'summaries': results})
 
+@app.route('/api/anomaly_status')
+@requires_auth
+def anomaly_status():
+    try:
+        import anomaly_detection
+    except ImportError:
+        return json.dumps({'available': False})
+    cameras = anomaly_detection.list_cameras_with_data()
+    statuses = []
+    for camera in cameras:
+        status = anomaly_detection.model_status(camera)
+        statuses.append({'camera': camera, 'trained': status is not None, **(status or {})})
+    return json.dumps({'available': True, 'cameras': statuses})
+
+@app.route('/api/train_anomaly_models', methods=['POST'])
+@requires_auth
+def train_anomaly_models():
+    _verify_csrf()
+    try:
+        import anomaly_detection
+    except ImportError:
+        return json.dumps({'ok': False, 'error': 'scikit-learn not installed.'})
+    lookback = int(request.form.get('lookback_days', 30))
+    # Läuft synchron -- Isolation-Forest-Training ist auf den hier zu
+    # erwartenden Datenmengen (hunderte, nicht Millionen Events) eine Sache
+    # von Sekunden, kein eigener Hintergrund-Prozess wie bei der Ollama-
+    # basierten Zusammenfassung nötig.
+    results = anomaly_detection.train_all_cameras(lookback)
+    return json.dumps({
+        'ok': True,
+        'results': {camera: {'trained': ok, 'message': msg} for camera, (ok, msg) in results.items()}
+    })
+
 os.makedirs(ARCHIVE_DIR, exist_ok=True)
 
 def _cleanup_old_recordings():
@@ -1610,6 +1643,7 @@ def save_pipeline_settings():
         "MQTT_PASSWORD": request.form.get('MQTT_PASSWORD', ''),
         "MQTT_TOPIC_PREFIX": (request.form.get('MQTT_TOPIC_PREFIX', 'idguard').strip() or 'idguard'),
         "MQTT_HA_DISCOVERY": request.form.get('MQTT_HA_DISCOVERY') == 'on',
+        "ANOMALY_DETECTION_ENABLED": request.form.get('ANOMALY_DETECTION_ENABLED') == 'on',
         "TRANSCRIPTION_ENABLED": request.form.get('TRANSCRIPTION_ENABLED') == 'on',
         "WHISPER_MODEL_SIZE": request.form.get('WHISPER_MODEL_SIZE', 'small') if request.form.get('WHISPER_MODEL_SIZE') in ('tiny', 'base', 'small', 'medium', 'large-v3') else 'small',
         "TRANSCRIPTION_LANGUAGE": request.form.get('TRANSCRIPTION_LANGUAGE', '').strip(),

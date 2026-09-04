@@ -596,6 +596,24 @@
                     </div>
 
                     <div class="settings-section">
+                        <div class="settings-section-label"><i class="fa-solid fa-magnifying-glass-chart"></i> Anomaly Detection (optional)</div>
+                        <p class="settings-hint" style="margin-top: -4px; margin-bottom: 12px;">
+                            Flags recordings whose AI description is a statistical outlier compared to that
+                            camera's recent history — reuses the same semantic-search embedding that's
+                            already computed for every event, no new model or GPU cost. Needs a per-camera
+                            baseline (train from the Summaries card, or via cron) before it can flag anything;
+                            a camera needs at least 15 analyzed recordings in the lookback window to train.
+                            Off by default.
+                        </p>
+                        <div class="settings-group">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" name="ANOMALY_DETECTION_ENABLED" {% if settings.get('ANOMALY_DETECTION_ENABLED') %}checked{% endif %} style="width:auto;">
+                                Enable
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
                         <div class="settings-section-label"><i class="fa-solid fa-tv"></i> Display</div>
                         <div class="settings-group" style="margin-bottom: 14px;">
                             <label>Theme</label>
@@ -827,6 +845,23 @@
                         same virtual environment and Ollama settings as the rest of the pipeline — nothing
                         extra to configure.
                     </p>
+                </details>
+            </div>
+        </details>
+
+        <details class="collapse-card" id="anomalyCard" ontoggle="if (this.open && !anomalyLoaded) loadAnomalyStatus();">
+            <summary>
+                <span><i class="fa-solid fa-magnifying-glass-chart"></i> Anomaly Detection</span>
+                <i class="fa-solid fa-chevron-down chevron"></i>
+            </summary>
+            <div class="collapse-body">
+                <p class="settings-hint" style="margin-top: -4px;">Per-camera baseline models (Isolation Forest, over the existing semantic-search embeddings) — flags recordings that look statistically unlike that camera's recent history. Must be enabled in Settings → Anomaly Detection to actually tag recordings; training works either way.</p>
+                <button type="button" class="btn-select-all" onclick="trainAnomalyModels()" id="trainAnomalyBtn" style="margin-bottom:14px;"><i class="fa-solid fa-brain"></i> Train / Refresh Baselines</button>
+                <div id="anomalyStatusList">Loading…</div>
+                <details style="margin-top:16px;">
+                    <summary style="cursor:pointer; color:var(--text-muted); font-size:0.9rem;"><i class="fa-solid fa-clock"></i> Automate with a cronjob</summary>
+                    <p class="settings-hint" style="margin-top:8px; margin-bottom:8px;">Weekly retrain, picking up whatever's new since last time:</p>
+                    <pre class="log-view" style="white-space:pre-wrap;">15 0 * * 1 cd /path/to/IDguard_PRO && ./.venv/bin/python anomaly_detection.py --lookback-days 30</pre>
                 </details>
             </div>
         </details>
@@ -1503,6 +1538,56 @@
         // --- People / Face Recognition ---
         let peopleLoaded = false;
         let summariesLoaded = false;
+        let anomalyLoaded = false;
+
+        function _formatTrainedAt(ts) {
+            if (!ts) return 'never';
+            return new Date(ts * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+        }
+
+        function renderAnomalyStatus(cameras) {
+            const el = document.getElementById('anomalyStatusList');
+            if (!cameras || !cameras.length) {
+                el.innerHTML = '<p class="settings-hint">No cameras with analyzed recordings yet.</p>';
+                return;
+            }
+            el.innerHTML = cameras.map(c => `
+                <div style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--border);">
+                    <span>${escapeHtml(c.camera)}</span>
+                    <span style="color:var(--text-muted); font-size:0.9rem;">${c.trained ? `trained ${escapeHtml(_formatTrainedAt(c.trained_at))} · ${c.sample_count} events` : 'not trained yet'}</span>
+                </div>
+            `).join('');
+        }
+
+        function loadAnomalyStatus() {
+            anomalyLoaded = true;
+            fetch('/api/anomaly_status').then(r => r.json()).then(data => {
+                if (!data.available) {
+                    document.getElementById('anomalyStatusList').innerHTML = '<p class="settings-hint">scikit-learn is not installed — already a dependency for face clustering, so this is unexpected. Check <code>pip install -r requirements.txt</code>.</p>';
+                    return;
+                }
+                renderAnomalyStatus(data.cameras);
+            }).catch(() => { document.getElementById('anomalyStatusList').innerHTML = '<p class="settings-hint">Could not load status.</p>'; });
+        }
+
+        function trainAnomalyModels() {
+            const btn = document.getElementById('trainAnomalyBtn');
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Training…';
+            _postForm('/api/train_anomaly_models', {}).then(res => {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+                if (!res.ok) {
+                    showToast('⚠️ Training failed: ' + (res.error || 'unknown error'), 6000);
+                    return;
+                }
+                const trainedCount = Object.values(res.results).filter(r => r.trained).length;
+                const total = Object.keys(res.results).length;
+                showToast(`✅ Trained ${trainedCount}/${total} camera baseline${total === 1 ? '' : 's'}.`);
+                loadAnomalyStatus();
+            });
+        }
 
         function _formatSummaryPeriod(s) {
             const start = new Date(s.start);

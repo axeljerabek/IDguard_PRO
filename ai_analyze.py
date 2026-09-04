@@ -31,6 +31,10 @@ try:
     import search_index
 except ImportError:
     search_index = None  # Optionales Feature — Analyse läuft unverändert ohne Suche
+try:
+    import anomaly_detection
+except ImportError:
+    anomaly_detection = None  # Optionales Feature — Analyse läuft unverändert ohne Anomalie-Erkennung
 
 
 def _load_settings():
@@ -524,6 +528,28 @@ def _analyze_inner(video_basename, base_dir):
             search_index.index_event(f"{video_basename}.mp4", base_dir, description, topics=list(qualifying_topics.keys()))
         except Exception as e:
             print(f"⚠️ Suchindex-Update fehlgeschlagen für {video_basename}: {e}")
+
+    # Anomalie-Erkennung: nutzt das gerade eben von search_index.index_event()
+    # berechnete und gespeicherte Embedding direkt weiter, keine zweite
+    # Berechnung nötig. Off by default -- muss zusätzlich in den Settings
+    # aktiviert werden, unabhängig davon, ob search_index selbst verfügbar
+    # ist (search_index ist Voraussetzung, aber nicht automatisch "an").
+    if anomaly_detection is not None and search_index is not None and _settings.get("ANOMALY_DETECTION_ENABLED", False):
+        try:
+            is_anomaly, score, camera = anomaly_detection.check_anomaly_for_event(f"{video_basename}.mp4")
+            if is_anomaly:
+                print(f"🚨 [Anomaly] {video_basename} weicht deutlich vom üblichen Muster für '{camera}' ab (Score {score:.3f}).")
+                try:
+                    with open(meta_path) as f:
+                        _meta = json.load(f)
+                except Exception:
+                    _meta = {}
+                _meta["anomaly"] = True
+                _meta["anomaly_score"] = score
+                with open(meta_path, "w") as f:
+                    json.dump(_meta, f)
+        except Exception as e:
+            print(f"⚠️ Anomalie-Prüfung fehlgeschlagen für {video_basename}: {e}")
 
     print(f"✅ AI-Analyse fertig für {video_basename}: {description}")
 
