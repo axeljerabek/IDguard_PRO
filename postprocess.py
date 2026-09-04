@@ -30,6 +30,8 @@ Aufruf (von recorder_pipeline.py per subprocess.Popen, fire-and-forget):
 """
 import sys
 import os
+import json
+import re
 import fcntl
 import signal
 
@@ -39,6 +41,10 @@ sys.path.append(DIR)
 import ai_analyze
 import transcribe_audio
 import face_recognize
+try:
+    import mqtt_client
+except ImportError:
+    mqtt_client = None
 
 GPU_LOCK_PATH = os.path.join(DIR, '.postprocess.lock')
 
@@ -141,3 +147,24 @@ if __name__ == "__main__":
               f"nächstes Video kann weiterlaufen.")
     finally:
         release_gpu_lock(lock_fd)
+
+    # MQTT-Event, falls konfiguriert -- nach dem GPU-Lock freigegeben wurde,
+    # damit ein unerreichbarer/langsamer Broker (mqtt_client.publish() ist
+    # zwar selbst nicht-blockierend, aber der Vollständigkeit halber) das
+    # Freigeben des Locks nicht verzögern kann. Läuft auch bei einem
+    # Watchdog-Abbruch -- dann eben mit dem, was bis dahin in der .ai.json
+    # stand (oder gar nichts, falls die Analyse nie so weit kam).
+    if mqtt_client is not None:
+        try:
+            meta_path = os.path.join(base_dir, f"{video_basename}.ai.json")
+            if os.path.exists(meta_path):
+                with open(meta_path) as f:
+                    meta = json.load(f)
+                m = re.match(r"^(.+?)_EVENT_\d{8}_\d{6}$", video_basename)
+                camera_name = m.group(1) if m else video_basename
+                if meta.get("description"):
+                    mqtt_client.publish_event_analyzed(
+                        camera_name, meta.get("description"), meta.get("topics"), video_filename
+                    )
+        except Exception as e:
+            print(f"⚠️ [MQTT] Event-Publish nach Nachbearbeitung fehlgeschlagen: {e}")

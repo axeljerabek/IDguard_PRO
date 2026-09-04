@@ -47,6 +47,15 @@ except ImportError as e:
     print(f"❌ CRITICAL ERROR: Could not load config.py: {e}")
     sys.exit(1)
 
+# Optional -- fehlt paho-mqtt oder ist die Datei nicht vorhanden, soll das
+# die Aufnahme-Pipeline nicht zum Absturz bringen. mqtt_client.publish() ist
+# selbst schon fehlertolerant, das ist hier nur eine zusätzliche
+# Absicherungsebene für dieses besonders sensible File.
+try:
+    import mqtt_client
+except ImportError:
+    mqtt_client = None
+
 # Für den REC-Indikator im Dashboard: aktueller Zustand pro Stream, von
 # web_ui.py gelesen (kein *.mp4-Glob-Konflikt durch führenden Punkt).
 STATUS_DIR = os.path.join(ALERTS_DIR, '.status')
@@ -194,6 +203,20 @@ def _write_state(name, state):
     try:
         with open(os.path.join(STATUS_DIR, f'{name}.json'), 'w') as f:
             json.dump({'state': state}, f)
+    except Exception:
+        pass
+
+
+def _publish_mqtt_recording(name, is_recording):
+    """RECORDING und POST_ROLL zählen für Home Assistant beide als
+    "Aufnahme aktiv" (die Datei wird in beiden Zuständen noch beschrieben)
+    -- nur der echte Übergang zu IDLE bedeutet "aus". mqtt_client.publish()
+    ist selbst schon nicht-blockierend und fehlertolerant; das try/except
+    hier ist nur zusätzliche Absicherung für dieses sensible File."""
+    if mqtt_client is None:
+        return
+    try:
+        mqtt_client.publish_recording_state(name, is_recording)
     except Exception:
         pass
 
@@ -1054,6 +1077,7 @@ class CameraAgent(multiprocessing.Process):
                                     if target_detected:
                                         state = "RECORDING"
                                         _write_state(self.name, "RECORDING")
+                                        _publish_mqtt_recording(self.name, True)
                                         ts_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                                         os.makedirs(ALERTS_DIR, exist_ok=True)
                                         video_file_path = os.path.join(ALERTS_DIR, f"{self.name}_EVENT_{ts_str}.mp4")
@@ -1216,6 +1240,7 @@ class CameraAgent(multiprocessing.Process):
                                             close_writer()
                                             state = "IDLE"
                                             _write_state(self.name, "IDLE")
+                                            _publish_mqtt_recording(self.name, False)
 
                                 elif state == "RECORDING":
                                     if target_detected:
@@ -1247,6 +1272,7 @@ class CameraAgent(multiprocessing.Process):
                                             close_writer()
                                             state = "IDLE"
                                             _write_state(self.name, "IDLE")
+                                            _publish_mqtt_recording(self.name, False)
                                             if _postprocessing_enabled():
                                                 try:
                                                     vb = os.path.splitext(os.path.basename(video_file_path))[0]
@@ -1313,6 +1339,7 @@ class CameraAgent(multiprocessing.Process):
                     close_writer()
                     state = "IDLE"
                     _write_state(self.name, "IDLE")
+                    _publish_mqtt_recording(self.name, False)
                     # av_buffer explizit leeren, bevor der Quell-Container
                     # geschlossen wird — close_writer() räumt den Puffer nur
                     # auf, wenn gerade aufgenommen wurde (if out_container:).

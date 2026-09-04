@@ -1545,6 +1545,10 @@ def save_pipeline_settings():
     except (TypeError, ValueError):
         watch_folder_stability = 5
     try:
+        mqtt_port = int(request.form.get('MQTT_PORT', 1883))
+    except (TypeError, ValueError):
+        mqtt_port = 1883
+    try:
         face_min_confidence = float(request.form.get('FACE_MIN_CONFIDENCE', 0.5))
     except (TypeError, ValueError):
         face_min_confidence = 0.5
@@ -1599,6 +1603,13 @@ def save_pipeline_settings():
         "EXPORT_INCLUDE_LARGE_THUMBS": request.form.get('EXPORT_INCLUDE_LARGE_THUMBS') == 'on',
         "EXPORT_INCLUDE_SMALL_THUMBS": request.form.get('EXPORT_INCLUDE_SMALL_THUMBS') == 'on',
         "EXPORT_DELETE_AFTER": request.form.get('EXPORT_DELETE_AFTER') == 'on',
+        "MQTT_ENABLED": request.form.get('MQTT_ENABLED') == 'on',
+        "MQTT_BROKER": request.form.get('MQTT_BROKER', '').strip(),
+        "MQTT_PORT": _clamp(mqtt_port, 1, 65535),
+        "MQTT_USERNAME": request.form.get('MQTT_USERNAME', '').strip(),
+        "MQTT_PASSWORD": request.form.get('MQTT_PASSWORD', ''),
+        "MQTT_TOPIC_PREFIX": (request.form.get('MQTT_TOPIC_PREFIX', 'idguard').strip() or 'idguard'),
+        "MQTT_HA_DISCOVERY": request.form.get('MQTT_HA_DISCOVERY') == 'on',
         "TRANSCRIPTION_ENABLED": request.form.get('TRANSCRIPTION_ENABLED') == 'on',
         "WHISPER_MODEL_SIZE": request.form.get('WHISPER_MODEL_SIZE', 'small') if request.form.get('WHISPER_MODEL_SIZE') in ('tiny', 'base', 'small', 'medium', 'large-v3') else 'small',
         "TRANSCRIPTION_LANGUAGE": request.form.get('TRANSCRIPTION_LANGUAGE', '').strip(),

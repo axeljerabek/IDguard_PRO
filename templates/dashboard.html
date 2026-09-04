@@ -546,6 +546,56 @@
                     </div>
 
                     <div class="settings-section">
+                        <div class="settings-section-label"><i class="fa-solid fa-house-signal"></i> Home Assistant / MQTT (optional)</div>
+                        <p class="settings-hint" style="margin-top: -4px; margin-bottom: 12px;">
+                            Publishes camera events to an MQTT broker — a "Recording" motion-style sensor per
+                            camera (on while a recording is in progress) and a "Last Event" sensor with the
+                            AI description, once analysis finishes. With Home Assistant Discovery enabled
+                            (default), these appear automatically under Settings → Devices &amp; Services → MQTT
+                            in Home Assistant, no YAML needed. Requires <code>pip install paho-mqtt</code> in
+                            the pipeline's virtual environment. Off by default; never blocks or slows down
+                            recording even if the broker is unreachable.
+                        </p>
+                        <div class="settings-group" style="margin-bottom: 14px;">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" name="MQTT_ENABLED" {% if settings.get('MQTT_ENABLED') %}checked{% endif %} style="width:auto;">
+                                Enable
+                            </label>
+                        </div>
+                        <div class="settings-grid">
+                            <div class="settings-group">
+                                <label>Broker host</label>
+                                <input type="text" name="MQTT_BROKER" value="{{ settings.get('MQTT_BROKER', '') }}" placeholder="192.168.1.10 or homeassistant.local">
+                            </div>
+                            <div class="settings-group">
+                                <label>Broker port</label>
+                                <input type="number" name="MQTT_PORT" min="1" max="65535" value="{{ settings.get('MQTT_PORT', 1883) }}">
+                            </div>
+                        </div>
+                        <div class="settings-grid">
+                            <div class="settings-group">
+                                <label>Username (optional)</label>
+                                <input type="text" name="MQTT_USERNAME" value="{{ settings.get('MQTT_USERNAME', '') }}" autocomplete="off">
+                            </div>
+                            <div class="settings-group">
+                                <label>Password (optional)</label>
+                                <input type="password" name="MQTT_PASSWORD" value="{{ settings.get('MQTT_PASSWORD', '') }}" autocomplete="new-password">
+                            </div>
+                        </div>
+                        <div class="settings-group" style="margin-bottom: 14px;">
+                            <label>Topic prefix</label>
+                            <input type="text" name="MQTT_TOPIC_PREFIX" value="{{ settings.get('MQTT_TOPIC_PREFIX', 'idguard') }}" placeholder="idguard">
+                            <p class="settings-hint" style="margin-top:4px;">Events publish under <code>&lt;prefix&gt;/&lt;camera&gt;/recording</code> and <code>&lt;prefix&gt;/&lt;camera&gt;/last_event_summary</code> — useful for your own automations even without Home Assistant.</p>
+                        </div>
+                        <div class="settings-group">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" name="MQTT_HA_DISCOVERY" {% if settings.get('MQTT_HA_DISCOVERY', True) %}checked{% endif %} style="width:auto;">
+                                Publish Home Assistant MQTT Discovery config (auto-creates entities)
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
                         <div class="settings-section-label"><i class="fa-solid fa-tv"></i> Display</div>
                         <div class="settings-group" style="margin-bottom: 14px;">
                             <label>Theme</label>
