@@ -33,6 +33,11 @@ The core mission of IDguard PRO is to act as an intelligent edge-computing senti
 
 ## Key Features
 
+### Camera Input
+* **RTMP and RTSP** camera sources, side by side — just point a camera's URL field at either, no separate configuration needed. RTSP connections use TCP transport by default (more robust against packet loss than the ffmpeg default of UDP).
+* **Watchfolder Import (optional):** point IDguard PRO at a folder instead of a camera, and it treats every video file dropped in there (from a phone backup, an old NVR export, a network share, anywhere) as a finished recording — waits for the file to stop growing, then imports it: renamed into the standard naming convention, filmstrip generated, and run through the same AI post-processing as a live camera event. Off by default.
+* **Automatic playback-codec fix on import:** if an imported file's video codec won't play reliably in a browser (HEVC/H.265 being the common offender — technically valid, but most non-Safari browsers ship without a licensed decoder for it), it's transcoded to H.264 automatically before it lands in the dashboard — NVENC-accelerated where available, software fallback otherwise. Audio is left untouched (copied, not re-encoded); already-compatible video (H.264, VP9, AV1) is only re-wrapped into an `.mp4` container if needed, never needlessly re-encoded.
+
 ### Detection & Recording
 * **Switchable AI Backends:** YOLOv10, YOLOv12, and YOLO26, selectable per deployment (see model comparison below), with model size from Nano to Extra Large.
 * **Event-Driven Recording:** Automatic MP4 recording triggered by detection, with configurable pre-roll and post-roll buffers to capture the arrival and departure of subjects.
@@ -168,6 +173,7 @@ Detailed installation steps, including virtual environment setup and dependency 
 
 * `web_ui.py`: Flask web dashboard — routes, settings, camera management, event/thumbnail/filmstrip serving, log/health endpoints, Ollama connectivity check, search API, export, People (face recognition) API.
 * `recorder_pipeline.py`: Core detection and recording logic — one process per camera, GPU-aware startup, packet-copy recording, filmstrip capture, shared live-preview frames, optional detection-box overlays, audio-trigger integration.
+* `watch_folder.py`: Optional folder-based import — its own background process, watches a configured folder for finished video files, transcodes to a browser-compatible codec if needed, and feeds them into the same post-processing pipeline as a live recording.
 * `postprocess.py`: Entry point for all post-recording processing — runs AI description/topics, transcription, and face recognition sequentially (not in parallel) for a finished recording, specifically so none of them race on the same sidecar metadata file.
 * `ai_analyze.py`: Optional post-recording AI scene analysis and topic classification via Ollama; prompt is built dynamically around configured detection classes and topics; writes dashboard metadata + Immich XMP sidecar; indexes the description and topics for search.
 * `audio_trigger.py`: Optional CLAP-based audio trigger — runs in its own background thread per camera, never blocks recording.
