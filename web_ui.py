@@ -48,6 +48,42 @@ app = Flask(__name__)
 
 # Archiv-Unterordner für aufbewahrte Aufnahmen (getrennt von den aktiven Alerts)
 ARCHIVE_DIR = os.path.join(ALERTS_DIR, 'archive')
+SUMMARIES_DIR = os.path.join(ALERTS_DIR, '.summaries')
+
+@app.route('/api/generate_summary', methods=['POST'])
+@requires_auth
+def generate_summary():
+    _verify_csrf()
+    period = request.form.get('period', 'day')
+    if period not in ('day', 'week'):
+        return json.dumps({'ok': False, 'error': 'Invalid period.'})
+    date_arg = request.form.get('date', '').strip()
+    # Läuft als eigener Subprozess -- derselbe Grund wie bei der KI-Analyse:
+    # der Ollama-Aufruf kann eine Weile dauern, das darf den Flask-Request-
+    # Thread nicht blockieren. Frontend pollt danach /api/summaries.
+    cmd = [sys.executable, os.path.join(SCRIPT_DIR, 'daily_summary.py'), '--period', period]
+    if date_arg:
+        cmd += ['--date', date_arg]
+    try:
+        subprocess.Popen(cmd)
+    except Exception as e:
+        return json.dumps({'ok': False, 'error': str(e)})
+    return json.dumps({'ok': True})
+
+@app.route('/api/summaries')
+@requires_auth
+def list_summaries():
+    """Liefert die zuletzt generierten Zusammenfassungen, neueste zuerst."""
+    results = []
+    if os.path.isdir(SUMMARIES_DIR):
+        for path in sorted(glob.glob(os.path.join(SUMMARIES_DIR, '*.json')), reverse=True)[:20]:
+            try:
+                with open(path) as f:
+                    results.append(json.load(f))
+            except Exception:
+                continue
+    return json.dumps({'summaries': results})
+
 os.makedirs(ARCHIVE_DIR, exist_ok=True)
 
 def _cleanup_old_recordings():

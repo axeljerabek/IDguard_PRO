@@ -751,6 +751,21 @@
             </div>
         </details>
 
+        <details class="collapse-card" id="summariesCard" ontoggle="if (this.open && !summariesLoaded) loadSummaries();">
+            <summary>
+                <span><i class="fa-solid fa-scroll"></i> Summaries</span>
+                <i class="fa-solid fa-chevron-down chevron"></i>
+            </summary>
+            <div class="collapse-body">
+                <p class="settings-hint" style="margin-top: -4px;">A short narrative summary of a day or week's events, written by the same AI model used for descriptions — a plain-language recap instead of scrolling through every recording.</p>
+                <div style="display:flex; gap:10px; margin-bottom:14px;">
+                    <button type="button" class="btn-select-all" onclick="generateSummary('day')" id="genDaySummaryBtn"><i class="fa-solid fa-sun"></i> Summarize Today</button>
+                    <button type="button" class="btn-select-all" onclick="generateSummary('week')" id="genWeekSummaryBtn"><i class="fa-solid fa-calendar-week"></i> Summarize This Week</button>
+                </div>
+                <div id="summariesList">Loading…</div>
+            </div>
+        </details>
+
         <details class="collapse-card" id="logCard" ontoggle="onLogToggle()">
             <summary>
                 <span><i class="fa-solid fa-terminal"></i> Log</span>
@@ -1422,6 +1437,73 @@
         }
         // --- People / Face Recognition ---
         let peopleLoaded = false;
+        let summariesLoaded = false;
+
+        function _formatSummaryPeriod(s) {
+            const start = new Date(s.start);
+            if (s.period === 'day') return start.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+            const end = new Date(new Date(s.end).getTime() - 86400000);
+            return `Week of ${start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${end.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+        }
+
+        function renderSummaries(summaries) {
+            const el = document.getElementById('summariesList');
+            if (!summaries.length) {
+                el.innerHTML = '<p class="settings-hint">No summaries generated yet — use the buttons above.</p>';
+                return;
+            }
+            el.innerHTML = summaries.map(s => `
+                <div style="padding:12px 0; border-bottom:1px solid var(--border);">
+                    <div style="font-weight:600; margin-bottom:4px;">${escapeHtml(_formatSummaryPeriod(s))}
+                        <span style="font-weight:400; color:var(--text-muted); font-size:0.85rem;"> · ${s.event_count} event${s.event_count === 1 ? '' : 's'}${s.cameras && s.cameras.length ? ' · ' + escapeHtml(s.cameras.join(', ')) : ''}</span>
+                    </div>
+                    <div style="color:var(--text-muted);">${s.error ? '⚠️ ' + escapeHtml(s.error) : escapeHtml(s.summary || '')}</div>
+                </div>
+            `).join('');
+        }
+
+        function loadSummaries() {
+            summariesLoaded = true;
+            fetch('/api/summaries').then(r => r.json()).then(data => renderSummaries(data.summaries || []))
+                .catch(() => { document.getElementById('summariesList').innerHTML = '<p class="settings-hint">Could not load summaries.</p>'; });
+        }
+
+        function generateSummary(period) {
+            const btn = document.getElementById(period === 'day' ? 'genDaySummaryBtn' : 'genWeekSummaryBtn');
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Generating…';
+            _postForm('/api/generate_summary', { period: period }).then(res => {
+                if (!res.ok) {
+                    showToast('⚠️ Could not start summary: ' + (res.error || 'unknown error'), 6000);
+                    btn.disabled = false;
+                    btn.innerHTML = originalText;
+                    return;
+                }
+                // Läuft als Hintergrund-Subprozess (Ollama-Aufruf kann dauern) --
+                // alle paar Sekunden nachsehen, ob das Ergebnis schon da ist,
+                // statt den Nutzer auf eine feste Wartezeit zu verpflichten.
+                let attempts = 0;
+                const poll = setInterval(() => {
+                    attempts++;
+                    fetch('/api/summaries').then(r => r.json()).then(data => {
+                        const summaries = data.summaries || [];
+                        renderSummaries(summaries);
+                        const justGenerated = summaries.find(s => {
+                            const genAt = new Date(s.generated_at).getTime();
+                            return genAt > Date.now() - 15000;
+                        });
+                        if (justGenerated || attempts >= 40) {  // max ~2 Minuten Polling
+                            clearInterval(poll);
+                            btn.disabled = false;
+                            btn.innerHTML = originalText;
+                            if (justGenerated) showToast('✅ Summary generated.');
+                        }
+                    });
+                }, 3000);
+            });
+        }
+
         let currentPeople = [];
         let currentClusters = {};
         let currentClusterIgnored = {};   // cluster_id -> bool, separat statt die vielen bestehenden Stellen umzubauen
