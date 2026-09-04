@@ -100,6 +100,12 @@ The core mission of IDguard PRO is to act as an intelligent edge-computing senti
 * With Home Assistant MQTT Discovery enabled (default), entities appear automatically — no YAML required.
 * Deliberately fire-and-forget: publishing runs on its own background thread, so an unreachable or slow broker never delays or affects recording. Off by default. See [HOME_ASSISTANT.md](./HOME_ASSISTANT.md) for setup and example automations.
 
+### Anomaly Detection (optional)
+* Flags recordings whose AI description is a statistical outlier compared to that camera's own recent history — "this doesn't look like what usually happens here" — without needing to know in advance what you're looking for.
+* Built on an Isolation Forest per camera, reusing the semantic-search embedding that's already computed for every event (see Semantic Search above) — no new model, no extra GPU cost, no new dependency (scikit-learn is already used for face clustering).
+* Needs a baseline: train from the dashboard's Anomaly Detection card (or via cron), which requires at least 15 analyzed recordings for that camera in the lookback window (default 30 days). Cameras with less history are skipped, not force-trained on too little data.
+* Flagged recordings get `anomaly: true` and a score written to their metadata. Off by default — training always works regardless, but tagging only happens once explicitly enabled in Settings.
+
 ### Export
 * Bundles a recording — video, trigger screenshot, all sidecar metadata (AI description, topics, transcript, XMP), and the full filmstrip folder — into one clearly named folder: `Event_<Camera>_<Timestamp> Topic_<Topic>` (the topic suffix only appears if one was detected).
 * Destination is one setting: a **local path** copies directly, a **remote `user@host:/path`** uses `rsync` instead. Remote export assumes passwordless SSH key access is already set up between the two machines — this can't configure that part for you.
@@ -170,7 +176,7 @@ IDguard PRO lets you switch the detection backend per deployment. Here's how the
 * **Optional AI Analysis:** [Ollama](https://ollama.com) (any vision-capable model — `llava` recommended as a reliable default, with a model picker for others)
 * **Optional Audio Trigger:** [CLAP](https://github.com/LAION-AI/CLAP) (`laion/clap-htsat-unfused`, via `transformers`)
 * **Optional Speech Transcription:** [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
-* **Optional Face Recognition:** [InsightFace](https://github.com/deepinsight/insightface) (buffalo_s/m/l, antelopev2) + `onnxruntime`, with `scikit-learn` (DBSCAN) for clustering
+* **Optional Face Recognition:** [InsightFace](https://github.com/deepinsight/insightface) (buffalo_s/m/l, antelopev2) + `onnxruntime`, with `scikit-learn` (DBSCAN for clustering, Isolation Forest for anomaly detection)
 * **Optional Semantic Search:** `sentence-transformers` (`all-MiniLM-L6-v2`) with a SQLite index for storage
 * **Export:** Local filesystem copy or `rsync` for remote destinations
 * **Process Management:** Threading, multiprocessing, and subprocess modules
@@ -186,6 +192,7 @@ Detailed installation steps, including virtual environment setup and dependency 
 * `watch_folder.py`: Optional folder-based import — its own background process, watches a configured folder for finished video files, transcodes to a browser-compatible codec if needed, and feeds them into the same post-processing pipeline as a live recording.
 * `daily_summary.py`: Optional daily/weekly narrative summary generator — gathers existing AI descriptions for a time period and asks Ollama to summarize them in plain language. Callable from the dashboard or via cron.
 * `mqtt_client.py`: Optional MQTT / Home Assistant integration — publishes per-camera recording state and event summaries, with Home Assistant MQTT Discovery. Fire-and-forget, never blocks the recording pipeline.
+* `anomaly_detection.py`: Optional per-camera anomaly detection (Isolation Forest over the existing search embeddings). Callable from the dashboard or via cron; tagging in `.ai.json` only happens once enabled in Settings.
 * `postprocess.py`: Entry point for all post-recording processing — runs AI description/topics, transcription, and face recognition sequentially (not in parallel) for a finished recording, specifically so none of them race on the same sidecar metadata file.
 * `ai_analyze.py`: Optional post-recording AI scene analysis and topic classification via Ollama; prompt is built dynamically around configured detection classes and topics; writes dashboard metadata + Immich XMP sidecar; indexes the description and topics for search.
 * `audio_trigger.py`: Optional CLAP-based audio trigger — runs in its own background thread per camera, never blocks recording.
