@@ -467,6 +467,26 @@
                             <label>Export folder</label>
                             <input type="text" name="EXPORT_DIR" value="{{ settings.get('EXPORT_DIR', '') }}" placeholder="/mnt/backup/idguard-exports or user@host:/path">
                         </div>
+                        <div class="settings-group">
+                            <label>What to include</label>
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:6px;">
+                                <input type="checkbox" name="EXPORT_INCLUDE_VIDEO" {% if settings.get('EXPORT_INCLUDE_VIDEO', True) %}checked{% endif %} style="width:auto;">
+                                Video file
+                            </label>
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:6px;">
+                                <input type="checkbox" name="EXPORT_INCLUDE_METADATA" {% if settings.get('EXPORT_INCLUDE_METADATA', True) %}checked{% endif %} style="width:auto;">
+                                Sidecar metadata (trigger screenshot, AI description/topics JSON, XMP)
+                            </label>
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:6px;">
+                                <input type="checkbox" name="EXPORT_INCLUDE_LARGE_THUMBS" {% if settings.get('EXPORT_INCLUDE_LARGE_THUMBS', True) %}checked{% endif %} style="width:auto;">
+                                Large filmstrip thumbnails
+                            </label>
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:6px;">
+                                <input type="checkbox" name="EXPORT_INCLUDE_SMALL_THUMBS" {% if settings.get('EXPORT_INCLUDE_SMALL_THUMBS', True) %}checked{% endif %} style="width:auto;">
+                                Small filmstrip thumbnails
+                            </label>
+                            <p class="settings-hint" style="margin-top:8px;">Applies to every future export (single or bulk) until changed here again.</p>
+                        </div>
                     </div>
 
                     <div class="settings-section">

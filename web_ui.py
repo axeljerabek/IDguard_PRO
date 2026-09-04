@@ -762,21 +762,37 @@ def _run_export(src_dir, filename, dest_root, subfolder=""):
     relative_path = f"{safe_subfolder}/{folder_name}" if safe_subfolder else folder_name
     is_remote = ('@' in dest_root and ':' in dest_root) or dest_root.startswith('rsync://')
 
-    candidates = [
-        video_path,
-        os.path.join(src_dir, f"{base}.jpg"),
-        os.path.join(src_dir, f"{base}.ai.json"),
-        os.path.join(src_dir, f"{base}.trigger.json"),
-        os.path.join(src_dir, f"{filename}.xmp"),
-    ]
+    settings = load_settings()
+    # .get(..., True): fehlt der Schlüssel (alte Settings-Datei vor diesem
+    # Feature), gilt das bisherige Verhalten -- alles exportieren.
+    include_video = settings.get("EXPORT_INCLUDE_VIDEO", True)
+    include_metadata = settings.get("EXPORT_INCLUDE_METADATA", True)
+    include_large_thumbs = settings.get("EXPORT_INCLUDE_LARGE_THUMBS", True)
+    include_small_thumbs = settings.get("EXPORT_INCLUDE_SMALL_THUMBS", True)
+
+    candidates = []
+    if include_video:
+        candidates.append(video_path)
+    if include_metadata:
+        candidates += [
+            os.path.join(src_dir, f"{base}.jpg"),
+            os.path.join(src_dir, f"{base}.ai.json"),
+            os.path.join(src_dir, f"{base}.trigger.json"),
+            os.path.join(src_dir, f"{filename}.xmp"),
+        ]
     files_to_copy = [p for p in candidates if os.path.exists(p)]
     thumbs_dir = os.path.join(src_dir, '.thumbs', base)
+    include_any_thumbs = include_large_thumbs or include_small_thumbs
 
     if is_remote:
         remote_target = dest_root.rstrip('/') + '/' + relative_path + '/'
         try:
             args = ['rsync', '-a'] + files_to_copy
-            if os.path.isdir(thumbs_dir):
+            if os.path.isdir(thumbs_dir) and include_any_thumbs:
+                if not include_large_thumbs:
+                    args += ['--exclude', 'large/']
+                if not include_small_thumbs:
+                    args += ['--exclude', 'small/']
                 args.append(thumbs_dir)
             args.append(remote_target)
             result = subprocess.run(args, capture_output=True, text=True, timeout=300)
@@ -795,8 +811,14 @@ def _run_export(src_dir, filename, dest_root, subfolder=""):
             os.makedirs(dest_dir, exist_ok=True)
             for p in files_to_copy:
                 shutil.copy2(p, dest_dir)
-            if os.path.isdir(thumbs_dir):
-                shutil.copytree(thumbs_dir, os.path.join(dest_dir, 'thumbs'), dirs_exist_ok=True)
+            if os.path.isdir(thumbs_dir) and include_any_thumbs:
+                skip_dirs = set()
+                if not include_large_thumbs:
+                    skip_dirs.add('large')
+                if not include_small_thumbs:
+                    skip_dirs.add('small')
+                ignore = shutil.ignore_patterns(*skip_dirs) if skip_dirs else None
+                shutil.copytree(thumbs_dir, os.path.join(dest_dir, 'thumbs'), dirs_exist_ok=True, ignore=ignore)
             return True, relative_path
         except Exception as e:
             return False, str(e)
@@ -1492,6 +1514,10 @@ def save_pipeline_settings():
         "AI_TOPICS": ai_topics,
         "AI_TOPICS_THRESHOLD": round(_clamp(topics_threshold, 0, 100), 0),
         "EXPORT_DIR": request.form.get('EXPORT_DIR', '').strip(),
+        "EXPORT_INCLUDE_VIDEO": request.form.get('EXPORT_INCLUDE_VIDEO') == 'on',
+        "EXPORT_INCLUDE_METADATA": request.form.get('EXPORT_INCLUDE_METADATA') == 'on',
+        "EXPORT_INCLUDE_LARGE_THUMBS": request.form.get('EXPORT_INCLUDE_LARGE_THUMBS') == 'on',
+        "EXPORT_INCLUDE_SMALL_THUMBS": request.form.get('EXPORT_INCLUDE_SMALL_THUMBS') == 'on',
         "TRANSCRIPTION_ENABLED": request.form.get('TRANSCRIPTION_ENABLED') == 'on',
         "WHISPER_MODEL_SIZE": request.form.get('WHISPER_MODEL_SIZE', 'small') if request.form.get('WHISPER_MODEL_SIZE') in ('tiny', 'base', 'small', 'medium', 'large-v3') else 'small',
         "TRANSCRIPTION_LANGUAGE": request.form.get('TRANSCRIPTION_LANGUAGE', '').strip(),
