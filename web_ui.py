@@ -1347,6 +1347,10 @@ def save_pipeline_settings():
     except (TypeError, ValueError):
         topics_threshold = 50
     try:
+        watch_folder_stability = float(request.form.get('WATCH_FOLDER_STABILITY_SEC', 5))
+    except (TypeError, ValueError):
+        watch_folder_stability = 5
+    try:
         face_min_confidence = float(request.form.get('FACE_MIN_CONFIDENCE', 0.5))
     except (TypeError, ValueError):
         face_min_confidence = 0.5
@@ -1404,7 +1408,13 @@ def save_pipeline_settings():
         "FACE_MIN_CONFIDENCE": round(_clamp(face_min_confidence, 0.1, 0.95), 2),
         "FACE_KNOWN_PERSON_THRESHOLD": round(_clamp(face_known_threshold, 0.1, 0.95), 2),
         "FACE_CLUSTER_EPS": round(_clamp(face_cluster_eps, 0.1, 0.9), 2),
-        "FACE_CLUSTER_MIN_SAMPLES": _clamp(face_cluster_min_samples, 2, 10)
+        "FACE_CLUSTER_MIN_SAMPLES": _clamp(face_cluster_min_samples, 2, 10),
+        "WATCH_FOLDER_ENABLED": request.form.get('WATCH_FOLDER_ENABLED') == 'on',
+        "WATCH_FOLDER_PATH": request.form.get('WATCH_FOLDER_PATH', '').strip(),
+        "WATCH_FOLDER_SOURCE_NAME": (request.form.get('WATCH_FOLDER_SOURCE_NAME', 'Import').strip() or 'Import'),
+        "WATCH_FOLDER_STABILITY_SEC": _clamp(watch_folder_stability, 1, 300),
+        "WATCH_FOLDER_DELETE_SOURCE": request.form.get('WATCH_FOLDER_DELETE_SOURCE') == 'on',
+        "WATCH_FOLDER_RUN_DETECTION": request.form.get('WATCH_FOLDER_RUN_DETECTION') == 'on',
     }
 
     with open(SETTINGS_F, 'w') as f:
@@ -1415,7 +1425,7 @@ def save_pipeline_settings():
     # und würde sonst unnötig einen Neustart auslösen.
     PIPELINE_RELEVANT_KEYS = (
         "YOLO_VERSION", "MODEL_SIZE", "TARGET_FPS", "CONFIDENCE_THRESHOLD",
-        "PRE_ROLL_SEC", "POST_ROLL_SEC", "DETECTION_CLASSES"
+        "PRE_ROLL_SEC", "POST_ROLL_SEC", "DETECTION_CLASSES", "WATCH_FOLDER_ENABLED"
     )
     pipeline_relevant_changed = any(
         old_settings.get(k) != settings.get(k) for k in PIPELINE_RELEVANT_KEYS

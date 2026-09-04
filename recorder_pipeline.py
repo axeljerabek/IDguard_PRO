@@ -1305,10 +1305,26 @@ if __name__ == "__main__":
         if stream.get("enabled", False):
             agent_proc = CameraAgent(stream, half_precision=gpu_profile["half_precision"])
             agent_proc.start()
-            agents.append({'process': agent_proc, 'stream': stream})
+            agents.append({'process': agent_proc, 'type': 'camera', 'stream': stream, 'name': stream['name']})
             system_logger.info(f"📡 [MASTER] Launched Process Worker for: {stream['name']}")
         else:
             system_logger.info(f"⏭️ [MASTER] Skipping Disabled Stream: {stream['name']}")
+
+    # Watchfolder-Import: eigener Prozess, unabhängig von den Kamera-Streams,
+    # nur gestartet wenn in den Settings aktiviert. Andere Konstruktor-
+    # Signatur als CameraAgent -- deshalb 'type' pro Eintrag, damit die
+    # Monitoring-Schleife unten beim Neustart den richtigen Prozess-Typ baut.
+    try:
+        with open(SETTINGS_F) as f:
+            _settings_for_watchfolder = json.load(f)
+    except Exception:
+        _settings_for_watchfolder = {}
+    if _settings_for_watchfolder.get("WATCH_FOLDER_ENABLED", False):
+        from watch_folder import WatchFolderAgent
+        wf_proc = WatchFolderAgent()
+        wf_proc.start()
+        agents.append({'process': wf_proc, 'type': 'watchfolder', 'stream': None, 'name': 'Watchfolder'})
+        system_logger.info("📥 [MASTER] Launched Watchfolder import process.")
 
     if not agents:
         system_logger.error("❌ No active streams found! Exiting.")
@@ -1320,12 +1336,15 @@ if __name__ == "__main__":
         for entry in agents:
             proc = entry['process']
             if not proc.is_alive():
-                stream = entry['stream']
                 exitcode = proc.exitcode
                 system_logger.warning(
-                    f"⚠️ [MASTER] Worker '{stream['name']}' ist beendet (exitcode={exitcode}) — starte automatisch neu..."
+                    f"⚠️ [MASTER] Worker '{entry['name']}' ist beendet (exitcode={exitcode}) — starte automatisch neu..."
                 )
-                new_proc = CameraAgent(stream, half_precision=gpu_profile["half_precision"])
+                if entry['type'] == 'camera':
+                    new_proc = CameraAgent(entry['stream'], half_precision=gpu_profile["half_precision"])
+                else:
+                    from watch_folder import WatchFolderAgent
+                    new_proc = WatchFolderAgent()
                 new_proc.start()
                 entry['process'] = new_proc
 
@@ -1339,7 +1358,7 @@ if __name__ == "__main__":
         proc.stop_agent()
         proc.join(timeout=5)
         if proc.is_alive():
-            system_logger.warning(f"⚠️ [MASTER] '{entry['stream']['name']}' reagiert nicht — erzwinge Terminate.")
+            system_logger.warning(f"⚠️ [MASTER] '{entry['name']}' reagiert nicht — erzwinge Terminate.")
             proc.terminate()
             proc.join(timeout=2)
 

@@ -470,6 +470,55 @@
                     </div>
 
                     <div class="settings-section">
+                        <div class="settings-section-label"><i class="fa-solid fa-folder-open"></i> Watchfolder Import (optional)</div>
+                        <p class="settings-hint" style="margin-top: -4px; margin-bottom: 12px;">
+                            Watches a folder for video files dropped in from elsewhere (e.g. a phone backup,
+                            an old NVR export, a network share) and imports them automatically once a file
+                            has stopped growing — treats each as a finished recording: renamed, filmstrip
+                            generated, and run through the same AI post-processing as a live camera event.
+                            Runs as its own background process; enabling/disabling requires a pipeline restart
+                            (automatic if the pipeline is already running).
+                        </p>
+                        <div class="settings-group" style="margin-bottom: 14px;">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" name="WATCH_FOLDER_ENABLED" {% if settings.get('WATCH_FOLDER_ENABLED') %}checked{% endif %} style="width:auto;">
+                                Enable
+                            </label>
+                        </div>
+                        <div class="settings-group" style="margin-bottom: 14px;">
+                            <label>Import folder</label>
+                            <input type="text" name="WATCH_FOLDER_PATH" value="{{ settings.get('WATCH_FOLDER_PATH', '') }}" placeholder="/mnt/imports/idguard-dropbox">
+                        </div>
+                        <div class="settings-grid">
+                            <div class="settings-group">
+                                <label>Source name (used as camera name in filenames)</label>
+                                <input type="text" name="WATCH_FOLDER_SOURCE_NAME" value="{{ settings.get('WATCH_FOLDER_SOURCE_NAME', 'Import') }}" placeholder="Import">
+                            </div>
+                            <div class="settings-group">
+                                <label>Stability wait (seconds)</label>
+                                <input type="number" name="WATCH_FOLDER_STABILITY_SEC" min="1" max="300" value="{{ settings.get('WATCH_FOLDER_STABILITY_SEC', 5) }}">
+                            </div>
+                        </div>
+                        <p class="settings-hint" style="margin-top:4px;">
+                            How long a file's size must stay unchanged before it's considered fully written
+                            and safe to import — Linux has no reliable "file is done" signal, so this is a
+                            practical stand-in. Raise it if you're importing over a slow network share.
+                        </p>
+                        <div class="settings-group" style="margin-bottom: 14px;">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" name="WATCH_FOLDER_DELETE_SOURCE" {% if settings.get('WATCH_FOLDER_DELETE_SOURCE') %}checked{% endif %} style="width:auto;">
+                                Delete original file from the import folder after a successful import
+                            </label>
+                        </div>
+                        <div class="settings-group">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" name="WATCH_FOLDER_RUN_DETECTION" {% if settings.get('WATCH_FOLDER_RUN_DETECTION') %}checked{% endif %} style="width:auto;">
+                                Only keep files containing a configured detection class (runs YOLO once per file)
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
                         <div class="settings-section-label"><i class="fa-solid fa-tv"></i> Display</div>
                         <div class="settings-group" style="margin-bottom: 14px;">
                             <label>Theme</label>
