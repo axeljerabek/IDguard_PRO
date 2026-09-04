@@ -8,6 +8,7 @@ import io
 import subprocess
 import shutil
 import json
+import re
 import secrets
 import threading
 import time
@@ -714,9 +715,27 @@ def _export_folder_name(filename, topic=None):
             name += f" Topic_{safe_topic}"
     return "".join(c if c.isalnum() or c in (' ', '_', '-') else '_' for c in name)
 
-def _run_export(src_dir, filename, dest_root):
+def _sanitize_subfolder_name(name):
+    """Macht einen vom Nutzer eingegebenen Unterordner-Namen dateisystem-
+    sicher — Positivliste statt Einzelfälle abzufangen (robuster gegen
+    Umgehungsversuche über Zeichen-Kombinationen, die bei sequenziellem
+    Abfangen einzelner Muster durch die Reihenfolge der Operationen
+    durchrutschen könnten): nur Buchstaben, Zahlen, Leerzeichen, Bindestrich,
+    Unterstrich erlaubt, alles andere (inkl. / \\ . für Pfad-Traversal)
+    wird zu einem einzelnen Bindestrich."""
+    if not name:
+        return ""
+    safe = re.sub(r"[^A-Za-z0-9 _-]+", "-", name.strip())
+    safe = re.sub(r"-{2,}", "-", safe).strip("- ")
+    return safe[:100]
+
+
+def _run_export(src_dir, filename, dest_root, subfolder=""):
     """Kopiert Video + alle Sidecar-Metadaten + Filmstrip-Ordner eines Events
-    in einen eigenen, benannten Unterordner unter dest_root.
+    in einen eigenen, benannten Unterordner unter dest_root — optional
+    zusätzlich in einen gemeinsamen, selbst benannten Gruppen-Unterordner
+    genestet (z.B. "Car accident"), wenn mehrere Events zusammen als
+    zusammengehörige Gruppe exportiert werden.
 
     dest_root kann ein lokaler Pfad ODER ein rsync-Remote-Ziel sein
     (user@host:/pfad) — für Remote-Ziele wird bereits eingerichteter
@@ -738,7 +757,9 @@ def _run_export(src_dir, filename, dest_root):
         except Exception:
             pass
 
+    safe_subfolder = _sanitize_subfolder_name(subfolder)
     folder_name = _export_folder_name(filename, topic)
+    relative_path = f"{safe_subfolder}/{folder_name}" if safe_subfolder else folder_name
     is_remote = ('@' in dest_root and ':' in dest_root) or dest_root.startswith('rsync://')
 
     candidates = [
@@ -752,7 +773,7 @@ def _run_export(src_dir, filename, dest_root):
     thumbs_dir = os.path.join(src_dir, '.thumbs', base)
 
     if is_remote:
-        remote_target = dest_root.rstrip('/') + '/' + folder_name + '/'
+        remote_target = dest_root.rstrip('/') + '/' + relative_path + '/'
         try:
             args = ['rsync', '-a'] + files_to_copy
             if os.path.isdir(thumbs_dir):
@@ -761,7 +782,7 @@ def _run_export(src_dir, filename, dest_root):
             result = subprocess.run(args, capture_output=True, text=True, timeout=300)
             if result.returncode != 0:
                 return False, f"rsync failed: {result.stderr.strip()[:300]}"
-            return True, folder_name
+            return True, relative_path
         except FileNotFoundError:
             return False, "rsync is not installed on this system."
         except subprocess.TimeoutExpired:
@@ -770,13 +791,13 @@ def _run_export(src_dir, filename, dest_root):
             return False, str(e)
     else:
         try:
-            dest_dir = os.path.join(dest_root, folder_name)
+            dest_dir = os.path.join(dest_root, safe_subfolder, folder_name) if safe_subfolder else os.path.join(dest_root, folder_name)
             os.makedirs(dest_dir, exist_ok=True)
             for p in files_to_copy:
                 shutil.copy2(p, dest_dir)
             if os.path.isdir(thumbs_dir):
                 shutil.copytree(thumbs_dir, os.path.join(dest_dir, 'thumbs'), dirs_exist_ok=True)
-            return True, folder_name
+            return True, relative_path
         except Exception as e:
             return False, str(e)
 
@@ -788,7 +809,8 @@ def _export_route_handler(src_dir, filename):
     export_dir = (settings.get('EXPORT_DIR') or '').strip()
     if not export_dir:
         return json.dumps({'ok': False, 'error': 'No export folder configured (Settings).'})
-    ok, result = _run_export(src_dir, filename, export_dir)
+    subfolder = request.form.get('subfolder', '')
+    ok, result = _run_export(src_dir, filename, export_dir, subfolder)
     if ok:
         return json.dumps({'ok': True, 'folder': result})
     return json.dumps({'ok': False, 'error': result})

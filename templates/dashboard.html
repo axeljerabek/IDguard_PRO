@@ -2091,6 +2091,14 @@
         async function exportSelectedEvents() {
             const items = Array.from(selectedEvents.entries());
             if (!items.length) return;
+            let subfolder = '';
+            if (items.length > 1) {
+                subfolder = prompt(
+                    `Exporting ${items.length} recordings. Optionally group them into a shared subfolder (e.g. "Car accident") — leave empty for individual folders as usual:`,
+                    ''
+                );
+                if (subfolder === null) return;  // Cancel gedrückt
+            }
             const btn = document.getElementById('bulkExportBtn');
             btn.disabled = true;
             let ok = 0, failed = 0;
@@ -2100,6 +2108,7 @@
                     const url = (isArchived ? '/export/archive/' : '/export/') + fn;
                     const body = new URLSearchParams();
                     body.append('csrf_token', CSRF_TOKEN);
+                    if (subfolder) body.append('subfolder', subfolder);
                     const resp = await fetch(url, { method: 'POST', body });
                     // Die Export-Route liefert einen Redirect (302) bei Erfolg wie bei Fehler —
                     // fetch folgt dem automatisch (resp.ok prüft nur den FINALEN Status, nicht
