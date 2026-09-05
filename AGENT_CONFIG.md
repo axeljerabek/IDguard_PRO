@@ -85,6 +85,15 @@ All under `/api/v1/agent/`, same `Authorization: Bearer <key>` / `X-API-Key` aut
 | `GET /search?q=...` | `search` | Same underlying search as the dashboard. |
 | `POST /cameras/<name>/trigger` | `manual_trigger` | Force-start a recording right now. Rejected (400) if the camera is disabled. |
 | `POST /cameras/<name>/stop` | `manual_trigger` | Ends a currently active recording immediately. **Not the same as `cameras_toggle`/disable** — disable only affects the next pipeline start, it does not stop an already-running recording. |
+| `POST /cameras/<name>/quick_record` | `manual_trigger` | Ad-hoc recording **independent of the pipeline** — works even if the pipeline is stopped or the camera is disabled there. Form param `duration` (seconds, default 30, capped at 300). Returns a `job_id` immediately (202). |
+| `GET /quick_record/<job_id>` | `manual_trigger` | Status of a quick-record job: `recording` → `done`/`failed`, with `output_path` once finished. |
+
+### Quick record vs. trigger
+
+Two different tools for "record something now":
+
+- **`/trigger`** — only works while the pipeline is running and that camera's process is already alive. Starts a normal event-style recording (pre-roll + post-roll), not a fixed duration. Use `/stop` (not `disable`) to end it exactly when you want.
+- **`/quick_record`** — a completely separate, lightweight path that connects to the camera directly via ffmpeg for exactly the requested duration. Works whether or not the pipeline is running at all. This is the right tool for "just record a minute of this camera right now."
 | `POST /cameras/<name>/notify_only/enable` | `manual_trigger` | Switch to report-only. Takes effect on next camera process restart. |
 | `POST /cameras/<name>/notify_only/disable` | `manual_trigger` | Back to normal auto-record. |
 | `GET /detections` | `manual_trigger` | Most recent detected classes per camera, most recent first. |

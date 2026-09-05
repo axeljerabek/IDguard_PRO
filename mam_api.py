@@ -682,6 +682,42 @@ def agent_stop_recording(name):
     return jsonify({"ok": True, "name": name, "status": "stop_sent"})
 
 
+@mam_bp.route("/agent/cameras/<name>/quick_record", methods=["POST"])
+@requires_agent_capability("manual_trigger")
+def agent_quick_record(name):
+    """Sofort-Aufnahme UNABHÄNGIG von der laufenden Pipeline -- kein YOLO,
+    keine Zustandsmaschine, funktioniert auch wenn die Pipeline komplett
+    gestoppt ist oder die Kamera dort deaktiviert ist. Für "nimm das
+    schnell für eine Minute auf" statt für ereignisgesteuerte Erkennung.
+    Nutzt ffmpegs eigenes -t-Flag für exakte Dauer."""
+    try:
+        import quick_record
+    except ImportError:
+        return jsonify({"error": "quick_record module not available."}), 500
+    duration = request.form.get("duration", request.args.get("duration", 30))
+    try:
+        duration = int(duration)
+    except (TypeError, ValueError):
+        return jsonify({"error": "'duration' must be a number of seconds."}), 400
+    job_id, error = quick_record.start_quick_record(name, duration)
+    if error:
+        return jsonify({"error": error}), 404
+    return jsonify({"ok": True, "job_id": job_id, "duration_sec": min(duration, quick_record.MAX_DURATION_SEC)}), 202
+
+
+@mam_bp.route("/agent/quick_record/<job_id>", methods=["GET"])
+@requires_agent_capability("manual_trigger")
+def agent_quick_record_status(job_id):
+    try:
+        import quick_record
+    except ImportError:
+        return jsonify({"error": "quick_record module not available."}), 500
+    job = quick_record.load_job(job_id)
+    if job is None:
+        return jsonify({"error": "Job not found."}), 404
+    return jsonify(job)
+
+
 @mam_bp.route("/agent/detections", methods=["GET"])
 @requires_agent_capability("manual_trigger")
 def agent_list_detections():
