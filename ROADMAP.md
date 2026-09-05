@@ -4,11 +4,12 @@ Ongoing, prioritized list. Worked through incrementally, not all at once.
 
 ---
 
-## Tier 4 — Agent Control (builds on the External API)
+## Tier 4 — Agent Control
 
-- [ ] Agent can call the existing External API to toggle cameras, change settings, start/stop the pipeline, and search — through the same endpoints as any other API client
-- [ ] Per-capability permission config (see AGENT_CONFIG.md) — off by default, enabled selectively
-- [ ] Delete and export intentionally excluded from agent capabilities for now
+- [x] Camera toggle, settings (allowlisted), pipeline start/stop, search, manual trigger/stop, quick-record, event details, summaries, system status, reanalyze, anomaly training
+- [x] Per-capability permission config, master switch, off by default
+- [x] Proactive notifications (agent webhook) after each analyzed event, with an anomaly-only filter
+- [x] Delete and export intentionally excluded for now
 - [ ] Longer-term: MCP server wrapper around the API for direct agent access
 
 ## Low priority / opportunistic
