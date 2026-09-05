@@ -4,6 +4,19 @@ Lets an AI agent (Hermes, OpenClaw, or anything else calling the same API) opera
 
 **Off by default.** Nothing in this section does anything until you explicitly turn it on in `agent_config.json`.
 
+## Quick reference — the right tool for the job
+
+| You want to... | Use | Not |
+| :--- | :--- | :--- |
+| Record something right now, for a specific duration, regardless of whether the pipeline is even running | `POST /cameras/<name>/quick_record` (form param `duration`) | ~~`/trigger`~~ — that needs the pipeline already running |
+| Start an event-style recording on a camera whose process is already live | `POST /cameras/<name>/trigger` | |
+| End a recording that's currently in progress | `POST /cameras/<name>/stop` | ~~`disable`~~ — disable does not touch an active recording |
+| Turn a camera on/off for future use (not right now) | `POST /cameras/<name>/enable` or `/disable` | Takes up to ~15s to actually take effect, it's not instant |
+| Find out what you're currently allowed to do | `GET /capabilities` | Always call this first if unsure — works even with everything else disabled |
+| See what a notify-only camera has spotted without recording | `GET /detections` | |
+
+**Common mistake to avoid:** a 404 means the route doesn't exist on the server you're talking to — it is never a sign that the documentation itself is wrong. If a documented route 404s, the most likely cause is that the server process hasn't picked up the latest code yet (needs a restart), not a wrong path. Ask the human to verify before guessing at alternate paths.
+
 ## The permission model
 
 `agent_config.json` has one master switch and a per-capability toggle:
