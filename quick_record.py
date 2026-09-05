@@ -154,12 +154,30 @@ def _run_worker(job_id, url, duration_sec, output_path, run_ai_analysis):
             except Exception as e:
                 print(f"⚠️ [QuickRecord] Filmstrip konnte nicht erzeugt werden: {e}")
 
+            job["ai_analysis"] = "skipped"
             if run_ai_analysis in ("True", True):
                 try:
                     import ai_analyze
                     basename = os.path.splitext(os.path.basename(output_path))[0]
                     ai_analyze.analyze(basename, ALERTS_DIR)
+                    meta_path = os.path.join(ALERTS_DIR, f"{basename}.ai.json")
+                    if os.path.exists(meta_path):
+                        with open(meta_path) as f:
+                            meta = json.load(f)
+                        if meta.get("description"):
+                            job["ai_analysis"] = "done"
+                            job["description"] = meta.get("description")
+                        else:
+                            # analyze() lief durch, aber ohne Beschreibung --
+                            # z.B. weil Ollama nicht erreichbar war und der
+                            # Fallback-Text griff, oder der Ollama-Request
+                            # selbst leer zurückkam.
+                            job["ai_analysis"] = "no_description"
+                    else:
+                        job["ai_analysis"] = "no_metadata_written"
                 except Exception as e:
+                    job["ai_analysis"] = "failed"
+                    job["ai_analysis_error"] = str(e)
                     print(f"⚠️ [QuickRecord] KI-Analyse fehlgeschlagen: {e}")
     except subprocess.TimeoutExpired:
         job["status"] = "failed"
