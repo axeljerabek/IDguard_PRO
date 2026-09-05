@@ -1676,6 +1676,10 @@ def save_pipeline_settings():
     except (TypeError, ValueError):
         mqtt_port = 1883
     try:
+        pose_fall_angle = float(request.form.get('POSE_FALL_ANGLE_THRESHOLD', 55))
+    except (TypeError, ValueError):
+        pose_fall_angle = 55
+    try:
         face_min_confidence = float(request.form.get('FACE_MIN_CONFIDENCE', 0.5))
     except (TypeError, ValueError):
         face_min_confidence = 0.5
@@ -1740,6 +1744,8 @@ def save_pipeline_settings():
         "AGENT_WEBHOOK_URL": request.form.get('AGENT_WEBHOOK_URL', '').strip(),
         "AGENT_WEBHOOK_ANOMALY_ONLY": request.form.get('AGENT_WEBHOOK_ANOMALY_ONLY') == 'on',
         "ANOMALY_DETECTION_ENABLED": request.form.get('ANOMALY_DETECTION_ENABLED') == 'on',
+        "POSE_ESTIMATION_ENABLED": request.form.get('POSE_ESTIMATION_ENABLED') == 'on',
+        "POSE_FALL_ANGLE_THRESHOLD": _clamp(pose_fall_angle, 20, 85),
         "TRANSCRIPTION_ENABLED": request.form.get('TRANSCRIPTION_ENABLED') == 'on',
         "WHISPER_MODEL_SIZE": request.form.get('WHISPER_MODEL_SIZE', 'small') if request.form.get('WHISPER_MODEL_SIZE') in ('tiny', 'base', 'small', 'medium', 'large-v3') else 'small',
         "TRANSCRIPTION_LANGUAGE": request.form.get('TRANSCRIPTION_LANGUAGE', '').strip(),
