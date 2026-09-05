@@ -1,6 +1,6 @@
 # Agent Control
 
-Lets an AI agent (Hermes, OpenClaw, or anything else calling the same API) operate IDguard PRO directly — toggle cameras, tune settings, start/stop the pipeline, and search — instead of only submitting jobs. Built on top of the [External API](./REMOTE_API.md); uses the same API keys and the same `/api/v1/` base.
+Lets an AI agent (Hermes, OpenClaw, or anything else calling the same API) operate vigil directly — toggle cameras, tune settings, start/stop the pipeline, and search — instead of only submitting jobs. Built on top of the [External API](./REMOTE_API.md); uses the same API keys and the same `/api/v1/` base.
 
 **Off by default.** Nothing in this section does anything until you explicitly turn it on in `agent_config.json`.
 
@@ -73,8 +73,8 @@ All under `/api/v1/agent/`, same `Authorization: Bearer <key>` / `X-API-Key` aut
 | :--- | :--- | :--- |
 | `GET /capabilities` | *(always reachable)* | Orientation call — see above. |
 | `GET /cameras` | `cameras_toggle` | Name, enabled, audio_enabled — URL never included. |
-| `POST /cameras/<name>/enable` | `cameras_toggle` | Optional JSON/form body `{"audio_enabled": true/false}` also sets audio in the same call. Omit it to leave audio unchanged. |
-| `POST /cameras/<name>/disable` | `cameras_toggle` | Same optional `audio_enabled` body as above. |
+| `POST /cameras/<name>/enable` | `cameras_toggle` | Optional JSON/form body `{"audio_enabled": true/false}` also sets audio in the same call. Omit it to leave audio unchanged. Takes effect within ~15s (the pipeline's monitoring interval), not instantly. |
+| `POST /cameras/<name>/disable` | `cameras_toggle` | Same optional `audio_enabled` body as above. Same ~15s delay to actually stop the running process. |
 | `POST /cameras/<name>/audio/enable` | `cameras_toggle` | Audio only — doesn't touch the camera's enabled state. |
 | `POST /cameras/<name>/audio/disable` | `cameras_toggle` | Audio only — doesn't touch the camera's enabled state. |
 | `GET /settings` | `settings_change` | Only allowlisted keys are returned, even reading. |

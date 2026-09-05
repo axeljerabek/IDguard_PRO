@@ -39,7 +39,7 @@ sys.path.append(DIR)
 
 try:
     from config import (
-        STREAMS, ALERTS_DIR, MODEL_PATH, PRE_ROLL_SEC, SETTINGS_F,
+        STREAMS, ALERTS_DIR, MODEL_PATH, PRE_ROLL_SEC, SETTINGS_F, STREAMS_F,
         POST_ROLL_SEC, TARGET_FPS, DETECTION_CLASSES, CONFIDENCE_THRESHOLD,
         get_stream_logger, system_logger, YOLO_VERSION, BROWSER_COMPATIBLE_VIDEO_CODECS
     )
@@ -1411,7 +1411,7 @@ if __name__ == "__main__":
     enabled_names = [s['name'] for s in STREAMS if s.get('enabled', False)]
     disabled_names = [s['name'] for s in STREAMS if not s.get('enabled', False)]
     system_logger.info("=" * 70)
-    system_logger.info("🚀 [MASTER] IDguard Pipeline Startup")
+    system_logger.info("🚀 [MASTER] vigil Pipeline Startup")
     system_logger.info(f"   KI-Modell     : YOLO {YOLO_VERSION} | Pfad: {MODEL_PATH}")
     system_logger.info(f"   Detection     : Klassen={DETECTION_CLASSES} | Confidence={CONFIDENCE_THRESHOLD}")
     system_logger.info(f"   Aufnahme      : Ziel-FPS={TARGET_FPS} | Pre-Roll={PRE_ROLL_SEC}s | Post-Roll={POST_ROLL_SEC}s")
@@ -1458,20 +1458,73 @@ if __name__ == "__main__":
     system_logger.info("[MASTER] All processes running in parallel. Monitoring ACTIVE.")
 
     while not shutdown_requested.is_set():
+        # Live-Abgleich mit streams.json -- vorher wurde diese Datei NUR beim
+        # Start gelesen. Eine Kamera über die Agenten-/Dashboard-API zu
+        # aktivieren/deaktivieren änderte zwar die Datei, hatte aber KEINE
+        # Wirkung auf einen bereits laufenden Master: eine neu aktivierte
+        # Kamera bekam nie einen Prozess, eine deaktivierte lief einfach
+        # unbeeindruckt weiter -- bis zum nächsten vollständigen
+        # Pipeline-Neustart. Das führte dazu, dass ein manueller Trigger für
+        # eine gerade erst aktivierte Kamera ins Leere lief: das Flag wurde
+        # geschrieben, aber kein Prozess existierte, der es je gelesen hätte.
+        try:
+            with open(STREAMS_F) as f:
+                current_streams = json.load(f)
+        except Exception:
+            current_streams = STREAMS  # Datei kurzzeitig nicht lesbar -- alten Stand behalten statt abzustürzen
+        current_by_name = {s['name']: s for s in current_streams if 'name' in s}
+
         for entry in agents:
+            if entry['type'] != 'camera':
+                continue
+            proc = entry['process']
+            still_enabled = current_by_name.get(entry['name'], {}).get('enabled', False)
+            if not proc.is_alive():
+                exitcode = proc.exitcode
+                if still_enabled:
+                    system_logger.warning(
+                        f"⚠️ [MASTER] Worker '{entry['name']}' ist beendet (exitcode={exitcode}) — starte automatisch neu..."
+                    )
+                    new_proc = CameraAgent(current_by_name[entry['name']], half_precision=gpu_profile["half_precision"])
+                    new_proc.start()
+                    entry['process'] = new_proc
+                    entry['stream'] = current_by_name[entry['name']]
+                else:
+                    system_logger.info(f"⏹️ [MASTER] '{entry['name']}' ist beendet und wurde zwischenzeitlich deaktiviert — kein Neustart.")
+            elif not still_enabled:
+                system_logger.info(f"⏹️ [MASTER] '{entry['name']}' wurde deaktiviert — stoppe laufenden Prozess.")
+                proc.stop_agent()
+                proc.join(timeout=5)
+                if proc.is_alive():
+                    proc.terminate()
+
+        # Nicht-Kamera-Einträge (Watchfolder) unverändert nach dem alten Muster prüfen
+        for entry in agents:
+            if entry['type'] == 'camera':
+                continue
             proc = entry['process']
             if not proc.is_alive():
                 exitcode = proc.exitcode
                 system_logger.warning(
                     f"⚠️ [MASTER] Worker '{entry['name']}' ist beendet (exitcode={exitcode}) — starte automatisch neu..."
                 )
-                if entry['type'] == 'camera':
-                    new_proc = CameraAgent(entry['stream'], half_precision=gpu_profile["half_precision"])
-                else:
-                    from watch_folder import WatchFolderAgent
-                    new_proc = WatchFolderAgent()
+                from watch_folder import WatchFolderAgent
+                new_proc = WatchFolderAgent()
                 new_proc.start()
                 entry['process'] = new_proc
+
+        # Tote/gestoppte Einträge aus der Liste entfernen (sonst wächst sie
+        # bei wiederholtem Ein-/Ausschalten immer weiter mit Leichen an)
+        agents = [e for e in agents if e['process'].is_alive()]
+
+        # Neu aktivierte Kameras, die noch gar keinen Eintrag haben, jetzt starten
+        running_names = {e['name'] for e in agents if e['type'] == 'camera'}
+        for name, stream in current_by_name.items():
+            if stream.get('enabled', False) and name not in running_names:
+                system_logger.info(f"📡 [MASTER] '{name}' wurde neu aktiviert — starte Prozess.")
+                new_proc = CameraAgent(stream, half_precision=gpu_profile["half_precision"])
+                new_proc.start()
+                agents.append({'process': new_proc, 'type': 'camera', 'stream': stream, 'name': name})
 
         # Interruptible statt time.sleep(15): reagiert sofort auf ein Signal
         # statt bis zu 15s zu blockieren.
