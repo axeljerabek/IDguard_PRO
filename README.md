@@ -1,6 +1,6 @@
 # vigil
 
-<img src="vigil-logo.svg" alt="IDguard PRO logo" width="800">
+<img src="vigil-logo.svg" alt="IDguard PRO logo" width="1000">
 
 **A self-hosted camera system that watches, understands, and tells you what happened — in plain language, searchable, and now controllable by an AI agent.**
 
