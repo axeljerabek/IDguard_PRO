@@ -14,6 +14,7 @@ Lets an AI agent (Hermes, OpenClaw, or anything else calling the same API) opera
 | Turn a camera on/off for future use (not right now) | `POST /cameras/<name>/enable` or `/disable` | Takes up to ~15s to actually take effect, it's not instant |
 | Find out what you're currently allowed to do | `GET /capabilities` | Always call this first if unsure — works even with everything else disabled |
 | See what a notify-only camera has spotted without recording | `GET /detections` | |
+| Read the description/topics/transcript of a specific recording | `GET /events/<filename>` | ~~Searching the filesystem~~ — you likely don't have filesystem access anyway, and this is the direct, reliable way to get it |
 
 **Common mistake to avoid:** a 404 means the route doesn't exist on the server you're talking to — it is never a sign that the documentation itself is wrong. If a documented route 404s, the most likely cause is that the server process hasn't picked up the latest code yet (needs a restart), not a wrong path. Ask the human to verify before guessing at alternate paths.
 
