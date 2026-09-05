@@ -718,6 +718,102 @@ def agent_quick_record_status(job_id):
     return jsonify(job)
 
 
+@mam_bp.route("/agent/events/<filename>", methods=["GET"])
+@requires_agent_capability("search")
+def agent_get_event(filename):
+    """Volle Metadaten zu einem einzelnen Video -- /search liefert nur
+    Treffer mit Score, hier gibt's die kompletten Details (Themen,
+    Transkript, Gesichter, Bewertung, Anomalie-Status)."""
+    filename = os.path.basename(filename)  # Pfad-Trick-Absicherung
+    basename = os.path.splitext(filename)[0]
+    for base_dir in (ALERTS_DIR, os.path.join(ALERTS_DIR, "archive")):
+        meta_path = os.path.join(base_dir, f"{basename}.ai.json")
+        if os.path.exists(meta_path):
+            try:
+                with open(meta_path) as f:
+                    return jsonify(json.load(f))
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+    return jsonify({"error": f"No metadata found for '{filename}'."}), 404
+
+
+@mam_bp.route("/agent/summaries", methods=["GET"])
+@requires_agent_capability("search")
+def agent_list_summaries():
+    """Dieselben Tages-/Wochen-Zusammenfassungen wie im Dashboard --
+    beantwortet 'was ist heute passiert?' ohne durch Einzelereignisse
+    suchen zu müssen."""
+    summaries_dir = os.path.join(ALERTS_DIR, ".summaries")
+    results = []
+    if os.path.isdir(summaries_dir):
+        import glob as _glob
+        for path in sorted(_glob.glob(os.path.join(summaries_dir, "*.json")), reverse=True)[:20]:
+            try:
+                with open(path) as f:
+                    results.append(json.load(f))
+            except Exception:
+                continue
+    return jsonify({"summaries": results})
+
+
+@mam_bp.route("/agent/system_status", methods=["GET"])
+@requires_agent_capability("search")
+def agent_system_status():
+    """Hardware-Werte (GPU-Temperatur, VRAM, CPU/RAM) -- derselbe Code wie
+    die Dashboard-Statuskarte. Lazy-Import von web_ui, um einen
+    zirkulären Import zu vermeiden (web_ui.py importiert dieses Modul)."""
+    try:
+        import web_ui
+        return jsonify(web_ui.get_detailed_system_status())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@mam_bp.route("/agent/reanalyze/<filename>", methods=["POST"])
+@requires_agent_capability("manual_trigger")
+def agent_reanalyze(filename):
+    """Stößt eine erneute KI-Analyse für ein bestehendes Video an --
+    derselbe Re-Analyze-Knopf wie im Dashboard, nur für den Agenten
+    freigegeben. Läuft als Hintergrund-Prozess, da eine Ollama-Analyse
+    eine Weile dauern kann."""
+    filename = os.path.basename(filename)
+    basename = os.path.splitext(filename)[0]
+    base_dir = None
+    for candidate in (ALERTS_DIR, os.path.join(ALERTS_DIR, "archive")):
+        if os.path.exists(os.path.join(candidate, filename)):
+            base_dir = candidate
+            break
+    if base_dir is None:
+        return jsonify({"error": f"Video '{filename}' not found."}), 404
+    try:
+        subprocess.Popen([sys.executable, os.path.join(DIR, "postprocess.py"), basename, base_dir])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"ok": True, "status": "reanalysis_started"})
+
+
+@mam_bp.route("/agent/anomaly/train", methods=["POST"])
+@requires_agent_capability("manual_trigger")
+def agent_train_anomaly():
+    """Trainiert die Anomalie-Baselines neu -- derselbe Dashboard-Button,
+    für den Agenten freigegeben. Läuft synchron (Training selbst dauert
+    typischerweise nur Sekunden, siehe anomaly_detection.py)."""
+    try:
+        import anomaly_detection
+    except ImportError:
+        return jsonify({"error": "anomaly_detection module not available."}), 500
+    lookback = request.form.get("lookback_days", request.args.get("lookback_days", 30))
+    try:
+        lookback = int(lookback)
+    except (TypeError, ValueError):
+        lookback = 30
+    results = anomaly_detection.train_all_cameras(lookback)
+    return jsonify({
+        "ok": True,
+        "results": {camera: {"trained": ok, "message": msg} for camera, (ok, msg) in results.items()}
+    })
+
+
 @mam_bp.route("/agent/detections", methods=["GET"])
 @requires_agent_capability("manual_trigger")
 def agent_list_detections():

@@ -1737,6 +1737,8 @@ def save_pipeline_settings():
         "MQTT_PASSWORD": request.form.get('MQTT_PASSWORD', ''),
         "MQTT_TOPIC_PREFIX": (request.form.get('MQTT_TOPIC_PREFIX', 'vigil').strip() or 'vigil'),
         "MQTT_HA_DISCOVERY": request.form.get('MQTT_HA_DISCOVERY') == 'on',
+        "AGENT_WEBHOOK_URL": request.form.get('AGENT_WEBHOOK_URL', '').strip(),
+        "AGENT_WEBHOOK_ANOMALY_ONLY": request.form.get('AGENT_WEBHOOK_ANOMALY_ONLY') == 'on',
         "ANOMALY_DETECTION_ENABLED": request.form.get('ANOMALY_DETECTION_ENABLED') == 'on',
         "TRANSCRIPTION_ENABLED": request.form.get('TRANSCRIPTION_ENABLED') == 'on',
         "WHISPER_MODEL_SIZE": request.form.get('WHISPER_MODEL_SIZE', 'small') if request.form.get('WHISPER_MODEL_SIZE') in ('tiny', 'base', 'small', 'medium', 'large-v3') else 'small',

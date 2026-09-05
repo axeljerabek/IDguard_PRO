@@ -78,6 +78,25 @@ GET /api/v1/agent/capabilities
 
 One call, tells an agent everything it needs before doing anything else: which capabilities are currently enabled, the risk level and description of each, which settings keys it's allowed to touch — and, only for capabilities that are actually on, the concrete data that goes with them (camera list if `cameras_toggle` is enabled, pipeline running/stopped if `pipeline_control` is enabled). Always reachable with a valid API key regardless of the master switch — it's read-only self-description, not an action, so there's nothing to gate. Saves an agent from finding out what it can do by trial and error (and the resulting stream of 403s).
 
+## Proactive notifications (agent webhook)
+
+Instead of polling, an agent can be notified automatically after each analyzed recording. Configure `AGENT_WEBHOOK_URL` in Settings → Agent Webhook (or `pipeline_settings.json` directly) — vigil POSTs a JSON payload there once analysis finishes:
+
+```json
+{
+  "event": "recording_analyzed",
+  "camera": "Entrance",
+  "filename": "Entrance_EVENT_20260905_120000.mp4",
+  "description": "A delivery van pulls up and a package is left at the door.",
+  "topics": {"delivery": 92},
+  "anomaly": false,
+  "anomaly_score": null,
+  "timestamp": 1788600000.0
+}
+```
+
+Check "Only notify for anomalies" to only get called for events flagged by Anomaly Detection (`"event": "anomaly"` instead) — useful if you want the agent to only react to the unusual cases, not every delivery. Same fire-and-forget guarantee as MQTT: an unreachable agent never delays or affects the pipeline.
+
 ## Endpoints
 
 All under `/api/v1/agent/`, same `Authorization: Bearer <key>` / `X-API-Key` auth as the rest of the External API.
@@ -96,6 +115,11 @@ All under `/api/v1/agent/`, same `Authorization: Bearer <key>` / `X-API-Key` aut
 | `POST /pipeline/start` | `pipeline_control` | |
 | `POST /pipeline/stop` | `pipeline_control` | |
 | `GET /search?q=...` | `search` | Same underlying search as the dashboard. |
+| `GET /events/<filename>` | `search` | Full metadata for one recording (description, topics, transcript, faces, anomaly status). Checks both active and archived recordings. |
+| `GET /summaries` | `search` | The same daily/weekly summaries shown on the dashboard. |
+| `GET /system_status` | `search` | Hardware stats — CPU/RAM/VRAM, GPU temperature. |
+| `POST /reanalyze/<filename>` | `manual_trigger` | Re-runs the AI analysis pipeline on an existing recording. Runs in the background. |
+| `POST /anomaly/train` | `manual_trigger` | Retrains anomaly-detection baselines for all cameras with enough history. Form param `lookback_days` (default 30). |
 | `POST /cameras/<name>/trigger` | `manual_trigger` | Force-start a recording right now. Rejected (400) if the camera is disabled. |
 | `POST /cameras/<name>/stop` | `manual_trigger` | Ends a currently active recording immediately. **Not the same as `cameras_toggle`/disable** — disable only affects the next pipeline start, it does not stop an already-running recording. |
 | `POST /cameras/<name>/quick_record` | `manual_trigger` | Ad-hoc recording **independent of the pipeline** — works even if the pipeline is stopped or the camera is disabled there. Form param `duration` (seconds, default 30, capped at 300). Returns a `job_id` immediately (202). |

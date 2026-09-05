@@ -596,6 +596,26 @@
                     </div>
 
                     <div class="settings-section">
+                        <div class="settings-section-label"><i class="fa-solid fa-tower-broadcast"></i> Agent Webhook (optional)</div>
+                        <p class="settings-hint" style="margin-top: -4px; margin-bottom: 12px;">
+                            Proactively notifies an agent (Hermes, or your own script) after each analyzed
+                            recording, instead of it having to poll for changes. Fire-and-forget, same as
+                            MQTT — an unreachable agent never delays or affects the pipeline.
+                        </p>
+                        <div class="settings-group" style="margin-bottom: 14px;">
+                            <label>Webhook URL</label>
+                            <input type="text" name="AGENT_WEBHOOK_URL" value="{{ settings.get('AGENT_WEBHOOK_URL', '') }}" placeholder="http://localhost:8787/vigil-event">
+                        </div>
+                        <div class="settings-group">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" name="AGENT_WEBHOOK_ANOMALY_ONLY" {% if settings.get('AGENT_WEBHOOK_ANOMALY_ONLY') %}checked{% endif %} style="width:auto;">
+                                Only notify for anomalies, not every recording
+                            </label>
+                            <p class="settings-hint" style="margin-top:4px;">Leave off to get every analyzed event; turn on if you only want the agent to hear about the unusual ones (needs Anomaly Detection enabled above to have any anomalies to report).</p>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
                         <div class="settings-section-label"><i class="fa-solid fa-magnifying-glass-chart"></i> Anomaly Detection (optional)</div>
                         <p class="settings-hint" style="margin-top: -4px; margin-bottom: 12px;">
                             Flags recordings whose AI description is a statistical outlier compared to that

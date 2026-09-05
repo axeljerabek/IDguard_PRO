@@ -45,21 +45,14 @@ try:
     import mqtt_client
 except ImportError:
     mqtt_client = None
+try:
+    import agent_webhook
+except ImportError:
+    agent_webhook = None
 
 GPU_LOCK_PATH = os.path.join(DIR, '.postprocess.lock')
 
-# Not-Obergrenze für die KOMPLETTE Nachbearbeitung eines einzelnen Videos.
-# Die einzelnen Ollama-HTTP-Aufrufe haben zwar schon eigene Timeouts (180s,
-# siehe ai_analyze.py), aber die schützen nur vor einem hängenden NETZWERK-
-# Aufruf. Sie schützen NICHT davor, dass ein instabiles Ollama die GPU in
-# einen Zustand versetzt, in dem unsere EIGENEN, rein lokalen Schritte
-# (Whisper, InsightFace -- kein HTTP, kein Timeout-Konzept) hängenbleiben,
-# weil sie auf GPU-Ressourcen warten, die Ollama nicht sauber freigibt. Genau
-# dieses Muster hat Axel beobachtet: drei Videos "liefen nicht", ein Ollama-
-# Neustart hat es behoben -- das GPU-Lock wäre in diesem Fall NIE von selbst
-# freigegeben worden, jedes nachfolgende Video hätte ewig gewartet. Dieser
-# Watchdog erzwingt nach einer großzügigen Obergrenze den Abbruch, statt die
-# komplette Warteschlange auf unbestimmte Zeit zu blockieren.
+# Not-Obergrenze für die komplette Nachbearbeitung -- schützt vor hängendem Ollama/GPU-Kontention, das sonst die ganze Warteschlange blockieren würde (Timeouts pro HTTP-Call reichen dafür nicht).
 POSTPROCESS_MAX_SECONDS = 20 * 60  # 20 Minuten für EIN Video, alle drei Schritte zusammen
 
 
@@ -93,17 +86,7 @@ if __name__ == "__main__":
         sys.exit(1)
     video_basename, base_dir = sys.argv[1], sys.argv[2]
 
-    # Der übergebene base_dir kann inzwischen veraltet sein: postprocess.py
-    # läuft als Fire-and-Forget-Hintergrundprozess, und bis dieser Prozess
-    # tatsächlich läuft (Python-Start, Modell-Imports — kann mehrere
-    # Sekunden dauern), könnte das Video schon archiviert worden sein. Ohne
-    # diese Neuauflösung würde jeder der drei Schritte unten den Ordner an
-    # der ALTEN Stelle einfach nicht mehr finden und still (kein Fehler,
-    # kein Crash) überspringen — genau das beobachtete Muster "keine
-    # automatische Analyse, manueller Klick funktioniert aber" (der
-    # manuelle Klick passiert ja erst, nachdem man sich die Liste
-    # angesehen hat, meist mit genug Abstand, dass ein Archivieren
-    # dazwischen weniger wahrscheinlich ist).
+    # base_dir kann veraltet sein (Video evtl. schon archiviert, bis dieser Fire-and-Forget-Prozess läuft) -- Ordner hier neu auflösen, sonst schlägt die Analyse still fehl.
     video_filename = video_basename + '.mp4'
     if not os.path.exists(os.path.join(base_dir, video_filename)):
         archive_dir = os.path.join(base_dir, 'archive')
@@ -118,14 +101,7 @@ if __name__ == "__main__":
     lock_fd = acquire_gpu_lock()
     print(f"🔒 GPU-Lock erhalten, starte Nachbearbeitung für {video_basename}.")
     try:
-        # Derselbe Check wie oben, NOCHMAL — das GPU-Lock kann je nach
-        # Warteschlange mehrere Minuten dauern (mehrere Videos hintereinander
-        # in Bearbeitung), und genau in dieser Zeit kann das Video gelöscht
-        # worden sein. Ohne diesen zweiten Check würde hier trotzdem
-        # analysiert und am Ende .ai.json/.xmp für ein nicht mehr
-        # existierendes Video geschrieben — verwaiste Sidecar-Dateien, die
-        # beim Löschen nie mit aufgeräumt wurden, weil sie zum Löschzeitpunkt
-        # noch gar nicht existierten.
+        # Zweiter Check nötig -- das Video kann während der GPU-Lock-Wartezeit gelöscht worden sein, sonst entstehen verwaiste Sidecar-Dateien.
         if not os.path.exists(os.path.join(base_dir, video_filename)):
             archive_dir = os.path.join(base_dir, 'archive') if not base_dir.endswith('archive') else base_dir
             if os.path.exists(os.path.join(archive_dir, video_filename)):
@@ -148,13 +124,8 @@ if __name__ == "__main__":
     finally:
         release_gpu_lock(lock_fd)
 
-    # MQTT-Event, falls konfiguriert -- nach dem GPU-Lock freigegeben wurde,
-    # damit ein unerreichbarer/langsamer Broker (mqtt_client.publish() ist
-    # zwar selbst nicht-blockierend, aber der Vollständigkeit halber) das
-    # Freigeben des Locks nicht verzögern kann. Läuft auch bei einem
-    # Watchdog-Abbruch -- dann eben mit dem, was bis dahin in der .ai.json
-    # stand (oder gar nichts, falls die Analyse nie so weit kam).
-    if mqtt_client is not None:
+    # MQTT-Event nach GPU-Lock-Freigabe, damit ein langsamer Broker die nicht verzögert. Läuft auch nach Watchdog-Abbruch, mit dem was bis dahin in der .ai.json steht.
+    if mqtt_client is not None or agent_webhook is not None:
         try:
             meta_path = os.path.join(base_dir, f"{video_basename}.ai.json")
             if os.path.exists(meta_path):
@@ -163,8 +134,14 @@ if __name__ == "__main__":
                 m = re.match(r"^(.+?)_EVENT_\d{8}_\d{6}$", video_basename)
                 camera_name = m.group(1) if m else video_basename
                 if meta.get("description"):
-                    mqtt_client.publish_event_analyzed(
-                        camera_name, meta.get("description"), meta.get("topics"), video_filename
-                    )
+                    if mqtt_client is not None:
+                        mqtt_client.publish_event_analyzed(
+                            camera_name, meta.get("description"), meta.get("topics"), video_filename
+                        )
+                    if agent_webhook is not None:
+                        agent_webhook.notify_event(
+                            camera_name, video_filename, meta.get("description"), meta.get("topics"),
+                            anomaly=meta.get("anomaly", False), anomaly_score=meta.get("anomaly_score")
+                        )
         except Exception as e:
-            print(f"⚠️ [MQTT] Event-Publish nach Nachbearbeitung fehlgeschlagen: {e}")
+            print(f"⚠️ [MQTT/Webhook] Event-Publish nach Nachbearbeitung fehlgeschlagen: {e}")
