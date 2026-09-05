@@ -4,7 +4,7 @@
 
 **A self-hosted camera system that watches, understands, and tells you what happened — in plain language, searchable, and now controllable by an AI agent.**
 
-Instead of one AI trying to do everything, IDguard PRO chains together several small, specialized models: YOLO spots the moment something's worth recording, an audio model can trigger on sound alone, a vision-language model describes the clip afterward, Whisper transcribes speech, a face model recognizes who's there, and a text-embedding model makes it all searchable by meaning. Everything runs on your own GPU — no cloud, nothing leaves your network.
+Instead of one AI trying to do everything, vigil chains together several small, specialized models: YOLO spots the moment something's worth recording, an audio model can trigger on sound alone, a vision-language model describes the clip afterward, Whisper transcribes speech, a face model recognizes who's there, and a text-embedding model makes it all searchable by meaning. Everything runs on your own GPU — no cloud, nothing leaves your network.
 
 ![Architecture Overview](architecture_overview.png)
 
@@ -48,13 +48,13 @@ Every AI feature above is **off by default** and independently toggleable. Run i
 
 ## Why not Motion or Frigate?
 
-**[Motion/MotionEye](https://motion-project.github.io/)** triggers on pixel differences — reliable, decades-old, but it can't tell a cloud shadow from an intruder. IDguard PRO replaced that with an actual object detector as the trigger from day one.
+**[Motion/MotionEye](https://motion-project.github.io/)** triggers on pixel differences — reliable, decades-old, but it can't tell a cloud shadow from an intruder. Vigil replaced that with an actual object detector as the trigger from day one.
 
 **[Frigate](https://frigate.video/)** is the closer, more mature comparison — it already does AI detection, semantic search, scene descriptions, transcription, and face recognition. Bigger community, wider hardware support (Coral, Hailo, Apple Silicon), a paid fine-tuning service. If you want a mature, broadly-compatible NVR, **Frigate is very likely the better choice today.**
 
 What's different here is shape, not raw capability:
 
-| | IDguard PRO | Typical NVR software |
+| | vigil | Typical NVR software |
 | :--- | :--- | :--- |
 | Audio trigger | Independent trigger source, free-text categories | Usually enrichment on already-recorded video |
 | AI models | Wired together — detection classes shape the description prompt, one combined search signal | Often bolted on side by side |
@@ -84,7 +84,7 @@ If your priority is a battle-tested, widely-supported project — pick Frigate. 
 ### Camera Input
 * **RTMP, RTSP, MJPEG, and local USB/V4L2 webcams** (`/dev/video0` etc.) — just point a camera's URL field at any of these, no separate configuration needed. RTSP connections use TCP transport by default (more robust against packet loss than the ffmpeg default of UDP).
 * **Automatic recording-path selection per camera:** cameras whose source codec plays back reliably in a browser (H.264, VP9, AV1) are recorded via packet copy — the already-compressed stream is written straight to disk, no re-encoding, ~1000× cheaper per frame. Cameras that don't (MJPEG, most raw USB webcam feeds) are recorded via real encoding instead (NVENC-accelerated where available, software fallback otherwise). Decided automatically per camera at connection time.
-* **Watchfolder Import (optional):** point IDguard PRO at a folder instead of a camera, and it treats every video file dropped in there as a finished recording — waits for the file to stop growing, then imports it: renamed, filmstrip generated, run through the same AI post-processing as a live camera event.
+* **Watchfolder Import (optional):** point vigil at a folder instead of a camera, and it treats every video file dropped in there as a finished recording — waits for the file to stop growing, then imports it: renamed, filmstrip generated, run through the same AI post-processing as a live camera event.
 * **Automatic playback-codec fix on import:** if an imported file's codec won't play reliably in a browser (HEVC being the common offender), it's transcoded to H.264 automatically — GPU-accelerated where available. Already-compatible video is only re-wrapped, never needlessly re-encoded.
 
 ### Detection & Recording
