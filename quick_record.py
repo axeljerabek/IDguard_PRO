@@ -121,6 +121,23 @@ def _run_worker(job_id, url, duration_sec, output_path, run_ai_analysis):
         else:
             job["status"] = "done"
             job["output_path"] = output_path
+
+            # Filmstrip -- dieselbe Funktion wie beim Watchfolder-Import,
+            # sonst bleibt die Aufnahme im Dashboard ohne Vorschaubild
+            # (nur ein leeres Icon statt eines echten Frames).
+            try:
+                import backfill_filmstrips
+                thumbs_root = os.path.join(ALERTS_DIR, ".thumbs")
+                os.makedirs(thumbs_root, exist_ok=True)
+                try:
+                    with open(os.path.join(DIR, "pipeline_settings.json")) as f:
+                        count = int(json.load(f).get("FILMSTRIP_COUNT", 8)) or 8
+                except Exception:
+                    count = 8
+                backfill_filmstrips.backfill_filmstrip(output_path, thumbs_root, count)
+            except Exception as e:
+                print(f"⚠️ [QuickRecord] Filmstrip konnte nicht erzeugt werden: {e}")
+
             if run_ai_analysis in ("True", True):
                 try:
                     import ai_analyze
