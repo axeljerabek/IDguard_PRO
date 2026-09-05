@@ -55,8 +55,10 @@ All under `/api/v1/agent/`, same `Authorization: Bearer <key>` / `X-API-Key` aut
 | :--- | :--- | :--- |
 | `GET /capabilities` | *(always reachable)* | Orientation call — see above. |
 | `GET /cameras` | `cameras_toggle` | Name, enabled, audio_enabled — URL never included. |
-| `POST /cameras/<name>/enable` | `cameras_toggle` | |
-| `POST /cameras/<name>/disable` | `cameras_toggle` | |
+| `POST /cameras/<name>/enable` | `cameras_toggle` | Optional JSON/form body `{"audio_enabled": true/false}` also sets audio in the same call. Omit it to leave audio unchanged. |
+| `POST /cameras/<name>/disable` | `cameras_toggle` | Same optional `audio_enabled` body as above. |
+| `POST /cameras/<name>/audio/enable` | `cameras_toggle` | Audio only — doesn't touch the camera's enabled state. |
+| `POST /cameras/<name>/audio/disable` | `cameras_toggle` | Audio only — doesn't touch the camera's enabled state. |
 | `GET /settings` | `settings_change` | Only allowlisted keys are returned, even reading. |
 | `POST /settings` | `settings_change` | JSON body of key/value pairs, allowlist enforced. |
 | `GET /pipeline/status` | `pipeline_control` | |

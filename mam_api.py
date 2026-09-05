@@ -475,13 +475,58 @@ def agent_disable_camera(name):
     return _set_camera_enabled(name, False)
 
 
+def _get_optional_bool(key):
+    """Liest ein optionales Bool-Feld aus JSON-Body ODER Form-Body -- Aufrufer
+    könnten beides schicken, beide werden akzeptiert. None = Feld nicht
+    mitgeschickt, unterscheidet sich bewusst von False (nicht mitgeschickt
+    heißt 'unverändert lassen', nicht 'auf False setzen')."""
+    payload = request.get_json(silent=True) or {}
+    if key in payload:
+        return bool(payload[key])
+    if key in request.form:
+        return request.form.get(key) in ("true", "1", "on", "True")
+    return None
+
+
 def _set_camera_enabled(name, enabled):
+    """Setzt enabled, UND optional audio_enabled, falls im Request-Body
+    mitgeschickt (JSON oder Form, siehe _get_optional_bool) -- vorher
+    wurde audio_enabled hier komplett ignoriert, ein mitgeschicktes
+    {"audio_enabled": false} hatte schlicht keine Wirkung."""
     streams = _load_streams()
+    audio_override = _get_optional_bool("audio_enabled")
     for s in streams:
         if s.get("name") == name:
             s["enabled"] = enabled
+            if audio_override is not None:
+                s["audio_enabled"] = audio_override
             _save_streams(streams)
-            return jsonify({"ok": True, "name": name, "enabled": enabled})
+            return jsonify({"ok": True, "name": name, "enabled": enabled, "audio_enabled": s.get("audio_enabled", False)})
+    return jsonify({"error": f"Camera '{name}' not found."}), 404
+
+
+@mam_bp.route("/agent/cameras/<name>/audio/enable", methods=["POST"])
+@requires_agent_capability("cameras_toggle")
+def agent_enable_camera_audio(name):
+    return _set_camera_audio(name, True)
+
+
+@mam_bp.route("/agent/cameras/<name>/audio/disable", methods=["POST"])
+@requires_agent_capability("cameras_toggle")
+def agent_disable_camera_audio(name):
+    return _set_camera_audio(name, False)
+
+
+def _set_camera_audio(name, audio_enabled):
+    """Dedizierter Audio-only-Endpunkt, für den Fall, dass ein Aufrufer nur
+    das Audio-Flag ändern will, ohne den Video-Enabled-Status anzufassen --
+    _set_camera_enabled() braucht immer einen enabled-Wert, das hier nicht."""
+    streams = _load_streams()
+    for s in streams:
+        if s.get("name") == name:
+            s["audio_enabled"] = audio_enabled
+            _save_streams(streams)
+            return jsonify({"ok": True, "name": name, "enabled": s.get("enabled", False), "audio_enabled": audio_enabled})
     return jsonify({"error": f"Camera '{name}' not found."}), 404
 
 
