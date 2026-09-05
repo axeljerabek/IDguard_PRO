@@ -32,7 +32,7 @@ In the dashboard: **Settings → Home Assistant / MQTT**
 | Broker host | IP or hostname of your MQTT broker |
 | Broker port | Default `1883` (unencrypted) — use whatever port your broker actually listens on |
 | Username / Password | Optional, only if your broker requires auth |
-| Topic prefix | Default `idguard` — change this if you're already using that namespace for something else, or if you run multiple vigil instances and want to tell them apart |
+| Topic prefix | Default `vigil` — change this if you're already using that namespace for something else, or if you run multiple vigil instances and want to tell them apart |
 | Publish Home Assistant MQTT Discovery config | On by default — turn off if you only want the raw topics for your own automations and don't want HA auto-creating entities |
 
 No pipeline restart is needed — MQTT settings are read fresh (with a short cache) on every publish.
@@ -63,7 +63,7 @@ automation:
   - alias: "vigil - notify on recording"
     trigger:
       - platform: state
-        entity_id: binary_sensor.idguard_entrance_recording
+        entity_id: binary_sensor.vigil_entrance_recording
         to: "on"
     action:
       - service: notify.mobile_app_your_phone
@@ -78,7 +78,7 @@ automation:
   - alias: "vigil - notify with description"
     trigger:
       - platform: state
-        entity_id: sensor.idguard_entrance_last_event
+        entity_id: sensor.vigil_entrance_last_event
     action:
       - service: notify.mobile_app_your_phone
         data:

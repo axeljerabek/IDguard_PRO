@@ -68,7 +68,7 @@ def _publish_raw_worker(topic, payload, retain, qos, broker, port, username, pas
         _mqtt_publish.single(
             topic, payload=payload, retain=retain, qos=qos,
             hostname=broker, port=port, auth=auth,
-            client_id="idguard-pro", keepalive=5
+            client_id="vigil", keepalive=5
         )
     except Exception as e:
         print(f"⚠️ [MQTT] Publish an '{topic}' fehlgeschlagen (Broker erreichbar? Zugangsdaten korrekt?): {e}")
@@ -130,23 +130,23 @@ def publish_ha_discovery(camera_name):
     safe_name = _safe_id(camera_name)
 
     device = {
-        "identifiers": [f"idguard_{safe_name}"],
+        "identifiers": [f"vigil_{safe_name}"],
         "name": f"vigil {camera_name}",
         "manufacturer": "vigil",
     }
     entities = [
-        ("binary_sensor", f"idguard_{safe_name}_recording", {
+        ("binary_sensor", f"vigil_{safe_name}_recording", {
             "name": f"{camera_name} Recording",
-            "unique_id": f"idguard_{safe_name}_recording",
+            "unique_id": f"vigil_{safe_name}_recording",
             "state_topic": f"{prefix}/{safe_name}/recording",
             "payload_on": "ON",
             "payload_off": "OFF",
             "device_class": "motion",
             "device": device,
         }),
-        ("sensor", f"idguard_{safe_name}_last_event", {
+        ("sensor", f"vigil_{safe_name}_last_event", {
             "name": f"{camera_name} Last Event",
-            "unique_id": f"idguard_{safe_name}_last_event",
+            "unique_id": f"vigil_{safe_name}_last_event",
             "state_topic": f"{prefix}/{safe_name}/last_event_summary",
             "device": device,
         }),

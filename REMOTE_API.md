@@ -104,18 +104,18 @@ If your endpoint doesn't respond with a 2xx, delivery is retried with exponentia
 
 ```bash
 # Submit
-curl -X POST https://your-idguard-host:19473/api/v1/jobs \
+curl -X POST https://your-vigil-host:19473/api/v1/jobs \
   -H "Authorization: Bearer idg_xxxxxxxxxxxx" \
   -F "file=@delivery_clip.mp4" \
   -F "topics=delivery,mail carrier" \
-  -F "callback_url=https://your-system.example/idguard-callback"
+  -F "callback_url=https://your-system.example/vigil-callback"
 
 # Poll
-curl https://your-idguard-host:19473/api/v1/jobs/<job_id> \
+curl https://your-vigil-host:19473/api/v1/jobs/<job_id> \
   -H "Authorization: Bearer idg_xxxxxxxxxxxx"
 
 # Get the result
-curl https://your-idguard-host:19473/api/v1/jobs/<job_id>/metadata \
+curl https://your-vigil-host:19473/api/v1/jobs/<job_id>/metadata \
   -H "Authorization: Bearer idg_xxxxxxxxxxxx"
 ```
 

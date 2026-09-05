@@ -495,7 +495,7 @@ def api_export_metadata():
 
     if fmt == 'json':
         resp = Response(json.dumps(events, indent=2, ensure_ascii=False), mimetype='application/json')
-        resp.headers['Content-Disposition'] = 'attachment; filename=idguard_export.json'
+        resp.headers['Content-Disposition'] = 'attachment; filename=vigil_export.json'
         return resp
 
     output = io.StringIO()
@@ -513,7 +513,7 @@ def api_export_metadata():
         row['people'] = ', '.join(p.get('name', '') for p in (e.get('people_in_video') or []))
         writer.writerow(row)
     resp = Response(output.getvalue(), mimetype='text/csv')
-    resp.headers['Content-Disposition'] = 'attachment; filename=idguard_export.csv'
+    resp.headers['Content-Disposition'] = 'attachment; filename=vigil_export.csv'
     return resp
 
 def _get_disk_status():
@@ -1735,7 +1735,7 @@ def save_pipeline_settings():
         "MQTT_PORT": _clamp(mqtt_port, 1, 65535),
         "MQTT_USERNAME": request.form.get('MQTT_USERNAME', '').strip(),
         "MQTT_PASSWORD": request.form.get('MQTT_PASSWORD', ''),
-        "MQTT_TOPIC_PREFIX": (request.form.get('MQTT_TOPIC_PREFIX', 'idguard').strip() or 'idguard'),
+        "MQTT_TOPIC_PREFIX": (request.form.get('MQTT_TOPIC_PREFIX', 'vigil').strip() or 'vigil'),
         "MQTT_HA_DISCOVERY": request.form.get('MQTT_HA_DISCOVERY') == 'on',
         "ANOMALY_DETECTION_ENABLED": request.form.get('ANOMALY_DETECTION_ENABLED') == 'on',
         "TRANSCRIPTION_ENABLED": request.form.get('TRANSCRIPTION_ENABLED') == 'on',

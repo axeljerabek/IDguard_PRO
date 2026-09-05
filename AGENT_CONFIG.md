@@ -106,18 +106,18 @@ Deliberate. Both are meaningfully higher-stakes than the rest (delete is irrever
 
 ```bash
 # Start here -- see what's currently allowed
-curl https://your-idguard-host:19473/api/v1/agent/capabilities \
+curl https://your-vigil-host:19473/api/v1/agent/capabilities \
   -H "Authorization: Bearer idg_xxxxxxxxxxxx"
 
 # Check what's currently allowed to run
-curl https://your-idguard-host:19473/api/v1/agent/pipeline/status \
+curl https://your-vigil-host:19473/api/v1/agent/pipeline/status \
   -H "Authorization: Bearer idg_xxxxxxxxxxxx"
 
 # Disable a camera
-curl -X POST https://your-idguard-host:19473/api/v1/agent/cameras/Backyard/disable \
+curl -X POST https://your-vigil-host:19473/api/v1/agent/cameras/Backyard/disable \
   -H "Authorization: Bearer idg_xxxxxxxxxxxx"
 
 # Search
-curl "https://your-idguard-host:19473/api/v1/agent/search?q=delivery" \
+curl "https://your-vigil-host:19473/api/v1/agent/search?q=delivery" \
   -H "Authorization: Bearer idg_xxxxxxxxxxxx"
 ```

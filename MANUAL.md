@@ -1,4 +1,4 @@
-# 🛡️ IDGUARD PRO - CONFIGURATION MANUAL
+# 🛡️ VIGIL - CONFIGURATION MANUAL
 
 **Version:** 2.0
 **Purpose:** Complete reference for every configurable parameter — both in `config.py` and in the live dashboard Settings.
