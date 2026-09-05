@@ -87,10 +87,31 @@ def list_summaries():
         for path in sorted(glob.glob(os.path.join(SUMMARIES_DIR, '*.json')), reverse=True)[:20]:
             try:
                 with open(path) as f:
-                    results.append(json.load(f))
+                    entry = json.load(f)
+                entry['filename'] = os.path.basename(path)
+                results.append(entry)
             except Exception:
                 continue
     return json.dumps({'summaries': results})
+
+@app.route('/api/delete_summary', methods=['POST'])
+@requires_auth
+def delete_summary():
+    _verify_csrf()
+    filename = request.form.get('filename', '')
+    # Nur exakt die erwartete Namenskonvention zulassen (day_YYYYMMDD.json /
+    # week_YYYYMMDD.json) -- verhindert jeden Pfad-Trick (../../etc), auch
+    # wenn os.path.basename() weiter unten schon zusätzlich absichert.
+    if not re.match(r'^(day|week)_\d{8}\.json$', filename):
+        return json.dumps({'ok': False, 'error': 'Invalid filename.'})
+    path = os.path.join(SUMMARIES_DIR, os.path.basename(filename))
+    if not os.path.exists(path):
+        return json.dumps({'ok': False, 'error': 'Summary not found.'})
+    try:
+        os.remove(path)
+    except Exception as e:
+        return json.dumps({'ok': False, 'error': str(e)})
+    return json.dumps({'ok': True})
 
 @app.route('/api/agent_config', methods=['GET'])
 @requires_auth

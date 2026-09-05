@@ -1737,12 +1737,58 @@
             }
             el.innerHTML = summaries.map(s => `
                 <div style="padding:12px 0; border-bottom:1px solid var(--border);">
-                    <div style="font-weight:600; margin-bottom:4px;">${escapeHtml(_formatSummaryPeriod(s))}
-                        <span style="font-weight:400; color:var(--text-muted); font-size:0.85rem;"> · ${s.event_count} event${s.event_count === 1 ? '' : 's'}${s.cameras && s.cameras.length ? ' · ' + escapeHtml(s.cameras.join(', ')) : ''}</span>
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+                        <div style="font-weight:600; margin-bottom:4px;">${escapeHtml(_formatSummaryPeriod(s))}
+                            <span style="font-weight:400; color:var(--text-muted); font-size:0.85rem;"> · ${s.event_count} event${s.event_count === 1 ? '' : 's'}${s.cameras && s.cameras.length ? ' · ' + escapeHtml(s.cameras.join(', ')) : ''}</span>
+                        </div>
+                        <div style="display:flex; gap:6px; flex-shrink:0;">
+                            <button type="button" class="btn-select-all" style="padding:4px 8px; font-size:0.8rem;" onclick="regenerateSummary('${s.period}', '${s.start.slice(0,10)}', this)" title="Regenerate"><i class="fa-solid fa-rotate"></i></button>
+                            <button type="button" class="btn-select-all" style="padding:4px 8px; font-size:0.8rem; color:var(--danger);" onclick="deleteSummary('${s.filename}', this)" title="Delete"><i class="fa-solid fa-trash"></i></button>
+                        </div>
                     </div>
                     <div style="color:var(--text-muted);">${s.error ? '⚠️ ' + escapeHtml(s.error) : escapeHtml(s.summary || '')}</div>
                 </div>
             `).join('');
+        }
+
+        function deleteSummary(filename, btn) {
+            if (!confirm('Delete this summary? This only removes the written recap, not the underlying recordings.')) return;
+            _postForm('/api/delete_summary', { filename: filename }).then(res => {
+                if (res.ok) { loadSummaries(); showToast('Summary deleted.'); }
+                else showToast('⚠️ Could not delete: ' + (res.error || 'unknown error'), 6000);
+            });
+        }
+
+        function regenerateSummary(period, dateStr, btn) {
+            const originalHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            _postForm('/api/generate_summary', { period: period, date: dateStr }).then(res => {
+                if (!res.ok) {
+                    showToast('⚠️ Could not regenerate: ' + (res.error || 'unknown error'), 6000);
+                    btn.disabled = false;
+                    btn.innerHTML = originalHtml;
+                    return;
+                }
+                // Läuft im Hintergrund, wie bei generateSummary() -- kurz pollen,
+                // bis das Ergebnis mit einem frischeren generated_at auftaucht.
+                let attempts = 0;
+                const poll = setInterval(() => {
+                    attempts++;
+                    fetch('/api/summaries').then(r => r.json()).then(data => {
+                        const summaries = data.summaries || [];
+                        renderSummaries(summaries);
+                        const justRegenerated = summaries.find(s =>
+                            s.period === period && s.start.slice(0, 10) === dateStr &&
+                            new Date(s.generated_at).getTime() > Date.now() - 15000
+                        );
+                        if (justRegenerated || attempts >= 40) {
+                            clearInterval(poll);
+                            if (justRegenerated) showToast('✅ Summary regenerated.');
+                        }
+                    });
+                }, 3000);
+            });
         }
 
         function loadSummaries() {
