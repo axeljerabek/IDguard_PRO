@@ -866,7 +866,7 @@
             </div>
         </details>
 
-        <details class="collapse-card" id="mamCard" ontoggle="if (this.open && !mamKeysLoaded) loadMamKeys();">
+        <details class="collapse-card" id="mamCard" ontoggle="if (this.open && !mamKeysLoaded) { loadMamKeys(); loadAgentConfig(); }">
             <summary>
                 <span><i class="fa-solid fa-plug-circle-bolt"></i> External API (Remote Control)</span>
                 <i class="fa-solid fa-chevron-down chevron"></i>
@@ -885,6 +885,18 @@
                     <code id="mamNewKeyValue" style="word-break:break-all; user-select:all;"></code>
                 </div>
                 <div id="mamKeysList">Loading…</div>
+
+                <hr style="border-color: var(--border); margin: 20px 0;">
+
+                <div style="font-weight:600; margin-bottom: 4px;">Agent Control</div>
+                <p class="settings-hint" style="margin-top: 0; margin-bottom: 12px;">Lets an agent (Hermes, OpenClaw, etc.) operate the pipeline directly through this same API instead of only submitting jobs — toggle cameras, tune settings, start/stop recording, search. See <code>AGENT_CONFIG.md</code>. Off by default.</p>
+
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer; padding:10px; border:1px solid var(--danger); border-radius:var(--radius-sm); margin-bottom:14px; background:var(--card-bg-inset);">
+                    <input type="checkbox" id="agentMasterSwitch" onchange="saveAgentConfig()" style="width:auto;">
+                    <span><strong style="color:var(--danger);">Enable agent control</strong> — master switch. Nothing below works while this is off, regardless of the individual toggles.</span>
+                </label>
+
+                <div id="agentCapabilitiesList">Loading…</div>
             </div>
         </details>
 
@@ -1589,6 +1601,52 @@
                     return;
                 }
                 renderMamKeys(data.keys);
+            });
+        }
+
+        function renderAgentCapabilities(config) {
+            const capOrder = ['search', 'cameras_toggle', 'pipeline_control', 'settings_change', 'delete', 'export'];
+            const labels = {
+                search: 'Search', cameras_toggle: 'Toggle cameras', pipeline_control: 'Start/stop pipeline',
+                settings_change: 'Change settings', delete: 'Delete recordings', export: 'Export recordings'
+            };
+            document.getElementById('agentMasterSwitch').checked = !!config.agent_control_enabled;
+            const notImplemented = new Set(['delete', 'export']);
+            document.getElementById('agentCapabilitiesList').innerHTML = capOrder.map(cap => {
+                const c = config.capabilities[cap] || {};
+                const disabled = notImplemented.has(cap);
+                return `
+                    <label style="display:flex; align-items:flex-start; gap:8px; cursor:${disabled ? 'default' : 'pointer'}; padding:8px 0; border-bottom:1px solid var(--border); opacity:${disabled ? '0.5' : '1'};">
+                        <input type="checkbox" data-cap="${cap}" ${c.enabled ? 'checked' : ''} ${disabled ? 'disabled' : 'onchange="saveAgentConfig()"'} style="width:auto; margin-top:3px;">
+                        <span>
+                            <strong>${labels[cap]}</strong>
+                            <span style="color:var(--text-muted); font-size:0.8rem;"> · risk: ${c.risk}${disabled ? ' · not implemented yet' : ''}</span>
+                            <br><span style="color:var(--text-muted); font-size:0.85rem;">${escapeHtml(c.description || '')}</span>
+                        </span>
+                    </label>
+                `;
+            }).join('');
+        }
+
+        function loadAgentConfig() {
+            fetch('/api/agent_config').then(r => r.json()).then(data => {
+                if (!data.capabilities) {
+                    document.getElementById('agentCapabilitiesList').innerHTML = '<p class="settings-hint">Agent control module not available.</p>';
+                    return;
+                }
+                renderAgentCapabilities(data);
+            });
+        }
+
+        function saveAgentConfig() {
+            const body = { agent_control_enabled: document.getElementById('agentMasterSwitch').checked ? 'on' : '' };
+            document.querySelectorAll('#agentCapabilitiesList input[data-cap]').forEach(el => {
+                body['cap_' + el.dataset.cap] = el.checked ? 'on' : '';
+            });
+            _postForm('/api/agent_config', body).then(res => {
+                if (res.ok) showToast('Agent control settings saved.');
+                else showToast('⚠️ Could not save: ' + (res.error || 'unknown error'), 6000);
+                loadAgentConfig();
             });
         }
 

@@ -92,6 +92,33 @@ def list_summaries():
                 continue
     return json.dumps({'summaries': results})
 
+@app.route('/api/agent_config', methods=['GET'])
+@requires_auth
+def get_agent_config():
+    try:
+        import agent_permissions
+        return json.dumps(agent_permissions.load_config())
+    except ImportError:
+        return json.dumps({'available': False})
+
+@app.route('/api/agent_config', methods=['POST'])
+@requires_auth
+def save_agent_config():
+    _verify_csrf()
+    try:
+        import agent_permissions
+    except ImportError:
+        return json.dumps({'ok': False, 'error': 'agent_permissions module not available.'})
+    config = agent_permissions.load_config()
+    config['agent_control_enabled'] = request.form.get('agent_control_enabled') == 'on'
+    for cap in config.get('capabilities', {}):
+        if cap in ('delete', 'export'):
+            continue  # nicht implementiert -- Checkbox in der GUI ist bewusst deaktiviert, hier zusätzlich serverseitig ignoriert
+        config['capabilities'][cap]['enabled'] = request.form.get(f'cap_{cap}') == 'on'
+    with open(agent_permissions.CONFIG_PATH, 'w') as f:
+        json.dump(config, f, indent=2)
+    return json.dumps({'ok': True})
+
 @app.route('/api/mam_keys', methods=['GET'])
 @requires_auth
 def list_mam_keys():
