@@ -1,5 +1,5 @@
 """
-mam_api.py — externe API für Media-Asset-Management-Anbindung (MAM).
+mam_api.py — externe API zur Remote-Steuerung von IDguard PRO.
 
 Erlaubt fremden Systemen, Video/Audio/Bilder von außen einzureichen,
 die IDguard PRO komplett durch dieselbe Pipeline schickt wie eine eigene
@@ -233,7 +233,7 @@ def _process_video_job(job_id, upload_path, params):
             try:
                 face_recognize.recognize(basename, JOBS_OUTPUT_DIR)
             except Exception as e:
-                print(f"⚠️ [MAM] Gesichtserkennung für Job {job_id} fehlgeschlagen: {e}")
+                print(f"⚠️ [API] Gesichtserkennung für Job {job_id} fehlgeschlagen: {e}")
 
         meta_path = os.path.join(JOBS_OUTPUT_DIR, f"{basename}.ai.json")
         meta = {}
@@ -254,7 +254,7 @@ def _process_video_job(job_id, upload_path, params):
         job["status"] = "failed"
         job["finished_at"] = time.time()
         job["error"] = str(e)
-        print(f"❌ [MAM] Job {job_id} fehlgeschlagen: {e}")
+        print(f"❌ [API] Job {job_id} fehlgeschlagen: {e}")
     finally:
         _save_job(job)
         _deliver_callback(job)
@@ -295,7 +295,7 @@ def _deliver_callback(job, max_attempts=5):
                     _save_job(current)
                 return
             except Exception as e:
-                print(f"⚠️ [MAM] Callback-Zustellung an {callback_url} fehlgeschlagen (Versuch {attempt}/{max_attempts}): {e}")
+                print(f"⚠️ [API] Callback-Zustellung an {callback_url} fehlgeschlagen (Versuch {attempt}/{max_attempts}): {e}")
                 time.sleep(delay)
                 delay = min(delay * 2, 60)
         current = _load_job(job["job_id"])

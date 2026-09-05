@@ -1,6 +1,6 @@
-# External API (MAM Integration)
+# External API (Remote Control)
 
-IDguard PRO can accept video from an external system — a media asset manager, another app, a script — process it through the same pipeline as a live recording (codec handling, filmstrip generation, AI description, face recognition), and hand the enriched result back, either via webhook callback or by polling a status endpoint.
+IDguard PRO can accept video from an external system — a media asset manager, home automation, another app, a script — process it through the same pipeline as a live recording (codec handling, filmstrip generation, AI description, face recognition), and hand the enriched result back, either via webhook callback or by polling a status endpoint.
 
 ## Getting an API key
 

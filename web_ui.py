@@ -46,13 +46,13 @@ except ImportError:
 
 app = Flask(__name__)
 
-# Externe MAM-API (separate API-Key-Auth, nicht die Dashboard-Session) --
+# Externe API zur Remote-Steuerung (separate API-Key-Auth, nicht die Dashboard-Session) --
 # eigenes Blueprint statt alles hier reinzupacken, siehe mam_api.py.
 try:
     from mam_api import mam_bp
     app.register_blueprint(mam_bp)
 except Exception as e:
-    print(f"⚠️ MAM-API konnte nicht geladen werden, externe API ist nicht verfügbar: {e}")
+    print(f"⚠️ Externe API konnte nicht geladen werden: {e}")
 
 # Archiv-Unterordner für aufbewahrte Aufnahmen (getrennt von den aktiven Alerts)
 ARCHIVE_DIR = os.path.join(ALERTS_DIR, 'archive')
