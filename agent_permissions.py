@@ -18,6 +18,7 @@ DEFAULT_CONFIG = {
         "search": {"enabled": True},
         "cameras_toggle": {"enabled": True},
         "pipeline_control": {"enabled": True},
+        "manual_trigger": {"enabled": False},
         "settings_change": {"enabled": True},
         "delete": {"enabled": False},
         "export": {"enabled": False},

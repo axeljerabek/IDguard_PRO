@@ -1605,9 +1605,10 @@
         }
 
         function renderAgentCapabilities(config) {
-            const capOrder = ['search', 'cameras_toggle', 'pipeline_control', 'settings_change', 'delete', 'export'];
+            const capOrder = ['search', 'cameras_toggle', 'pipeline_control', 'manual_trigger', 'settings_change', 'delete', 'export'];
             const labels = {
                 search: 'Search', cameras_toggle: 'Toggle cameras', pipeline_control: 'Start/stop pipeline',
+                manual_trigger: 'Manual trigger & notify-only mode',
                 settings_change: 'Change settings', delete: 'Delete recordings', export: 'Export recordings'
             };
             document.getElementById('agentMasterSwitch').checked = !!config.agent_control_enabled;

@@ -19,6 +19,11 @@
       "risk": "medium",
       "description": "Start or stop the entire recording pipeline. Stopping it means no camera records until it's started again."
     },
+    "manual_trigger": {
+      "enabled": false,
+      "risk": "medium",
+      "description": "Force-start a recording on a specific camera right now, and switch a camera between normal (auto-record) and notify-only (YOLO still detects, but only reports -- recording waits for an explicit trigger) mode. Creates real recordings and uses storage; off by default even though the other low-risk capabilities default on."
+    },
     "settings_change": {
       "enabled": true,
       "risk": "medium",

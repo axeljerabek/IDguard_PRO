@@ -61,18 +61,7 @@ except ImportError:
 STATUS_DIR = os.path.join(ALERTS_DIR, '.status')
 os.makedirs(STATUS_DIR, exist_ok=True)
 
-# Hintergrund-Writer fürs Filmstrip: nimmt der Haupt-Frame-Schleife die
-# blockierende Festplatten-I/O (cv2.imwrite + JSON) komplett ab. Vorher lief
-# das synchron direkt im Capture-Loop bei jedem Filmstrip-Intervall (Standard
-# alle 2s) — bei mehreren Kameras auf gemeinsamer Platte konnten sich diese
-# kurzen Stalls überlappen und verlängern. Der eingehende RTMP-Stream läuft
-# während eines solchen Stalls unbeeindruckt weiter; die Aufnahme verpasst in
-# dieser Zeit effektiv Frames, was sich als Ruckeln in der fertigen Datei
-# zeigt, OHNE dass GPU oder CPU dabei ausgelastet wären (reine I/O-Wartezeit
-# erscheint nicht als Prozessorlast). Da jede Kamera als eigener 'spawn'-
-# Prozess läuft (siehe multiprocessing-Fix weiter unten), ist ein modul-
-# globaler Writer hier automatisch schon "ein Writer-Thread pro Kamera",
-# ganz ohne zusätzliche Verwaltung.
+# Filmstrip-Schreiben läuft im Hintergrund-Thread statt im Capture-Loop -- vermeidet I/O-Stalls, die sonst als Ruckeln sichtbar würden.
 _filmstrip_write_queue = queue.Queue()
 
 def _filmstrip_writer_loop():
@@ -97,14 +86,7 @@ def _filmstrip_writer_loop():
 
 threading.Thread(target=_filmstrip_writer_loop, daemon=True).start()
 
-# Dieselbe Idee wie beim Filmstrip-Writer oben, aber für die 1fps-Live-
-# Vorschau — die lief bisher NICHT nur mit blockierendem Schreiben im
-# Hauptloop, sondern hatte dort sogar noch results[0].plot() (Box-Zeichnen),
-# cv2.resize() und cv2.imencode() mit drin. Läuft dazu noch KONTINUIERLICH
-# alle ~1s (Standard-THUMBNAIL_FPS), unabhängig davon ob gerade überhaupt
-# aufgenommen wird — vermutlich der Hauptverursacher fürs beobachtete
-# Mikroruckeln, da es bei JEDER Kamera bei JEDEM Intervall-Tick zuschlägt,
-# nicht nur während aktiver Aufnahmen mit aktiviertem Filmstrip.
+# Live-Vorschau (Box-Zeichnen, Resize, Encode) läuft ebenfalls im Hintergrund-Thread, nicht im Haupt-Loop -- lief kontinuierlich, unabhängig von aktiver Aufnahme.
 _shared_frame_write_queue = queue.Queue()
 
 def _draw_boxes_with_labels(cv2, img, boxes, names):
@@ -221,6 +203,54 @@ def _publish_mqtt_recording(name, is_recording):
         pass
 
 
+TRIGGER_DIR = os.path.join(ALERTS_DIR, '.triggers')
+DETECTION_DIR = os.path.join(ALERTS_DIR, '.detections')
+os.makedirs(TRIGGER_DIR, exist_ok=True)
+os.makedirs(DETECTION_DIR, exist_ok=True)
+
+
+def _check_and_clear_manual_trigger(name):
+    """Prüft, ob ein externer Trigger (Agent/API) für diese Kamera angefordert
+    wurde -- reine Datei-Existenzprüfung, kein Locking nötig, da nur dieser
+    eine Prozess die Datei je liest/löscht, und die schreibende Seite
+    (mam_api.py) sie nur einmalig anlegt."""
+    path = os.path.join(TRIGGER_DIR, f'{name}.flag')
+    if os.path.exists(path):
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+        return True
+    return False
+
+
+_last_detection_notify = {}  # Kameraname -> Zeitstempel der letzten Meldung
+DETECTION_NOTIFY_MIN_INTERVAL = 5  # Sekunden -- verhindert Spam bei durchgehender Erkennung
+
+
+def _write_detection_notification(name, detected_names):
+    """Im notify_only-Modus: statt automatisch aufzunehmen, wird hier nur
+    gemeldet, was gerade erkannt wurde -- als Datei (für den Agenten-
+    Abfrage-Endpunkt) und per MQTT. Gedrosselt, damit eine durchgehende
+    Erkennung nicht bei jedem Frame neu schreibt/published."""
+    now = time.time()
+    last = _last_detection_notify.get(name, 0)
+    if now - last < DETECTION_NOTIFY_MIN_INTERVAL:
+        return
+    _last_detection_notify[name] = now
+    payload = {"camera": name, "detected_classes": sorted(set(detected_names)), "timestamp": now}
+    try:
+        with open(os.path.join(DETECTION_DIR, f'{name}.json'), 'w') as f:
+            json.dump(payload, f)
+    except Exception:
+        pass
+    if mqtt_client is not None:
+        try:
+            mqtt_client.publish(f"{name}/detection", payload)
+        except Exception:
+            pass
+
+
 class GracefulShutdown(BaseException):
     """Eigene Exception statt Exception-Basisklasse, damit sie nicht versehentlich
     vom generischen 'except Exception' als Crash geloggt wird (siehe Fix 2)."""
@@ -238,6 +268,12 @@ class CameraAgent(multiprocessing.Process):
         # Feature haben das Feld noch nicht, sollen sich aber nicht plötzlich
         # stumm schalten.
         self.audio_enabled = stream_info.get("audio_enabled", True)
+        # Notify-only: YOLO erkennt weiterhin normal, löst aber KEINE
+        # automatische Aufnahme aus -- nur eine Erkennungs-Meldung (Datei +
+        # MQTT). Aufnahme startet dann ausschließlich über einen externen
+        # Trigger (Agent/API). Default False -- bestehendes Verhalten
+        # bleibt für alle Kameras ohne dieses Feld exakt gleich.
+        self.notify_only = stream_info.get("notify_only", False)
         # Vom Master anhand der tatsächlich verbauten GPU bestimmt (siehe
         # detect_gpu_profile) — nicht pro Worker neu geraten.
         self.half_precision_allowed = half_precision
@@ -365,20 +401,7 @@ class CameraAgent(multiprocessing.Process):
         else:
             self.logger.warning("⚠️ No valid YOLO path found; running in VISION-ONLY mode.")
 
-        # Erkennung komplett vom Decode/Encode-Loop entkoppelt: YOLO lief
-        # bisher SYNCHRON im selben Loop wie das Video-Encoding — war die
-        # Inferenz mal langsamer (z.B. weil mehrere Kamera-Prozesse
-        # gleichzeitig dieselbe GPU nutzen), verzögerte das direkt das
-        # nächste zu encodierende Frame. Das war vermutlich die
-        # Hauptursache für das beobachtete Mikroruckeln, nicht die PTS-
-        # Berechnung selbst. Jetzt läuft die Inferenz in einem eigenen
-        # Thread: der Haupt-Loop übergibt nur das jeweils NEUESTE Frame
-        # (nicht-blockierend, ein noch unverarbeitetes älteres Frame wird
-        # einfach überschrieben statt aufzustauen) und liest den zuletzt
-        # verfügbaren Erkennungsstand — Encoding wartet nie mehr auf
-        # Erkennung. Nur boxes (NumPy) + names (Dict) werden geteilt, nie
-        # das rohe Ultralytics-Results-Objekt (GPU-/Modell-Zustand,
-        # zwischen Threads riskant aufzuheben — siehe Filmstrip-Kommentare).
+        # YOLO läuft in eigenem Thread statt synchron im Encode-Loop -- verzögerte sonst das Encoding bei langsamer Inferenz. Nur boxes/names geteilt, nie das rohe Ultralytics-Objekt.
         _detection_lock = threading.Lock()
         _latest_detection = {'boxes': None, 'names': None}
         _pending_frame_lock = threading.Lock()
@@ -413,18 +436,7 @@ class CameraAgent(multiprocessing.Process):
         _detection_thread = threading.Thread(target=_detection_worker, daemon=True)
         _detection_thread.start()
 
-        # Einmaliger echter NVENC-Test beim Start dieses Kamera-Prozesses.
-        # add_stream('h264_nvenc', ...) allein ist KEIN zuverlässiger
-        # Verfügbarkeits-Check — PyAV/ffmpeg öffnen den eigentlichen Encoder
-        # (avcodec_open2) oft erst beim ERSTEN echten encode()-Aufruf, nicht
-        # schon bei add_stream(). Ohne diesen Test hier würde add_stream()
-        # klaglos durchlaufen, die Pipeline meldet fälschlich "NVENC aktiv",
-        # und der eigentliche Fehler taucht erst still mitten in der
-        # laufenden Aufnahme auf — bei JEDEM einzelnen Frame erneut, weit
-        # außerhalb des dafür vorgesehenen Fallback-try/except (genau das
-        # Muster, das im Docker-Container ohne funktionierenden NVENC-Zugriff
-        # beobachtet wurde). Gleiche Philosophie wie _load_and_selftest oben:
-        # echt testen statt nur hoffen.
+        # Echter NVENC-Test beim Start -- add_stream() allein prüft nicht zuverlässig, echte Fehler tauchen sonst erst mitten in der Aufnahme auf.
         def _probe_nvenc():
             try:
                 import tempfile
@@ -478,17 +490,7 @@ class CameraAgent(multiprocessing.Process):
         # Sicherheitsnetz gegen Speicher-Runaway, trimmt aber nicht mehr aktiv.
         safety_cap = int((TARGET_FPS + 60) * PRE_ROLL_SEC) * 3
         av_buffer = deque(maxlen=safety_cap)
-        # Encoding-Warteschlange: encode_video_frame()/encode_audio_frame()
-        # werden NICHT mehr direkt aus der State-Machine heraus aufgerufen,
-        # sondern nur noch eingereiht. Ein Drain-Schritt (siehe
-        # _drain_encode_queue) arbeitet davon pro Paket-Durchlauf nur eine
-        # BEGRENZTE Menge ab — das verteilt den Pre-Roll-Burst (bei 10s
-        # Pre-Roll und 30fps potenziell 300+ Frames) über mehrere
-        # Loop-Durchläufe, statt ihn in einem einzigen blockierenden Rutsch
-        # abzuarbeiten, während der Decode-Loop keine neuen Quell-Pakete
-        # liest. Bewusst EIN Thread (kein zweiter Encoding-Thread) — die
-        # PyAV/ffmpeg-Encoder-Objekte sind nicht garantiert thread-sicher
-        # für gleichzeitige encode()-Aufrufe, das wäre ein neues Risiko.
+        # Encoding läuft über eine Warteschlange, verteilt über mehrere Loop-Durchläufe abgearbeitet -- vermeidet einen blockierenden Pre-Roll-Burst. Ein Thread bewusst, PyAV-Encoder sind nicht thread-sicher.
         pending_encode_queue = deque()
 
         def trim_buffer():
@@ -504,14 +506,7 @@ class CameraAgent(multiprocessing.Process):
         MODEL_RETRY_INTERVAL = 60  # Sekunden zwischen Nachlade-Versuchen
         last_model_retry = time.time()
 
-        # Frame-Rate-Drosselung: bisher wurde JEDER vom Quell-Stream gelieferte
-        # Frame durch YOLO gejagt und encodiert, unabhängig von TARGET_FPS.
-        # Liefert die Kamera nativ z.B. 25-30fps, aber TARGET_FPS steht auf 15,
-        # lief die Inferenz also fast doppelt so oft wie nötig — UND die
-        # Ausgabedatei bekam PTS als wäre sie exakt mit TARGET_FPS aufgenommen,
-        # obwohl tatsächlich mit Quell-FPS geschrieben wurde (falsche
-        # Wiedergabegeschwindigkeit/-dauer). Jetzt werden überzählige
-        # Quell-Frames VOR der (teuren) BGR-Konvertierung übersprungen.
+        # Frame-Drosselung: überzählige Quell-Frames werden vor der teuren BGR-Konvertierung übersprungen, damit YOLO nicht öfter läuft als TARGET_FPS nötig.
         frame_interval = 1.0 / TARGET_FPS if TARGET_FPS and TARGET_FPS > 0 else 0.0
         last_processed_time = 0.0
 
@@ -809,16 +804,7 @@ class CameraAgent(multiprocessing.Process):
                 item_type, data, ts = pending_encode_queue.popleft()
                 write_buffered_item(item_type, data, ts)
 
-        # NVDEC-Hardware-Decode vorbereiten (Punkt "GPU voll nutzen" — bisher
-        # lag utilization.decoder konstant bei 0%). Das HWAccel-Objekt selbst
-        # wird nur EINMAL pro Prozess konstruiert (defensiv gegen abweichende
-        # PyAV-Versionen: schlägt Import/Konstruktion fehl, ist NVDEC auf
-        # dieser Maschine grundsätzlich nicht verfügbar — dauerhaft aus).
-        # Schlägt aber nur EIN Verbindungsversuch fehl (z.B. weil die Cam
-        # gerade kurz weg ist), bleibt hw_device erhalten: bei jedem neuen
-        # Reconnect wird NVDEC erneut probiert, sobald der Stream wieder da
-        # ist — nur der jeweils fehlgeschlagene Versuch selbst fällt auf
-        # Software-Decode zurück.
+        # NVDEC-HWAccel-Objekt einmal pro Prozess konstruiert; schlägt nur ein Verbindungsversuch fehl, bleibt hw_device erhalten und wird beim nächsten Reconnect erneut probiert.
         hw_device = None
         try:
             from av.codec.hwaccel import HWAccel
@@ -921,14 +907,7 @@ class CameraAgent(multiprocessing.Process):
                             time.sleep(5)
                             continue
 
-                    # Video-Codec der Quelle bestimmt den Aufnahme-Modus für
-                    # DIESE Verbindung: browser-kompatibel (H.264/VP9/AV1) ->
-                    # Packet-Copy wie bisher, sonst (MJPEG, rohes USB-Material,
-                    # HEVC, ...) -> echtes Encoding nötig, da eine Packet-Copy-
-                    # Aufnahme sonst im Dashboard nicht abspielbar wäre (mit
-                    # Chromium konkret verifiziert bei MJPEG und HEVC). Neu
-                    # bestimmt bei jedem Reconnect, falls sich mal die Quelle
-                    # ändert (z.B. Kamera-Firmware-Update).
+                    # Quell-Codec bestimmt den Aufnahme-Modus (Packet-Copy bei H.264/VP9/AV1, sonst echtes Encoding) -- neu bestimmt bei jedem Reconnect.
                     try:
                         in_video_for_codec = next(s for s in container.streams if s.type == 'video')
                         source_codec = in_video_for_codec.codec_context.name
@@ -943,19 +922,7 @@ class CameraAgent(multiprocessing.Process):
                         self.logger.warning(f"⚠️ [{self.name}] Video-Codec konnte nicht bestimmt werden ({e}), nehme sicherheitshalber Encode-Modus an.")
                         recording_mode = "encode"
 
-                # Erst JETZT den SIGTERM-Handler aktivieren — nicht schon ganz am
-                # Anfang von run(). Bis hierher lief NVENC-Probe, Modell-Laden und
-                # der Verbindungsaufbau: alles native, fragile ffmpeg/CUDA-C-Code.
-                # Ein SIGTERM währenddessen würde mit dem alten, früh registrierten
-                # Handler eine Python-Exception MITTEN in diesem C-Code auslösen —
-                # genau das Muster, das zu "terminate called without an active
-                # exception" führen kann (beobachtet bei Axel, exakt während der
-                # frühen Initialisierungsphase einer Kamera). Bis hierher nutzt ein
-                # SIGTERM also bewusst Pythons sicheres Standardverhalten (sofortiges
-                # Beenden, kein Python-Exception-Einwurf in laufenden C-Aufrufen) —
-                # es gibt ohnehin noch keine laufende Aufnahme zu retten. Ab hier,
-                # im stabilen Hauptloop, übernimmt der eigentliche Graceful-Shutdown-
-                # Handler, damit eine Aufnahme beim Stoppen sauber geflusht wird.
+                # SIGTERM-Handler erst hier aktivieren, nicht am Anfang -- vorher läuft fragiler nativer Code (NVENC-Probe, Verbindungsaufbau), ein früher Handler kann dort 'terminate called without an active exception' auslösen.
                 signal.signal(signal.SIGTERM, _handle_signal)
                 signal.signal(signal.SIGINT, _handle_signal)
 
@@ -974,21 +941,7 @@ class CameraAgent(multiprocessing.Process):
                             for frame in packet.decode():
                                 now = time.time()
 
-                                # KRITISCH: Paket-Einreihung für die Aufnahme MUSS
-                                # unbedingt bei JEDEM Paket passieren, VOR jeder
-                                # Drosselung. Bei Packet-Copy sind Video-Pakete
-                                # nicht mehr unabhängig voneinander wie bei echtem
-                                # Encoding — P-/B-Frames referenzieren VORHERIGE
-                                # Frames. Ein durch die Drosselung übersprungenes
-                                # Paket würde eine Lücke in dieser Referenzkette
-                                # reißen und bei allen nachfolgenden Frames bis
-                                # zum nächsten Keyframe zu Artefakten/Geisterbildern
-                                # führen (genau das von Axel beobachtete Symptom).
-                                # Nutzt den state-Stand zu Beginn dieses Frames —
-                                # ein IDLE->RECORDING-Übergang weiter unten in
-                                # DERSELBEN Iteration schließt dieses Paket über
-                                # av_buffer (gerade eben befüllt) automatisch mit
-                                # ein, wenn der Pre-Roll-Puffer gleich eingereiht wird.
+                                # KRITISCH: Paket-Einreihung muss vor jeder Drosselung passieren -- bei Packet-Copy referenzieren P-/B-Frames vorherige Frames, ein übersprungenes Paket erzeugt Artefakte bis zum nächsten Keyframe.
                                 if recording_mode == "copy":
                                     if state == "IDLE" and not packet_video_queued:
                                         av_buffer.append(("video", packet, now))
@@ -1007,15 +960,7 @@ class CameraAgent(multiprocessing.Process):
 
                                 img_bgr = frame.to_ndarray(format='bgr24')
 
-                                # Encode-Modus (Kamera liefert keinen browser-
-                                # kompatiblen Codec, z.B. MJPEG/rohes USB-Material):
-                                # erst HIER einreihen, NACH der Drosselung -- anders
-                                # als beim Copy-Modus ist das hier unproblematisch,
-                                # da jedes eingereihte Bild unabhängig neu encodiert
-                                # wird (keine P-/B-Frame-Referenzkette wie bei
-                                # Packet-Copy, die durch übersprungene Frames reißen
-                                # könnte). Entspricht dem alten, bewährten Verhalten
-                                # von vor dem Packet-Copy-Umbau.
+                                # Encode-Modus reiht NACH der Drosselung ein -- unproblematisch, da jedes Bild unabhängig encodiert wird (keine Referenzkette wie bei Packet-Copy).
                                 if recording_mode == "encode":
                                     if state == "IDLE":
                                         av_buffer.append(("video", img_bgr.copy(), now))
@@ -1034,18 +979,7 @@ class CameraAgent(multiprocessing.Process):
                                         if detector is not None:
                                             self.logger.info(f"✅ [{self.name}] KI-Modell nachträglich geladen — Erkennung ist jetzt wieder aktiv.")
 
-                                # Fix 6: "person_detected"/"Person" umbenannt, da
-                                # DETECTION_CLASSES inzwischen beliebige Objektarten
-                                # sein können (Tiere, Pakete, ...) — die alten Logs
-                                # sagten irreführend "Person found", auch wenn z.B.
-                                # eine Katze erkannt wurde.
-                                #
-                                # KEINE synchrone Inferenz mehr hier — nur das
-                                # aktuelle Frame an den Erkennungs-Thread übergeben
-                                # (nicht-blockierend, überschreibt ein evtl. noch
-                                # unverarbeitetes älteres Frame) und den zuletzt
-                                # verfügbaren Erkennungsstand auslesen. Der Encode-
-                                # Pfad wartet dadurch nie mehr auf die Inferenz.
+                                # Keine synchrone Inferenz mehr -- nur aktuelles Frame an den Erkennungs-Thread übergeben, zuletzt verfügbaren Stand auslesen.
                                 if detector is not None:
                                     with _pending_frame_lock:
                                         _pending_frame['img'] = img_bgr
@@ -1055,6 +989,9 @@ class CameraAgent(multiprocessing.Process):
                                     boxes = _latest_detection['boxes']
                                     names = _latest_detection['names']
                                 target_detected = boxes is not None and len(boxes) > 0
+                                manual_trigger = _check_and_clear_manual_trigger(self.name)
+                                if manual_trigger:
+                                    target_detected = True
 
                                 # Erst NACH der Detection: write_shared_frame bekommt die
                                 # Ergebnisse mit, damit die Live-Vorschau (Grid + Lightbox)
@@ -1074,7 +1011,16 @@ class CameraAgent(multiprocessing.Process):
                                 target_detected = target_detected or audio_triggered_now
 
                                 if state == "IDLE":
-                                    if target_detected:
+                                    if target_detected and self.notify_only and not manual_trigger:
+                                        # Melden statt aufnehmen -- Zustand bleibt IDLE, die
+                                        # eigentliche Aufnahme muss extern (Agent/API) über
+                                        # einen manuellen Trigger ausgelöst werden.
+                                        # boxes: [x1,y1,x2,y2,conf,class_id] pro Zeile --
+                                        # tatsächlich erkannte Klassen, nicht die komplette
+                                        # COCO-Zuordnung, die in 'names' steckt.
+                                        detected_class_names = [names.get(int(b[5]), str(int(b[5]))) for b in boxes] if names else []
+                                        _write_detection_notification(self.name, detected_class_names)
+                                    elif target_detected:
                                         state = "RECORDING"
                                         _write_state(self.name, "RECORDING")
                                         _publish_mqtt_recording(self.name, True)
@@ -1182,20 +1128,7 @@ class CameraAgent(multiprocessing.Process):
                                                 pending_encode_queue.extend(av_buffer)
 
                                             else:
-                                                # PACKET-COPY statt Neu-Encodieren: die Recherche zu Motion
-                                                # (die dieselbe Pre-Roll-Architektur nutzt) zeigte, dass genau
-                                                # das Neu-Encodieren des Pre-Roll-Bursts das Problem ist, nicht
-                                                # die PTS-Logik. Motion selbst warnt in der eigenen Doku davor,
-                                                # große Pre-Capture-Werte zu nutzen, weil währenddessen keine
-                                                # neuen Frames von der Quelle gelesen werden können. Statt die
-                                                # gepufferten Frames neu zu encodieren, werden hier die bereits
-                                                # komprimierten Pakete direkt in den Container gemuxt (wie
-                                                # "ffmpeg -c:v copy") — grob 1000x schneller pro Frame als ein
-                                                # echter Encode-Durchlauf (gemessen: 0.7ms vs. 786ms für 150
-                                                # Frames). add_stream_from_template kopiert die Codec-Parameter
-                                                # direkt von der Quelle, kein manuelles NVENC/libx264-Setup mehr
-                                                # nötig — die Aufnahme-Qualität entspricht exakt dem, was die
-                                                # Kamera selbst liefert.
+                                                # Packet-Copy statt Neu-Encodieren: ~1000x schneller (0.7ms vs 786ms/150 Frames), Qualität exakt wie die Kamera-Quelle.
                                                 in_video_stream = next(s for s in container.streams if s.type == 'video')
                                                 out_video = out_container.add_stream_from_template(in_video_stream)
 
@@ -1340,15 +1273,7 @@ class CameraAgent(multiprocessing.Process):
                     state = "IDLE"
                     _write_state(self.name, "IDLE")
                     _publish_mqtt_recording(self.name, False)
-                    # av_buffer explizit leeren, bevor der Quell-Container
-                    # geschlossen wird — close_writer() räumt den Puffer nur
-                    # auf, wenn gerade aufgenommen wurde (if out_container:).
-                    # War der Zustand IDLE, könnte der Puffer trotzdem noch
-                    # Pre-Roll-Pakete der ALTEN Verbindung enthalten. PyAV-
-                    # Pakete halten intern eine Referenz auf ihren Quell-
-                    # Kontext — wird der geschlossen, während noch Pakete
-                    # darauf zeigen, stürzt ein späteres Muxen mit Segfault
-                    # ab (im Test konkret reproduziert und verifiziert).
+                    # av_buffer explizit leeren vor dem Schließen des Quell-Containers -- sonst können alte Pakete noch darauf zeigen und beim Muxen segfaulten (reproduziert).
                     av_buffer.clear()
                     if container:
                         try:
@@ -1364,15 +1289,7 @@ class CameraAgent(multiprocessing.Process):
             self.logger.error(f"💥 Process Crash [{self.name}]: {e}")
         finally:
             close_writer()
-            # Filmstrip-Schreib-Thread ist bewusst ein Daemon-Thread (stirbt
-            # sofort mit dem Prozess, ohne selbst zu blockieren) -- das heißt
-            # aber auch: OHNE explizites Warten hier könnten noch nicht
-            # geschriebene Bilder aus der Queue (close_writer() -> flush_
-            # filmstrip() reiht die gerade erst ein) beim Prozessende verloren
-            # gehen. queue.Queue.join() blockiert, bis JEDES eingereihte Item
-            # tatsächlich geschrieben wurde (task_done() im Writer-Loop) --
-            # ohne das könnten manche Filmstrip-Slots einer Aufnahme fehlen,
-            # gerade bei der letzten Aufnahme vor einem Neustart/Shutdown.
+            # queue.join() wartet, bis alle Filmstrip-Bilder wirklich geschrieben sind -- der Daemon-Thread stirbt sonst mit dem Prozess und verliert die letzten Bilder.
             try:
                 _filmstrip_write_queue.join()
             except Exception:
@@ -1433,18 +1350,7 @@ def detect_gpu_profile(logger):
 # MAIN ORCHESTRATOR
 # ---------------------------------------------------------
 if __name__ == "__main__":
-    # KRITISCH: muss vor jeglicher Prozess-Erzeugung passieren, und vor jedem
-    # CUDA-Zugriff im Master (detect_gpu_profile() gleich unten tut genau
-    # das). Linux nutzt standardmäßig 'fork' für multiprocessing — forkt der
-    # Master aber NACHDEM er selbst schon CUDA berührt hat (torch.cuda.
-    # is_available() etc. in detect_gpu_profile), erben die Worker-Prozesse
-    # einen bereits angefassten CUDA-Kontext, der sich nicht sauber
-    # re-initialisieren lässt: "Cannot re-initialize CUDA in forked
-    # subprocess. To use CUDA with multiprocessing, you must use the
-    # 'spawn' start method" — exakt die von PyTorch selbst empfohlene
-    # Lösung, hier umgesetzt. 'spawn' startet jeden Worker als komplett
-    # frischen Python-Interpreter (kein geerbter Speicherzustand), auf
-    # Kosten eines minimal langsameren Prozessstarts.
+    # KRITISCH: muss vor jedem CUDA-Zugriff im Master passieren -- 'spawn' statt 'fork', da sich ein CUDA-Kontext nach fork() nicht sauber re-initialisieren lässt (PyTorch-Empfehlung).
     multiprocessing.set_start_method('spawn', force=True)
 
     system_logger = get_stream_logger("SYSTEM")

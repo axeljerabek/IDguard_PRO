@@ -612,6 +612,81 @@ def agent_search():
     return jsonify({"results": results[:50]})
 
 
+@mam_bp.route("/agent/cameras/<name>/notify_only/enable", methods=["POST"])
+@requires_agent_capability("manual_trigger")
+def agent_enable_notify_only(name):
+    return _set_notify_only(name, True)
+
+
+@mam_bp.route("/agent/cameras/<name>/notify_only/disable", methods=["POST"])
+@requires_agent_capability("manual_trigger")
+def agent_disable_notify_only(name):
+    return _set_notify_only(name, False)
+
+
+def _set_notify_only(name, notify_only):
+    """Schaltet eine Kamera zwischen normal (YOLO-Erkennung löst direkt eine
+    Aufnahme aus) und notify-only (YOLO erkennt weiter, meldet aber nur --
+    Aufnahme startet erst über /trigger) um. Braucht KEINEN Pipeline-
+    Neustart -- CameraAgent.notify_only wird nur beim Prozessstart aus
+    streams.json gelesen, ein bereits laufender Worker merkt eine spätere
+    Änderung hier also erst nach dem nächsten Neustart dieser Kamera."""
+    streams = _load_streams()
+    for s in streams:
+        if s.get("name") == name:
+            s["notify_only"] = notify_only
+            _save_streams(streams)
+            return jsonify({
+                "ok": True, "name": name, "notify_only": notify_only,
+                "note": "Takes effect after this camera's process restarts (stop/start pipeline), not instantly."
+            })
+    return jsonify({"error": f"Camera '{name}' not found."}), 404
+
+
+@mam_bp.route("/agent/cameras/<name>/trigger", methods=["POST"])
+@requires_agent_capability("manual_trigger")
+def agent_trigger_recording(name):
+    """Löst JETZT eine Aufnahme für diese Kamera aus -- funktioniert für
+    JEDE Kamera (nicht nur notify_only), nutzt dieselbe Pre-Roll-Logik wie
+    ein normaler YOLO-Trigger. Reine Datei-Existenzprüfung als Signal an
+    den laufenden CameraAgent-Prozess -- der liest und löscht sie selbst
+    in seiner Hauptschleife, kein Locking nötig (nur ein Schreiber hier,
+    nur ein Leser dort)."""
+    streams = _load_streams()
+    if not any(s.get("name") == name for s in streams):
+        return jsonify({"error": f"Camera '{name}' not found."}), 404
+    if not any(s.get("name") == name and s.get("enabled") for s in streams):
+        return jsonify({"error": f"Camera '{name}' is disabled -- enable it first."}), 400
+    trigger_dir = os.path.join(ALERTS_DIR, ".triggers")
+    os.makedirs(trigger_dir, exist_ok=True)
+    open(os.path.join(trigger_dir, f"{name}.flag"), "w").close()
+    return jsonify({"ok": True, "name": name, "status": "trigger_sent"})
+
+
+@mam_bp.route("/agent/detections", methods=["GET"])
+@requires_agent_capability("manual_trigger")
+def agent_list_detections():
+    """Letzte gemeldete Erkennung pro Kamera -- v.a. für notify_only-Kameras
+    gedacht (dort ist das der einzige Weg zu erfahren, dass gerade etwas
+    erkannt wurde, ohne dass automatisch aufgenommen wird), funktioniert
+    aber für jede Kamera, die überhaupt schon mal erkannt hat."""
+    detection_dir = os.path.join(ALERTS_DIR, ".detections")
+    results = []
+    if os.path.isdir(detection_dir):
+        for fn in os.listdir(detection_dir):
+            if not fn.endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(detection_dir, fn)) as f:
+                    results.append(json.load(f))
+            except Exception:
+                continue
+    results.sort(key=lambda r: r.get("timestamp", 0), reverse=True)
+    return jsonify({"detections": results})
+
+
+
+
 @mam_bp.route("/agent/capabilities", methods=["GET"])
 @requires_api_key
 def agent_capabilities():
@@ -635,6 +710,7 @@ def agent_capabilities():
             "search": cap_info("search"),
             "cameras_toggle": cap_info("cameras_toggle"),
             "pipeline_control": cap_info("pipeline_control"),
+            "manual_trigger": cap_info("manual_trigger"),
             "settings_change": cap_info("settings_change"),
             "delete": cap_info("delete"),
             "export": cap_info("export"),

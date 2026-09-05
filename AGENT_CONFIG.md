@@ -29,13 +29,31 @@ Both the master switch **and** the specific capability must be `true` for a call
 | `search` | Low | Read-only. Search recordings by description, topic, transcript, person. |
 | `cameras_toggle` | Low | Enable/disable individual cameras. Never touches URLs or credentials. |
 | `pipeline_control` | Medium | Start/stop the whole recording pipeline. While stopped, nothing records. |
+| `manual_trigger` | Medium | Force-start a recording on any camera right now, switch a camera into notify-only mode (YOLO keeps detecting, but recording waits for an explicit trigger instead of starting automatically), and read recent detections. Off by default even though most other capabilities default on — creates real recordings and uses storage. |
 | `settings_change` | Medium | Change a fixed allowlist of tuning settings (see below). Credentials, URLs, and export destinations are never reachable through this capability — enforced in code, not just by convention. |
 | `delete` | High | **Not implemented.** No route exists for it. Listed here as a placeholder for the decision, not a working toggle. |
 | `export` | Medium | **Not implemented.** Same as above. |
 
+## Notify-only mode: putting the agent "in front of" recording
+
+Normally, a YOLO detection immediately starts a recording. `manual_trigger` adds a second mode: switch a camera to **notify-only**, and detections stop auto-recording — they just get reported (a file the agent can poll, plus an MQTT event if configured). The agent decides whether that report is worth an actual recording, and if so, calls the trigger endpoint.
+
+```
+POST /agent/cameras/<name>/notify_only/enable    # switch this camera to report-only
+POST /agent/cameras/<name>/notify_only/disable   # back to normal auto-record
+GET  /agent/detections                            # what's been seen recently, per camera
+POST /agent/cameras/<name>/trigger                # start a recording on this camera right now
+```
+
+Two things worth knowing:
+- **`notify_only` takes effect after that camera's process restarts** (stop/start the pipeline), not instantly — it's read once when the camera process starts, the same way most per-camera settings are.
+- **The camera still has to be running and detecting** for any of this to work — turning a camera fully off (`cameras_toggle`) means nothing is watching it, so there's nothing to notify about. What varies with notify-only is whether a detection *automatically* records, not whether detection happens at all.
+
 ## Settings allowlist
 
 `settings_change` can only touch: `CONFIDENCE_THRESHOLD`, `TARGET_FPS`, `PRE_ROLL_SEC`, `POST_ROLL_SEC`, `DETECTION_CLASSES`, `AI_TOPICS`, `AI_TOPICS_THRESHOLD`, `AI_TOPICS_ENABLED`, `AI_ANALYZE_MAX_FRAMES`, `ANOMALY_DETECTION_ENABLED`, `FACE_MIN_CONFIDENCE`.
+
+`DETECTION_CLASSES` is the list of COCO class IDs YOLO watches for — an agent with `settings_change` can already change what triggers a recording (e.g. `{"DETECTION_CLASSES": [0, 16]}` for person + dog) without needing `manual_trigger` at all.
 
 Anything outside this list — MQTT credentials, camera URLs, export paths, watchfolder paths — is rejected with a 403, even if `settings_change` is enabled. A request that mixes an allowed and a disallowed key is rejected entirely; nothing partially applies.
 
@@ -65,6 +83,10 @@ All under `/api/v1/agent/`, same `Authorization: Bearer <key>` / `X-API-Key` aut
 | `POST /pipeline/start` | `pipeline_control` | |
 | `POST /pipeline/stop` | `pipeline_control` | |
 | `GET /search?q=...` | `search` | Same underlying search as the dashboard. |
+| `POST /cameras/<name>/trigger` | `manual_trigger` | Force-start a recording right now. Rejected (400) if the camera is disabled. |
+| `POST /cameras/<name>/notify_only/enable` | `manual_trigger` | Switch to report-only. Takes effect on next camera process restart. |
+| `POST /cameras/<name>/notify_only/disable` | `manual_trigger` | Back to normal auto-record. |
+| `GET /detections` | `manual_trigger` | Most recent detected classes per camera, most recent first. |
 
 ## Why delete and export aren't here yet
 
