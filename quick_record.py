@@ -122,6 +122,22 @@ def _run_worker(job_id, url, duration_sec, output_path, run_ai_analysis):
             job["status"] = "done"
             job["output_path"] = output_path
 
+            # Haupt-Thumbnail (Dashboard-Kachel) -- derselbe Dateiname wie
+            # der normale "Trigger-Screenshot" der Pipeline (<basename>.jpg
+            # direkt neben dem Video), nur ohne Erkennungs-Box, da hier gar
+            # keine YOLO-Erkennung stattfindet. Ein Frame aus der Mitte der
+            # Aufnahme statt dem allerersten -- robuster gegen einen
+            # eventuellen schwarzen/leeren allerersten Frame mancher Quellen.
+            thumb_path = os.path.splitext(output_path)[0] + ".jpg"
+            try:
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", output_path, "-ss", str(duration_sec / 2),
+                     "-frames:v", "1", "-q:v", "3", thumb_path],
+                    capture_output=True, timeout=30
+                )
+            except Exception as e:
+                print(f"⚠️ [QuickRecord] Haupt-Thumbnail konnte nicht erzeugt werden: {e}")
+
             # Filmstrip -- dieselbe Funktion wie beim Watchfolder-Import,
             # sonst bleibt die Aufnahme im Dashboard ohne Vorschaubild
             # (nur ein leeres Icon statt eines echten Frames).
