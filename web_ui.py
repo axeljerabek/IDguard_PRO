@@ -1799,6 +1799,7 @@ def save_pipeline_settings():
         "WATCH_FOLDER_STABILITY_SEC": _clamp(watch_folder_stability, 1, 300),
         "WATCH_FOLDER_DELETE_SOURCE": request.form.get('WATCH_FOLDER_DELETE_SOURCE') == 'on',
         "WATCH_FOLDER_RUN_DETECTION": request.form.get('WATCH_FOLDER_RUN_DETECTION') == 'on',
+        "WATCH_FOLDER_LIVE_MODE_ENABLED": request.form.get('WATCH_FOLDER_LIVE_MODE_ENABLED') == 'on',
     }
 
     with open(SETTINGS_F, 'w') as f:

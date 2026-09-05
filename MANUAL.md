@@ -202,6 +202,17 @@ One shared pose model, loaded once at camera-process startup — only if at leas
 *   **`WATCH_FOLDER_STABILITY_SEC`** (default 5): How long a file's size must stay unchanged before it's considered finished.
 *   **`WATCH_FOLDER_DELETE_SOURCE`**: Whether to remove the original file after import (copy vs. move).
 *   **`WATCH_FOLDER_RUN_DETECTION`**: If enabled, runs YOLO once on the imported file and discards it if none of `DETECTION_CLASSES` are found.
+*   **`WATCH_FOLDER_LIVE_MODE_ENABLED`**: If enabled, a newly-discovered growing file is probed once (`mp4_probe.py`) to check whether it's a streamable container (MPEG-TS, or "fast-start"/fragmented MP4 with the index written first). If so, it's read live — via a tailing FIFO (`live_tail.py`) feeding a real `CameraAgent` instance — through the same detection/recording pipeline as an actual camera, instead of waiting for it to finish. A classic MP4 (index written only at the end, the common case for most recording tools) can't be read this way at all; it falls back to the normal wait-for-completion behavior automatically, file by file. The live source is stopped automatically once its underlying file stops growing for 60s or disappears.
+
+---
+
+## 13b. PLATFORM SOURCES (YouTube, Twitch, Vimeo, and others)
+
+A camera's `url` field (§2) accepts a YouTube/Twitch/Vimeo/Facebook/Dailymotion/Kick link directly, alongside the usual rtsp://, rtmp://, and /dev/videoX values — no separate setting or camera "type" needed.
+
+*   Requires `yt-dlp` installed (`pip install yt-dlp`) and reachable via `ffmpeg` on the same machine.
+*   A persistent background bridge process (`platform_bridge.py`) keeps a `yt-dlp | ffmpeg` pipeline feeding a local FIFO in an always-streamable format (MPEG-TS), restarting that pipeline on its own if the channel goes offline or the connection drops — the same tailing/FIFO mechanism as Watchfolder mode 1 (§13). vigil's own camera-connection logic just reads the local FIFO, so it's never affected by a platform's own time-limited/signed stream URLs expiring mid-recording.
+*   No additional settings — the bridge starts automatically the moment a platform URL is detected for a camera, and is stopped/cleaned up when that camera is disabled or its process stops.
 *   Codec handling matches live cameras: browser-incompatible codecs (HEVC being the common case) are transcoded automatically, GPU-accelerated where available; already-compatible files are only re-wrapped.
 *   Runs as its own background process, independent of camera recording processes.
 

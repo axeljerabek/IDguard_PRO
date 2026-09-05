@@ -543,6 +543,13 @@
                                 Only keep files containing a configured detection class (runs YOLO once per file)
                             </label>
                         </div>
+                        <div class="settings-group">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" name="WATCH_FOLDER_LIVE_MODE_ENABLED" {% if settings.get('WATCH_FOLDER_LIVE_MODE_ENABLED') %}checked{% endif %} style="width:auto;">
+                                Read growing files live instead of waiting for them to finish
+                            </label>
+                            <p class="settings-hint" style="margin-top:4px;">Only works for streamable sources (MPEG-TS, or "fast-start" MP4 with the index written first) — checked automatically per file. A classic MP4 that only becomes readable once finished falls back to waiting, same as with this off. Runs the file through the same detection/recording pipeline as a real camera instead of a blind import at the end.</p>
+                        </div>
                     </div>
 
                     <div class="settings-section">

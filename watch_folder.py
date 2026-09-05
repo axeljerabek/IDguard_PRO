@@ -1,20 +1,29 @@
 #!/usr/bin/env python3
 """
 watch_folder.py - Überwacht einen konfigurierbaren Import-Ordner auf neue
-Videodateien und importiert sie automatisch, sobald sie vollständig
-geschrieben sind (Modus 2 — "warten bis fertig", siehe Diskussion zu Modus 1
-"wachsende Datei als Stream lesen", der bewusst NICHT hier implementiert ist:
-funktioniert nur zuverlässig bei streambaren Containern wie MPEG-TS, nicht
-bei MP4, wo der moov-Atom oft erst am Dateiende steht).
+Videodateien.
+
+Zwei Modi, je nachdem ob eine neu entdeckte, wachsende Datei sich beim
+ersten Anblick als streambar erweist (moov-Atom vor mdat, siehe
+mp4_probe.py -- MPEG-TS-Dateien sind das grundsätzlich immer):
+
+  Modus 1 ("live lesen"): die Datei wird SOFORT über eine tailende FIFO
+  (live_tail.py) an eine echte CameraAgent-Instanz angehängt -- läuft
+  durch dieselbe Erkennungs-/Aufnahme-Pipeline wie eine normale Kamera,
+  nicht nur ein blinder Import am Ende. Braucht WATCH_FOLDER_LIVE_MODE_ENABLED.
+  Genau dieselbe Technik bedient auch platform_bridge.py für 24/7-
+  Plattform-Streams (YouTube/Twitch/...) -- beides "lies eine lokal
+  kontinuierlich wachsende Quelle, als wäre sie live".
+
+  Modus 2 ("warten bis fertig", Standard und einziger Modus, falls Modus 1
+  aus ist oder die Datei sich als NICHT streambar erweist, z.B. klassisches
+  MP4 mit moov am Ende): unverändert wie bisher -- Dateigröße wird
+  periodisch geprüft, erst nach WATCH_FOLDER_STABILITY_SEC Sekunden ohne
+  Änderung gilt die Datei als fertig und wird importiert.
 
 Läuft als eigener Prozess, vom Master (recorder_pipeline.py) genauso
 gestartet wie ein CameraAgent, wenn WATCH_FOLDER_ENABLED aktiv ist — nutzt
 dieselbe stop.sh/start_detached.sh-Lebenszyklus-Verwaltung automatisch mit.
-
-Datei-Vollständigkeits-Erkennung: Linux hat kein zuverlässiges Betriebssystem-
-Signal dafür. Üblicher, robuster Ansatz (auch von rsync/Samba-Übertragungen
-so gehandhabt): Dateigröße wird periodisch geprüft, erst nach
-WATCH_FOLDER_STABILITY_SEC Sekunden ohne Änderung gilt die Datei als fertig.
 """
 import os
 import sys
@@ -38,8 +47,21 @@ except ImportError:
 
 import backfill_filmstrips
 
+try:
+    import mp4_probe
+    import live_tail
+except ImportError:
+    mp4_probe = None
+    live_tail = None
+
 VIDEO_EXTENSIONS = (".mp4", ".mkv", ".avi", ".mov", ".m4v", ".ts")
 POLL_INTERVAL_SEC = 2.0
+LIVE_FIFO_DIR_NAME = ".watchfolder_fifos"
+# Wie lange eine Live-Quelle ohne Größenänderung als "beendet" gilt --
+# deutlich großzügiger als die normale Stability-Prüfung (Modus 2), da eine
+# echte Live-Quelle zeitweise stocken kann, ohne dass die Aufnahme wirklich
+# vorbei ist.
+LIVE_SOURCE_IDLE_TIMEOUT_SEC = 60
 
 
 def _load_settings():
@@ -83,12 +105,7 @@ def _transcode_video_to_h264(src_path, logger=print):
     NVENC-Versuch zuerst (passt zur GPU-Beschleunigung im Rest des Systems),
     Software-Fallback falls NVENC nicht verfügbar oder fehlschlägt."""
     tmp_out = os.path.splitext(src_path)[0] + "__transcode.mp4"
-    # NVENC-Versuch: -hwaccel cuda VOR der Eingabe sorgt dafür, dass auch das
-    # Dekodieren der Quelle auf der GPU läuft, nicht nur das Encodieren.
-    # Ohne das lief bisher nur -c:v h264_nvenc auf der GPU, während das
-    # Dekodieren einer z.B. einstündigen HEVC-Quelle in Software auf der CPU
-    # passierte -- bei Axel beobachtet: NVENC lief tatsächlich schon, aber
-    # trotzdem 400%+ CPU-Last durchs Software-Decodieren der Eingabe.
+    # -hwaccel cuda vor der Eingabe: Decodieren läuft sonst in Software, nur Encodieren auf der GPU -- beobachtet als 400%+ CPU-Last trotz aktivem NVENC.
     try:
         result = subprocess.run(
             ["ffmpeg", "-y", "-hwaccel", "cuda", "-i", src_path,
@@ -230,12 +247,7 @@ def process_file(src_path, source_name, delete_source, run_detection, model, log
         # spricht nichts dagegen, die Datei zu verschieben statt zu kopieren.
         shutil.move(mp4_path, dest_path)
     else:
-        # Kein Remux nötig UND die Originaldatei soll im Import-Ordner
-        # erhalten bleiben -- kopieren, nicht verschieben. Vorher hier ein
-        # echter Bug: mp4_path == src_path bei bereits-.mp4-Dateien führte zu
-        # shutil.move() unabhängig von delete_source, die Originaldatei
-        # verschwand also selbst dann aus dem Import-Ordner, wenn der Nutzer
-        # explizit "Original behalten" eingestellt hatte.
+        # Kein Remux nötig + Original soll bleiben -- kopieren, nicht verschieben (vorheriger Bug: verschwand trotz 'Original behalten').
         shutil.copy2(mp4_path, dest_path)
     if delete_source and was_remuxed and os.path.exists(src_path):
         os.remove(src_path)
@@ -279,6 +291,63 @@ def process_file(src_path, source_name, delete_source, run_detection, model, log
     return True
 
 
+def _start_live_source(path, source_name, logger=print):
+    """Startet Modus 1 für eine neu entdeckte, als streambar erkannte
+    Datei: FIFO anlegen, Live-Tail starten, und eine echte CameraAgent-
+    Instanz auf die FIFO ansetzen -- läuft danach durch dieselbe
+    Erkennungs-/Aufnahme-Pipeline wie eine normale Kamera, nicht nur ein
+    blinder Import am Ende. Gibt ein Dict mit den laufenden Komponenten
+    zurück, oder None bei einem Fehler (Aufrufer fällt dann auf Modus 2
+    zurück)."""
+    try:
+        from recorder_pipeline import CameraAgent
+    except ImportError as e:
+        logger(f"⚠️ [Watchfolder] CameraAgent konnte für Live-Modus nicht importiert werden, falle auf Modus 2 zurück: {e}")
+        return None
+
+    fifo_dir = os.path.join(ALERTS_DIR, LIVE_FIFO_DIR_NAME)
+    os.makedirs(fifo_dir, exist_ok=True)
+    safe_name = f"{source_name}_{os.path.basename(path)}".replace("/", "_")
+    fifo_path = os.path.join(fifo_dir, f"{safe_name}.fifo")
+
+    tailer = live_tail.GrowingFileTailer(path, fifo_path)
+    try:
+        tailer.start()
+    except Exception as e:
+        logger(f"⚠️ [Watchfolder] Live-Tail für '{path}' konnte nicht gestartet werden: {e}")
+        return None
+
+    stream_info = {
+        "name": f"{source_name}_Live",
+        "url": fifo_path,
+        "enabled": True,
+        "audio_enabled": True,
+        "notify_only": False,
+        "type": "VIDEO",
+    }
+    agent = CameraAgent(stream_info, half_precision=True)
+    agent.start()
+    logger(f"🎬 [Watchfolder] '{path}' ist streambar -- läuft jetzt live über '{stream_info['name']}' statt auf Fertigstellung zu warten.")
+    return {"tailer": tailer, "agent": agent, "fifo_path": fifo_path, "last_size": -1, "last_change": time.time()}
+
+
+def _stop_live_source(entry, logger=print):
+    """Beendet eine per _start_live_source() gestartete Live-Verarbeitung
+    sauber -- CameraAgent zuerst (damit eine laufende Aufnahme noch
+    ordentlich abgeschlossen wird), dann der Tailer, dann die FIFO von der
+    Platte entfernen."""
+    try:
+        entry["agent"].stop_agent()
+        entry["agent"].join(timeout=10)
+    except Exception as e:
+        logger(f"⚠️ [Watchfolder] Fehler beim Stoppen des Live-CameraAgent: {e}")
+    try:
+        entry["tailer"].stop()
+        entry["tailer"].cleanup()
+    except Exception as e:
+        logger(f"⚠️ [Watchfolder] Fehler beim Stoppen des Live-Tailers: {e}")
+
+
 class WatchFolderAgent(multiprocessing.Process):
     """Eigener Prozess, analog zu CameraAgent -- vom Master gestartet, wenn
     WATCH_FOLDER_ENABLED in den Settings aktiv ist."""
@@ -299,7 +368,8 @@ class WatchFolderAgent(multiprocessing.Process):
 
         print("🚀 [Watchfolder] Prozess gestartet.")
         model = None
-        seen = {}  # path -> (size, last_change_ts)
+        seen = {}  # path -> (size, last_change_ts) -- Modus 2 (warten bis fertig)
+        live_sources = {}  # path -> Dict von _start_live_source() -- Modus 1 (live lesen)
 
         try:
             while not self._stop_event.is_set():
@@ -309,6 +379,7 @@ class WatchFolderAgent(multiprocessing.Process):
                 stability_sec = float(settings.get("WATCH_FOLDER_STABILITY_SEC", 5) or 5)
                 delete_source = bool(settings.get("WATCH_FOLDER_DELETE_SOURCE", False))
                 run_detection = bool(settings.get("WATCH_FOLDER_RUN_DETECTION", False))
+                live_mode_enabled = bool(settings.get("WATCH_FOLDER_LIVE_MODE_ENABLED", False)) and mp4_probe is not None and live_tail is not None
 
                 if not folder or not os.path.isdir(folder):
                     time.sleep(POLL_INTERVAL_SEC)
@@ -327,12 +398,51 @@ class WatchFolderAgent(multiprocessing.Process):
                     current_files.update(glob.glob(os.path.join(folder, f"*{ext}")))
 
                 now = time.time()
+
+                # Laufende Live-Quellen (Modus 1) zuerst prüfen -- beendet
+                # sich die Quelldatei (verschwindet oder wächst lange nicht
+                # mehr), sauber stoppen, statt für immer eine tote FIFO offen
+                # zu halten.
+                for path in list(live_sources.keys()):
+                    entry = live_sources[path]
+                    if path not in current_files:
+                        print(f"🎬 [Watchfolder] Live-Quelle '{path}' ist verschwunden -- stoppe.")
+                        _stop_live_source(entry)
+                        live_sources.pop(path, None)
+                        continue
+                    try:
+                        size = os.path.getsize(path)
+                    except OSError:
+                        size = entry["last_size"]
+                    if size != entry["last_size"]:
+                        entry["last_size"] = size
+                        entry["last_change"] = now
+                    elif now - entry["last_change"] >= LIVE_SOURCE_IDLE_TIMEOUT_SEC:
+                        print(f"🎬 [Watchfolder] Live-Quelle '{path}' seit {LIVE_SOURCE_IDLE_TIMEOUT_SEC}s ohne Änderung -- vermutlich beendet, stoppe.")
+                        _stop_live_source(entry)
+                        live_sources.pop(path, None)
+
                 for path in current_files:
+                    if path in live_sources:
+                        continue  # wird oben bereits als Live-Quelle behandelt
                     try:
                         size = os.path.getsize(path)
                     except OSError:
                         continue
                     if path not in seen:
+                        # Neu entdeckte Datei: bei aktiviertem Live-Modus SOFORT
+                        # prüfen, ob sie streambar ist -- nur bei der allerersten
+                        # Sichtung, nicht bei jedem Schleifendurchlauf, damit eine
+                        # bereits als "nicht streambar" erkannte Datei nicht
+                        # wiederholt geprüft wird.
+                        if live_mode_enabled:
+                            probe_result = mp4_probe.probe_mp4_streamability(path)
+                            is_ts = path.endswith(".ts")  # MPEG-TS braucht kein moov, grundsätzlich immer streambar
+                            if is_ts or probe_result == mp4_probe.STREAMABLE:
+                                live_entry = _start_live_source(path, source_name)
+                                if live_entry is not None:
+                                    live_sources[path] = live_entry
+                                    continue
                         seen[path] = (size, now)
                     else:
                         old_size, last_change = seen[path]
@@ -353,6 +463,8 @@ class WatchFolderAgent(multiprocessing.Process):
         except Exception as e:
             print(f"💥 [Watchfolder] Prozess-Crash: {e}")
         finally:
+            for entry in live_sources.values():
+                _stop_live_source(entry)
             print("🛑 [Watchfolder] Prozess beendet.")
 
 

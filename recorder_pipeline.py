@@ -32,6 +32,11 @@ try:
 except ImportError:
     platform_source = None  # Optionales Feature — Pipeline läuft unverändert ohne es
 
+try:
+    import platform_bridge
+except ImportError:
+    platform_bridge = None  # Optionales Feature — Pipeline läuft unverändert ohne es
+
 # CPU-Thread-Wildwuchs von PyTorch/OpenBLAS global drosseln
 os.environ["OMP_NUM_THREADS"] = "2"
 os.environ["OPENBLAS_NUM_THREADS"] = "2"
@@ -334,13 +339,18 @@ class CameraAgent(multiprocessing.Process):
         super().__init__()
         self.name = stream_info["name"]
         self.url = stream_info.get("url", "")
-        # Ursprüngliche Plattform-URL (z.B. YouTube/Twitch/Vimeo-Link) getrennt
-        # gemerkt -- self.url wird bei jedem (Re-)Connect frisch aufgelöst,
-        # da die von yt-dlp gelieferte Stream-URL typischerweise zeitlich
-        # begrenzt/signiert ist und nach einigen Minuten abläuft. Für normale
-        # Kamera-URLs (rtsp://, rtmp://, /dev/videoX) bleibt das Feld einfach
-        # ungenutzt -- dieselbe URL wird direkt verwendet, wie bisher.
-        self.platform_url = self.url if platform_source is not None and platform_source.needs_resolution(self.url) else None
+        # Plattform-URLs (YouTube/Twitch/Vimeo/...) laufen NICHT direkt über
+        # av.open() -- ein persistenter Hintergrund-Prozess (PlatformStreamBridge)
+        # kümmert sich robust um yt-dlp-Auflösung/Reconnect und schreibt in eine
+        # lokale FIFO; self.url wird für diesen Fall auf die FIFO umgebogen.
+        # Das entkoppelt vigils eigene Verbindungs-Retry-Schleife komplett von
+        # plattformspezifischen Eigenheiten (ablaufende signierte URLs,
+        # Offline-Kanäle) -- dieselbe FIFO-Technik wie bei Watchfolder-Modus 1.
+        self._original_platform_url = self.url if platform_source is not None and platform_source.needs_resolution(self.url) else None
+        self._platform_bridge = None
+        if self._original_platform_url is not None:
+            fifo_path = os.path.join(ALERTS_DIR, ".platform_fifos", f"{self.name}.fifo")
+            self.url = fifo_path
         self.enabled = stream_info.get("enabled", False)
         # Default True — bestehende streams.json-Einträge von vor diesem
         # Feature haben das Feld noch nicht, sollen sich aber nicht plötzlich
@@ -1145,27 +1155,34 @@ class CameraAgent(multiprocessing.Process):
             """Ein reiner Gerätepfad wie /dev/video0 (USB-Webcam über V4L2)
             hat kein Protokoll-Präfix, aus dem ffmpeg das Format selbst
             erkennen könnte (anders als bei rtmp://, rtsp://, http://) --
-            muss hier explizit angegeben werden. None = ffmpeg soll selbst
-            erkennen (alle anderen Quellen, unverändertes Verhalten)."""
-            return "v4l2" if url.startswith("/dev/video") else None
+            muss hier explizit angegeben werden. Eine Plattform-Brücken-FIFO
+            (siehe platform_bridge.py) ebenfalls: eine Named Pipe ohne
+            Dateiendungs-Erkennung braucht die explizite Format-Angabe,
+            sonst kann ffmpeg nicht wissen, dass dort MPEG-TS ankommt.
+            None = ffmpeg soll selbst erkennen (alle anderen Quellen,
+            unverändertes Verhalten)."""
+            if url.startswith("/dev/video"):
+                return "v4l2"
+            if url.endswith(".fifo"):
+                return "mpegts"
+            return None
 
         input_format = _build_input_format(self.url)
 
         try:
             while not self._stop_event.is_set():
                 if container is None:
-                    if self.platform_url is not None:
-                        # Zeitlich begrenzte/signierte Stream-URL -- bei
-                        # JEDEM (Re-)Connect frisch auflösen, nicht nur beim
-                        # allerersten Mal, da eine ältere aufgelöste URL
-                        # nach einigen Minuten schlicht abgelaufen sein kann,
-                        # selbst wenn der Kanal weiterhin live ist.
-                        resolved_url, resolve_error = platform_source.resolve_stream_url(self.platform_url)
-                        if resolved_url is None:
-                            self.logger.error(f"❌ [{self.name}] Plattform-URL konnte nicht aufgelöst werden: {resolve_error}. Erneuter Versuch in 30s...")
-                            time.sleep(30)  # großzügigerer Abstand als bei einer normalen Kamera -- ein "offline" Kanal soll nicht im 5s-Takt angeklopft werden
-                            continue
-                        self.url = resolved_url
+                    if self._original_platform_url is not None:
+                        # Brücken-Prozess läuft dauerhaft im Hintergrund und
+                        # kümmert sich SELBST um Reconnect/Offline-Kanäle --
+                        # hier nur sicherstellen, dass er läuft, nicht bei
+                        # jedem Verbindungsversuch neu starten.
+                        if self._platform_bridge is None or not self._platform_bridge.is_alive:
+                            self.logger.info(f"🌉 [{self.name}] Starte Plattform-Brücke für {self._original_platform_url}")
+                            os.makedirs(os.path.dirname(self.url), exist_ok=True)
+                            self._platform_bridge = platform_bridge.PlatformStreamBridge(self._original_platform_url, self.url)
+                            self._platform_bridge.start()
+                            time.sleep(2)  # der Brücke kurz Zeit geben, die FIFO tatsächlich anzulegen, bevor av.open() sie zu öffnen versucht
                     self.logger.info(f"🔗 Attempting connection to: {self.url}")
                     open_options = _build_open_options(self.url)
                     using_nvdec = False
@@ -1622,6 +1639,9 @@ class CameraAgent(multiprocessing.Process):
                     container.close()
                 except Exception:
                     pass
+            if self._platform_bridge is not None:
+                self._platform_bridge.stop()
+                self._platform_bridge.cleanup()
             self.logger.info("🛑 Agent process shutting down.")
 
     def stop_agent(self):
