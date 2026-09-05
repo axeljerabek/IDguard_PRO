@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 140" width="100%" height="100%">
+  <defs>
+    <!-- Aggressiver Neon-Alert-Gradient (Cyber Red zu Neon Orange) -->
+    <linearGradient id="neonRed" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff004c" />
+      <stop offset="100%" stop-color="#ff6a00" />
+    </linearGradient>
+    
+    <!-- Dunkler Carbon/Stealth Gradient für die Hintergrundklinge -->
+    <linearGradient id="carbon" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#334155" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+    
+    <!-- Metallischer Effekt für den Text -->
+    <linearGradient id="textMetal" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#cbd5e1" />
+    </linearGradient>
+
+    <!-- Intensiver Glow für das AI-Auge und den REC-Dot -->
+    <filter id="hyperGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+
+    <style>
+      .txt-title {
+        font-family: "Arial Black", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        font-weight: 900;
+        font-size: 58px;
+        fill: url(#textMetal);
+        letter-spacing: 12px;
+      }
+      .txt-sub {
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        font-weight: 700;
+        font-size: 11px;
+        fill: #ff004c;
+        letter-spacing: 7px;
+      }
+    </style>
+  </defs>
+
+  <!-- Vantablack/Dark-Mode Hintergrund -->
+  <rect width="500" height="140" rx="14" fill="#040609" />
+
+  <!-- VIGIL LOGO MARK (Links) -->
+  <g transform="translate(35, 20)">
+    <!-- Rechte Schatten-Klinge (Carbon/Stealth) -->
+    <path d="M 120 20 L 80 0 L 55 100 L 95 100 Z" fill="url(#carbon)" />
+    
+    <!-- Linke leuchtende Klinge (Neon-Rot), die sich im Vordergrund kreuzt -->
+    <path d="M 0 20 L 40 0 L 65 100 L 25 100 Z" fill="url(#neonRed)" />
+
+    <!-- AI Targeting Eye (Computer Vision Fokus im Negativraum) -->
+    <!-- Gestricheltes Fadenkreuz / Bounding Box -->
+    <circle cx="60" cy="35" r="14" fill="none" stroke="#ff004c" stroke-width="1.5" stroke-dasharray="4 4" transform="rotate(45 60 35)"/>
+    <!-- Glühender Kern -->
+    <circle cx="60" cy="35" r="6" fill="#ffffff" filter="url(#hyperGlow)"/>
+    <!-- Pupille / Sensor -->
+    <circle cx="60" cy="35" r="2" fill="#ff004c" />
+  </g>
+
+  <!-- VIGIL TYPOGRAFIE (Rechts) -->
+  <g transform="translate(170, 78)">
+    <!-- Hauptname -->
+    <text x="0" y="0" class="txt-title">VIGIL</text>
+    
+    <!-- REC Indicator & Subtitle -->
+    <!-- Pulsierender Recording/Live-Punkt -->
+    <circle cx="6" cy="23" r="3" fill="#ff004c" filter="url(#hyperGlow)" />
+    <!-- Slogan -->
+    <text x="18" y="27" class="txt-sub">LOCAL AI SENTINEL</text>
+  </g>
+</svg>
