@@ -4,7 +4,7 @@ import json
 import urllib.request
 
 # ==============================================================================
-# IDENTITY-GUARD PRO - PRODUCTION CONFIGURATION (PORTABLE & STABLE)
+# VIGIL - PRODUCTION CONFIGURATION (PORTABLE & STABLE)
 # ==============================================================================
 
 # AUTOMATISCHE PFAD-ERKENNUNG: Findet den Projektordner selbstständig.
@@ -137,7 +137,7 @@ if not os.path.exists(MODEL_PATH) or os.path.getsize(MODEL_PATH) < MODEL_MIN_BYT
 STREAMS_F = os.path.join(PROJECT_ROOT, "streams.json")
 
 STREAMS = [
-    {"name": "Example_Camera", "url": "rtmp://192.168.1.50/live/stream", "enabled": False, "audio_enabled": True, "type": "VIDEO"}
+    {"name": "Example_Camera", "url": "rtmp://192.168.1.50/live/stream", "enabled": False, "audio_enabled": True, "notify_only": False, "type": "VIDEO"}
 ]
 if os.path.exists(STREAMS_F):
     try:
@@ -191,7 +191,7 @@ COCO_CLASS_NAMES = {
     18: "Sheep", 19: "Cow", 20: "Elephant", 21: "Bear", 22: "Zebra", 23: "Giraffe",
     24: "Backpack", 25: "Umbrella", 26: "Handbag", 27: "Tie", 28: "Suitcase",
     29: "Frisbee", 30: "Skis", 31: "Snowboard", 32: "Sports ball", 33: "Kite",
-    34: "Baseballschläger", 35: "Baseball glove", 36: "Skateboard", 37: "Surfboard",
+    34: "Baseball bat", 35: "Baseball glove", 36: "Skateboard", 37: "Surfboard",
     38: "Tennis racquet", 39: "Bottle", 40: "Wine glass", 41: "Cup", 42: "Fork",
     43: "Knife", 44: "Spoon", 45: "Bowl", 46: "Banana", 47: "Apple", 48: "Sandwich",
     49: "Orange", 50: "Broccoli", 51: "Carrot", 52: "Hotdog", 53: "Pizza", 54: "Donut",
@@ -264,4 +264,3 @@ def global_log(msg, level="info"):
     if level == "info": system_logger.info(msg)
     elif level == "error": system_logger.error(msg)
     elif level == "warning": system_logger.warning(msg)
-BROWSER_COMPATIBLE_VIDEO_CODECS = {"h264", "vp9", "av1"}
