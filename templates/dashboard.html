@@ -655,6 +655,34 @@
                                 <input type="number" name="POSE_LOITERING_SECONDS" min="5" max="600" step="5" value="{{ settings.get('POSE_LOITERING_SECONDS', 30) }}">
                             </div>
                         </div>
+                        <div class="settings-group" style="margin-top:14px;">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" name="POSE_MOVEMENT_ENABLED" {% if settings.get('POSE_MOVEMENT_ENABLED') %}checked{% endif %} style="width:auto;">
+                                Also detect fast movement (possibly running)
+                            </label>
+                            <p class="settings-hint" style="margin-top:4px;">Position-based, no pose model needed. Speed is measured relative to the person's own size in frame, so it works at any distance from the camera without calibration.</p>
+                        </div>
+                        <div class="settings-group" style="margin-top:14px;">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" name="POSE_PROXIMITY_ENABLED" {% if settings.get('POSE_PROXIMITY_ENABLED') %}checked{% endif %} style="width:auto;">
+                                Also detect two or more people in close, sustained proximity
+                            </label>
+                            <p class="settings-hint" style="margin-top:4px;">Position-based. A brief pass-by (e.g. on a sidewalk) doesn't trigger this — only sustained closeness over several seconds.</p>
+                        </div>
+                        <div class="settings-group" style="margin-top:14px;">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" name="POSE_GAZE_ENABLED" {% if settings.get('POSE_GAZE_ENABLED') %}checked{% endif %} style="width:auto;">
+                                Also detect head orientation (facing camera vs. facing away)
+                            </label>
+                            <p class="settings-hint" style="margin-top:4px;">Uses the same pose model as fall detection, no extra GPU cost. Informational rather than an alert — logged, not treated as urgent.</p>
+                        </div>
+                        <div class="settings-group" style="margin-top:14px;">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" name="POSE_POINTING_ENABLED" {% if settings.get('POSE_POINTING_ENABLED') %}checked{% endif %} style="width:auto;">
+                                Also detect a pointing gesture (one arm extended sideways)
+                            </label>
+                            <p class="settings-hint" style="margin-top:4px;">Uses the same pose model, no extra GPU cost. Also informational rather than an alert.</p>
+                        </div>
                     </div>
 
                     <div class="settings-section">

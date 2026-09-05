@@ -20,7 +20,10 @@ einstellbar, nicht hart codiert.
 import math
 
 KP_NOSE = 0
+KP_LEFT_EYE, KP_RIGHT_EYE = 1, 2
+KP_LEFT_EAR, KP_RIGHT_EAR = 3, 4
 KP_LEFT_SHOULDER, KP_RIGHT_SHOULDER = 5, 6
+KP_LEFT_ELBOW, KP_RIGHT_ELBOW = 7, 8
 KP_LEFT_WRIST, KP_RIGHT_WRIST = 9, 10
 KP_LEFT_HIP, KP_RIGHT_HIP = 11, 12
 
@@ -227,3 +230,99 @@ class RaisedHandsTracker:
     def reset(self):
         self._consecutive_count = 0
         self._confirmed = False
+
+
+def detect_head_orientation(keypoints):
+    """Grobe Einschätzung, ob eine Person der Kamera zugewandt ist oder den
+    Rücken zudreht. Basiert auf Sichtbarkeit statt Winkel: bei abgewandtem
+    Rücken sind Nase/Augen für die Kamera schlicht nicht sichtbar, während
+    Schultern weiterhin gut erkennbar bleiben -- dieses Sichtbarkeits-Muster
+    ist zuverlässiger als ein errechneter Winkel aus Keypoints, die es bei
+    einer abgewandten Person ohnehin nicht gibt.
+
+    Gibt {"orientation": "facing_camera"|"facing_away"|"unknown",
+    "confidence": ..., "reason": ...} zurück."""
+    face_visible = _kp_ok(keypoints, KP_NOSE) or _kp_ok(keypoints, KP_LEFT_EYE) or _kp_ok(keypoints, KP_RIGHT_EYE)
+    shoulders_visible = _kp_ok(keypoints, KP_LEFT_SHOULDER) or _kp_ok(keypoints, KP_RIGHT_SHOULDER)
+
+    if not shoulders_visible:
+        return {"orientation": "unknown", "confidence": "low",
+                "reason": "Body not confidently detected at all."}
+    if face_visible:
+        return {"orientation": "facing_camera", "confidence": "medium",
+                "reason": "Facial keypoints (nose/eyes) are visible."}
+    return {"orientation": "facing_away", "confidence": "medium",
+            "reason": "Body detected, but no facial keypoints visible -- likely facing away from the camera."}
+
+
+def detect_pointing(keypoints, extension_ratio=1.3):
+    """Erkennt eine ausgestreckte Zeige-Geste -- EIN Arm deutlich seitlich
+    ausgestreckt, auf Schulterhöhe (nicht darüber wie beim Notsignal, nicht
+    darunter wie in Ruheposition). extension_ratio: wie weit das Handgelenk
+    horizontal über die Schulter hinausreichen muss, als Vielfaches der
+    Schulterbreite (skalierungsunabhängig).
+
+    Gibt {"pointing": bool, "arm": "left"|"right"|None, "confidence": ...,
+    "reason": ...} zurück."""
+    if not (_kp_ok(keypoints, KP_LEFT_SHOULDER) and _kp_ok(keypoints, KP_RIGHT_SHOULDER)):
+        return {"pointing": False, "arm": None, "confidence": "low",
+                "reason": "Shoulders not confidently detected."}
+
+    shoulder_width = abs(keypoints[KP_RIGHT_SHOULDER][0] - keypoints[KP_LEFT_SHOULDER][0])
+    if shoulder_width <= 0:
+        return {"pointing": False, "arm": None, "confidence": "low", "reason": "Invalid shoulder geometry."}
+    shoulder_y = (keypoints[KP_LEFT_SHOULDER][1] + keypoints[KP_RIGHT_SHOULDER][1]) / 2
+    # Vertikale Toleranz: Handgelenk darf nicht zu weit über/unter der
+    # Schulterlinie sein, sonst ist es eher Notsignal (weit drüber) oder
+    # eine Ruheposition (weit drunter), keine Zeige-Geste.
+    vertical_tolerance = shoulder_width * 0.8
+
+    for side, wrist_idx, shoulder_idx in (
+        ("left", KP_LEFT_WRIST, KP_LEFT_SHOULDER),
+        ("right", KP_RIGHT_WRIST, KP_RIGHT_SHOULDER),
+    ):
+        if not _kp_ok(keypoints, wrist_idx):
+            continue
+        wx, wy, _ = keypoints[wrist_idx]
+        sx, sy, _ = keypoints[shoulder_idx]
+        horizontal_extension = abs(wx - sx)
+        vertical_offset = abs(wy - shoulder_y)
+        if horizontal_extension >= shoulder_width * extension_ratio and vertical_offset <= vertical_tolerance:
+            return {"pointing": True, "arm": side, "confidence": "medium",
+                    "reason": f"{side.capitalize()} wrist extended {horizontal_extension / shoulder_width:.1f}x shoulder-width sideways, near shoulder height."}
+
+    return {"pointing": False, "arm": None, "confidence": "medium", "reason": "No arm extended sideways at shoulder height."}
+
+
+class GenericEventTracker:
+    """Wiederverwendbarer Bestätigungs-Tracker für Ereignisse, die (anders
+    als Sturz/Notsignal) nicht binär "erkannt/nicht erkannt" sind, sondern
+    einen String-Zustand liefern (z.B. Blickrichtung) -- bestätigt einen
+    Zustand erst nach mehreren aufeinanderfolgenden gleichen Werten, meldet
+    aber nur bei einem tatsächlichen WECHSEL erneut, nicht bei jedem Frame,
+    in dem der schon bestätigte Zustand weiter anhält."""
+
+    def __init__(self, required_consecutive=3):
+        self.required_consecutive = required_consecutive
+        self._pending_value = None
+        self._pending_count = 0
+        self._confirmed_value = None
+
+    def update(self, value):
+        """Gibt den neu bestätigten Wert zurück, GENAU beim Moment des
+        Wechsels, sonst None (auch wenn ein Zustand weiterhin gilt)."""
+        if value == self._pending_value:
+            self._pending_count += 1
+        else:
+            self._pending_value = value
+            self._pending_count = 1
+
+        if self._pending_count >= self.required_consecutive and self._confirmed_value != value:
+            self._confirmed_value = value
+            return value
+        return None
+
+    def reset(self):
+        self._pending_value = None
+        self._pending_count = 0
+        self._confirmed_value = None
