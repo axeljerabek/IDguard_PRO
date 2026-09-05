@@ -23,10 +23,10 @@
     --warning: #f2b558;
 
     --border: #322f3d;
-    --radius-lg: 16px;
-    --radius-md: 10px;
-    --radius-sm: 7px;
-    --gap: clamp(14px, 2.2vw, 22px);
+    --radius-lg: 12px;
+    --radius-md: 8px;
+    --radius-sm: 5px;
+    --gap: clamp(10px, 1.8vw, 18px);
 
     /* Bisher hart codierte Einzelwerte (kein Theme-Wechsel möglich) — jetzt
        als eigene Variablen, damit der Light-Override-Block direkt darunter
@@ -86,7 +86,7 @@ body {
         var(--bg);
     color: var(--text);
     line-height: 1.55;
-    padding: clamp(14px, 3vw, 26px);
+    padding: clamp(8px, 2vw, 20px);
     -webkit-font-smoothing: antialiased;
     max-width: 100vw;
     overflow-x: hidden;
@@ -94,7 +94,7 @@ body {
 
 .container {
     width: 100%;
-    padding: 0 24px;
+    padding: 0 16px;
     margin: 0 auto;
     box-sizing: border-box;
 }
@@ -116,7 +116,7 @@ h1 i { color: var(--primary); }
     background-color: var(--card-bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    padding: clamp(12px, 1.8vw, 18px);
+    padding: clamp(8px, 1.4vw, 14px);
     margin-bottom: var(--gap);
     box-shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.5);
     min-width: 0;
@@ -277,7 +277,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .btn-ghost-danger:hover { background: var(--danger-soft); border-color: var(--danger); }
 
 @media (max-width: 420px) {
-    .container { padding: 0 12px; }
+    .container { padding: 0 8px; }
     .pipeline-bar { flex-direction: column; align-items: stretch; }
     .pipeline-bar-actions { justify-content: stretch; }
     .pipeline-bar-actions .btn-ghost { flex: 1; }
@@ -335,14 +335,14 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .streams-grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
+    gap: 8px;
 }
 @media (max-width: 640px) {
     .streams-grid { grid-template-columns: 1fr; }
 }
 .stream-container {
     background: var(--card-bg-inset);
-    padding: 6px;
+    padding: 4px;
     border-radius: var(--radius-md);
 }
 
