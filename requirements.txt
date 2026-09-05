@@ -16,3 +16,4 @@ insightface
 onnxruntime-gpu
 scikit-learn
 paho-mqtt 
+yt-dlp

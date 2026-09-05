@@ -27,6 +27,11 @@ try:
 except ImportError:
     loitering_detection = None  # Optionales Feature — Pipeline läuft unverändert ohne es
 
+try:
+    import platform_source
+except ImportError:
+    platform_source = None  # Optionales Feature — Pipeline läuft unverändert ohne es
+
 # CPU-Thread-Wildwuchs von PyTorch/OpenBLAS global drosseln
 os.environ["OMP_NUM_THREADS"] = "2"
 os.environ["OPENBLAS_NUM_THREADS"] = "2"
@@ -329,6 +334,13 @@ class CameraAgent(multiprocessing.Process):
         super().__init__()
         self.name = stream_info["name"]
         self.url = stream_info.get("url", "")
+        # Ursprüngliche Plattform-URL (z.B. YouTube/Twitch/Vimeo-Link) getrennt
+        # gemerkt -- self.url wird bei jedem (Re-)Connect frisch aufgelöst,
+        # da die von yt-dlp gelieferte Stream-URL typischerweise zeitlich
+        # begrenzt/signiert ist und nach einigen Minuten abläuft. Für normale
+        # Kamera-URLs (rtsp://, rtmp://, /dev/videoX) bleibt das Feld einfach
+        # ungenutzt -- dieselbe URL wird direkt verwendet, wie bisher.
+        self.platform_url = self.url if platform_source is not None and platform_source.needs_resolution(self.url) else None
         self.enabled = stream_info.get("enabled", False)
         # Default True — bestehende streams.json-Einträge von vor diesem
         # Feature haben das Feld noch nicht, sollen sich aber nicht plötzlich
@@ -1142,6 +1154,18 @@ class CameraAgent(multiprocessing.Process):
         try:
             while not self._stop_event.is_set():
                 if container is None:
+                    if self.platform_url is not None:
+                        # Zeitlich begrenzte/signierte Stream-URL -- bei
+                        # JEDEM (Re-)Connect frisch auflösen, nicht nur beim
+                        # allerersten Mal, da eine ältere aufgelöste URL
+                        # nach einigen Minuten schlicht abgelaufen sein kann,
+                        # selbst wenn der Kanal weiterhin live ist.
+                        resolved_url, resolve_error = platform_source.resolve_stream_url(self.platform_url)
+                        if resolved_url is None:
+                            self.logger.error(f"❌ [{self.name}] Plattform-URL konnte nicht aufgelöst werden: {resolve_error}. Erneuter Versuch in 30s...")
+                            time.sleep(30)  # großzügigerer Abstand als bei einer normalen Kamera -- ein "offline" Kanal soll nicht im 5s-Takt angeklopft werden
+                            continue
+                        self.url = resolved_url
                     self.logger.info(f"🔗 Attempting connection to: {self.url}")
                     open_options = _build_open_options(self.url)
                     using_nvdec = False

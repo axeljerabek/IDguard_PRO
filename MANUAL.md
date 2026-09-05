@@ -42,7 +42,7 @@ The `STREAMS` list defines the active cameras. This is the one thing you still e
 | Key | Type | Description |
 | :--- | :--- | :--- |
 | **`name`** | `string` | Unique ID (used in logs, filenames, alerts, dashboard grouping, and MQTT/agent-API topic paths). |
-| **`url`** | `string` | The RTMP/RTSP/MJPEG stream origin URL, or a `/dev/videoX` path for a local USB webcam. |
+| **`url`** | `string` | The RTMP/RTSP/MJPEG stream origin URL, a `/dev/videoX` path for a local USB webcam, **or a YouTube/Twitch/Vimeo/Facebook/Dailymotion/Kick URL** — resolved automatically via `yt-dlp` into a direct stream URL, re-resolved fresh on every (re)connect since these are typically time-limited/signed. Requires `yt-dlp` installed (`pip install yt-dlp`). If the channel isn't currently live, vigil waits 30s before trying again rather than reconnecting every 5s like a normal camera. |
 | **`enabled`**| `boolean`| Default state; can be overridden per-camera live from the dashboard or the agent API (stored in `stream_overrides.json`/`streams.json`, takes precedence over this default). Toggling it live takes up to ~15s to actually start/stop the camera's process — the pipeline reconciles against the file on a periodic cycle, not instantly on save. |
 | **`type`** | `string` | Currently supports `"VIDEO"`. |
 | **`audio_enabled`** | `boolean` | Whether this camera's audio is used for the CLAP trigger (§7b). Default `true` for existing entries without this field. |

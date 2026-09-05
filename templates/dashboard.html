@@ -117,7 +117,7 @@
                         {% for s in streams_full %}
                         <div class="stream-row">
                             <input type="text" name="stream_name" value="{{ s.name }}" placeholder="Name" required>
-                            <input type="text" name="stream_url" value="{{ s.url }}" placeholder="rtmp://192.168.x.x/..." required>
+                            <input type="text" name="stream_url" value="{{ s.url }}" placeholder="rtmp://, rtsp://, /dev/video0, or a YouTube/Twitch/Vimeo URL" required>
                             <input type="hidden" name="stream_enabled_flag" value="{{ '1' if s.enabled else '0' }}">
                             <label class="stream-row-toggle">
                                 <input type="checkbox" {% if s.enabled %}checked{% endif %} onchange="this.parentElement.previousElementSibling.value = this.checked ? '1' : '0'">
@@ -1148,7 +1148,7 @@
             div.className = 'stream-row';
             div.innerHTML = `
                 <input type="text" name="stream_name" placeholder="Name" required>
-                <input type="text" name="stream_url" placeholder="rtmp://192.168.x.x/..." required>
+                <input type="text" name="stream_url" placeholder="rtmp://, rtsp://, /dev/video0, or a YouTube/Twitch/Vimeo URL" required>
                 <input type="hidden" name="stream_enabled_flag" value="1">
                 <label class="stream-row-toggle">
                     <input type="checkbox" checked onchange="this.parentElement.previousElementSibling.value = this.checked ? '1' : '0'">
