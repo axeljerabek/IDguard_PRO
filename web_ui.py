@@ -139,7 +139,7 @@ def create_mam_key():
     label = request.form.get('label', '').strip()
     raw_key = mam_api.generate_api_key(label)
     # Der Klartext-Key wird HIER EINMALIG zurückgegeben -- danach ist er aus
-    # IDguard PRO selbst nicht mehr abrufbar (nur der Hash wird gespeichert).
+    # vigil selbst nicht mehr abrufbar (nur der Hash wird gespeichert).
     return json.dumps({'ok': True, 'key': raw_key})
 
 @app.route('/api/mam_keys/<key_hash>/revoke', methods=['POST'])
@@ -1411,7 +1411,7 @@ def _stop_proc(proc, timeout=5):
 
 def _start_live_ffmpeg(url, m3u8_path, log_path, use_nvenc):
     """Startet den ffmpeg-Prozess fürs Live-HLS. NVENC (Hardware) passt zur
-    restlichen Maschine (IDguards eigene Aufnahme nutzt schon NVENC, Axels
+    restlichen Maschine (vigils eigene Aufnahme nutzt schon NVENC, Axels
     exec_push-Skript nutzt Intel QuickSync) — Software-Encoding (libx264)
     ist der garantiert funktionierende Fallback für Maschinen ohne
     NVIDIA-GPU."""

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#14131b">
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
-    <title>IDguard PRO Dashboard</title>
+    <title>vigil Dashboard</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.15/hls.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -15,7 +15,7 @@
 </head>
 <body>
     <div class="container">
-        <h1><i class="fa-solid fa-shield-halved"></i> IDguard PRO Dashboard</h1>
+        <h1><i class="fa-solid fa-shield-halved"></i> vigil Dashboard</h1>
 
         <!-- Schmale Pipeline-Control-Leiste: dezente Buttons, keine "Helden" -->
         <div class="pipeline-bar">
@@ -458,14 +458,14 @@
                             Copies the video, thumbnail, and all sidecar metadata for an event into its
                             own folder, named e.g. <code>Event_Garden_20260830_081734 Topic_Accident</code>.
                             Leave empty to hide the Export button. Two destination types:
-                            <strong>local path</strong> (e.g. <code>/mnt/backup/idguard-exports</code>) copies
+                            <strong>local path</strong> (e.g. <code>/mnt/backup/vigil-exports</code>) copies
                             directly; <strong>remote path</strong> (e.g. <code>user@host:/path</code>) uses
                             <code>rsync</code> — this requires passwordless SSH key access to already be set
                             up between this machine and the remote one; nothing here can configure that for you.
                         </p>
                         <div class="settings-group">
                             <label>Export folder</label>
-                            <input type="text" name="EXPORT_DIR" value="{{ settings.get('EXPORT_DIR', '') }}" placeholder="/mnt/backup/idguard-exports or user@host:/path">
+                            <input type="text" name="EXPORT_DIR" value="{{ settings.get('EXPORT_DIR', '') }}" placeholder="/mnt/backup/vigil-exports or user@host:/path">
                         </div>
                         <div class="settings-group">
                             <label>What to include</label>
@@ -490,7 +490,7 @@
                         <div class="settings-group">
                             <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:var(--danger);">
                                 <input type="checkbox" name="EXPORT_DELETE_AFTER" {% if settings.get('EXPORT_DELETE_AFTER', False) %}checked{% endif %} style="width:auto;">
-                                Delete the original from IDguard after a successful export
+                                Delete the original from vigil after a successful export
                             </label>
                             <p class="settings-hint" style="margin-top:4px;">Only deletes once the export is confirmed successful — never if the export fails partway through. Off by default; this is permanent, there's no undo.</p>
                         </div>
@@ -514,7 +514,7 @@
                         </div>
                         <div class="settings-group" style="margin-bottom: 14px;">
                             <label>Import folder</label>
-                            <input type="text" name="WATCH_FOLDER_PATH" value="{{ settings.get('WATCH_FOLDER_PATH', '') }}" placeholder="/mnt/imports/idguard-dropbox">
+                            <input type="text" name="WATCH_FOLDER_PATH" value="{{ settings.get('WATCH_FOLDER_PATH', '') }}" placeholder="/mnt/imports/vigil-dropbox">
                         </div>
                         <div class="settings-grid">
                             <div class="settings-group">
@@ -584,7 +584,7 @@
                         </div>
                         <div class="settings-group" style="margin-bottom: 14px;">
                             <label>Topic prefix</label>
-                            <input type="text" name="MQTT_TOPIC_PREFIX" value="{{ settings.get('MQTT_TOPIC_PREFIX', 'idguard') }}" placeholder="idguard">
+                            <input type="text" name="MQTT_TOPIC_PREFIX" value="{{ settings.get('MQTT_TOPIC_PREFIX', 'vigil') }}" placeholder="vigil">
                             <p class="settings-hint" style="margin-top:4px;">Events publish under <code>&lt;prefix&gt;/&lt;camera&gt;/recording</code> and <code>&lt;prefix&gt;/&lt;camera&gt;/last_event_summary</code> — useful for your own automations even without Home Assistant.</p>
                         </div>
                         <div class="settings-group">
@@ -838,10 +838,10 @@
                         after midnight, and a weekly one every Monday, both waiting in this card next time
                         you open the dashboard:
                     </p>
-                    <pre class="log-view" style="white-space:pre-wrap;">5 0 * * *  cd /path/to/IDguard_PRO && ./.venv/bin/python daily_summary.py --period day
-10 0 * * 1 cd /path/to/IDguard_PRO && ./.venv/bin/python daily_summary.py --period week</pre>
+                    <pre class="log-view" style="white-space:pre-wrap;">5 0 * * *  cd /path/to/vigil && ./.venv/bin/python daily_summary.py --period day
+10 0 * * 1 cd /path/to/vigil && ./.venv/bin/python daily_summary.py --period week</pre>
                     <p class="settings-hint" style="margin-top:8px;">
-                        Replace <code>/path/to/IDguard_PRO</code> with your actual install path. Uses the
+                        Replace <code>/path/to/vigil</code> with your actual install path. Uses the
                         same virtual environment and Ollama settings as the rest of the pipeline — nothing
                         extra to configure.
                     </p>
@@ -861,7 +861,7 @@
                 <details style="margin-top:16px;">
                     <summary style="cursor:pointer; color:var(--text-muted); font-size:0.9rem;"><i class="fa-solid fa-clock"></i> Automate with a cronjob</summary>
                     <p class="settings-hint" style="margin-top:8px; margin-bottom:8px;">Weekly retrain, picking up whatever's new since last time:</p>
-                    <pre class="log-view" style="white-space:pre-wrap;">15 0 * * 1 cd /path/to/IDguard_PRO && ./.venv/bin/python anomaly_detection.py --lookback-days 30</pre>
+                    <pre class="log-view" style="white-space:pre-wrap;">15 0 * * 1 cd /path/to/vigil && ./.venv/bin/python anomaly_detection.py --lookback-days 30</pre>
                 </details>
             </div>
         </details>
@@ -872,7 +872,7 @@
                 <i class="fa-solid fa-chevron-down chevron"></i>
             </summary>
             <div class="collapse-body">
-                <p class="settings-hint" style="margin-top: -4px;">Lets an external system (a media asset manager, another app, your own script) submit video for IDguard PRO to process — through the same pipeline as a live recording (codec handling, filmstrip, AI description, faces), with per-job topics instead of the global setting. See <code>REMOTE_API.md</code> for the full endpoint reference and example requests.</p>
+                <p class="settings-hint" style="margin-top: -4px;">Lets an external system (a media asset manager, another app, your own script) submit video for vigil to process — through the same pipeline as a live recording (codec handling, filmstrip, AI description, faces), with per-job topics instead of the global setting. See <code>REMOTE_API.md</code> for the full endpoint reference and example requests.</p>
                 <div style="display:flex; gap:10px; align-items:flex-end; margin-bottom:14px; flex-wrap:wrap;">
                     <div class="settings-group" style="margin-bottom:0; flex:1; min-width:200px;">
                         <label>New key label</label>
@@ -2951,7 +2951,7 @@
                             if (el) el.style.display = isRec ? 'flex' : 'none';
                             if (isRec) anyRecording = true;
                         });
-                        document.title = anyRecording ? '🔴 REC · IDguard PRO' : DEFAULT_TITLE;
+                        document.title = anyRecording ? '🔴 REC · vigil' : DEFAULT_TITLE;
                     }
                     if (data.thumbnail_interval_ms) {
                         updateThumbnailPollRate(data.thumbnail_interval_ms);

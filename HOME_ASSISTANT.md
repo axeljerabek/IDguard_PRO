@@ -1,6 +1,6 @@
 # Home Assistant / MQTT Integration
 
-IDguard PRO can publish camera events to an MQTT broker, with optional Home Assistant auto-discovery — no YAML required to get the entities into HA.
+vigil can publish camera events to an MQTT broker, with optional Home Assistant auto-discovery — no YAML required to get the entities into HA.
 
 ## What you get
 
@@ -9,12 +9,12 @@ Per enabled camera, two entities:
 * **`<Camera> Recording`** — a `binary_sensor` (device class `motion`) that turns `ON` while a recording is in progress (covers both the active detection phase and the post-roll buffer) and `OFF` once it finishes.
 * **`<Camera> Last Event`** — a `sensor` holding the AI-generated description of the most recent recording, updated once post-processing finishes.
 
-Both are grouped under one Home Assistant device per camera (`IDguard <Camera>`), so they show up together under Settings → Devices & Services → MQTT → Devices.
+Both are grouped under one Home Assistant device per camera (`vigil <Camera>`), so they show up together under Settings → Devices & Services → MQTT → Devices.
 
 ## Prerequisites
 
 1. A running MQTT broker (Mosquitto is the common self-hosted choice; Home Assistant's own **Mosquitto broker add-on** works fine too if you run HA OS/Supervised).
-2. The `paho-mqtt` Python package installed in IDguard PRO's virtual environment:
+2. The `paho-mqtt` Python package installed in vigil's virtual environment:
    ```bash
    source .venv/bin/activate
    pip install paho-mqtt
@@ -22,7 +22,7 @@ Both are grouped under one Home Assistant device per camera (`IDguard <Camera>`)
    (Already listed in `requirements.txt` — a normal `pip install -r requirements.txt` picks it up.)
 3. Home Assistant's **MQTT integration** configured and pointed at the same broker (Settings → Devices & Services → Add Integration → MQTT).
 
-## Enabling it in IDguard PRO
+## Enabling it in vigil
 
 In the dashboard: **Settings → Home Assistant / MQTT**
 
@@ -32,7 +32,7 @@ In the dashboard: **Settings → Home Assistant / MQTT**
 | Broker host | IP or hostname of your MQTT broker |
 | Broker port | Default `1883` (unencrypted) — use whatever port your broker actually listens on |
 | Username / Password | Optional, only if your broker requires auth |
-| Topic prefix | Default `idguard` — change this if you're already using that namespace for something else, or if you run multiple IDguard PRO instances and want to tell them apart |
+| Topic prefix | Default `idguard` — change this if you're already using that namespace for something else, or if you run multiple vigil instances and want to tell them apart |
 | Publish Home Assistant MQTT Discovery config | On by default — turn off if you only want the raw topics for your own automations and don't want HA auto-creating entities |
 
 No pipeline restart is needed — MQTT settings are read fresh (with a short cache) on every publish.
@@ -60,7 +60,7 @@ A couple of starting points once the entities exist in Home Assistant:
 **Notify on any recording:**
 ```yaml
 automation:
-  - alias: "IDguard - notify on recording"
+  - alias: "vigil - notify on recording"
     trigger:
       - platform: state
         entity_id: binary_sensor.idguard_entrance_recording
@@ -75,7 +75,7 @@ automation:
 **Notify with the AI description once analysis finishes:**
 ```yaml
 automation:
-  - alias: "IDguard - notify with description"
+  - alias: "vigil - notify with description"
     trigger:
       - platform: state
         entity_id: sensor.idguard_entrance_last_event

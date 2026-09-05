@@ -101,7 +101,7 @@ def publish(topic_suffix, payload, retain=False, qos=0):
     port = int(settings.get("MQTT_PORT", 1883) or 1883)
     username = settings.get("MQTT_USERNAME") or None
     password = settings.get("MQTT_PASSWORD") or None
-    prefix = (settings.get("MQTT_TOPIC_PREFIX") or "idguard").strip("/") or "idguard"
+    prefix = (settings.get("MQTT_TOPIC_PREFIX") or "vigil").strip("/") or "vigil"
     full_topic = f"{prefix}/{topic_suffix}"
     if not isinstance(payload, str):
         payload = json.dumps(payload)
@@ -126,13 +126,13 @@ def publish_ha_discovery(camera_name):
     port = int(settings.get("MQTT_PORT", 1883) or 1883)
     username = settings.get("MQTT_USERNAME") or None
     password = settings.get("MQTT_PASSWORD") or None
-    prefix = (settings.get("MQTT_TOPIC_PREFIX") or "idguard").strip("/") or "idguard"
+    prefix = (settings.get("MQTT_TOPIC_PREFIX") or "vigil").strip("/") or "vigil"
     safe_name = _safe_id(camera_name)
 
     device = {
         "identifiers": [f"idguard_{safe_name}"],
-        "name": f"IDguard {camera_name}",
-        "manufacturer": "IDguard PRO",
+        "name": f"vigil {camera_name}",
+        "manufacturer": "vigil",
     }
     entities = [
         ("binary_sensor", f"idguard_{safe_name}_recording", {

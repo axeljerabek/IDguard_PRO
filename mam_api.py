@@ -1,8 +1,8 @@
 """
-mam_api.py — externe API zur Remote-Steuerung von IDguard PRO.
+mam_api.py — externe API zur Remote-Steuerung von vigil.
 
 Erlaubt fremden Systemen, Video/Audio/Bilder von außen einzureichen,
-die IDguard PRO komplett durch dieselbe Pipeline schickt wie eine eigene
+die vigil komplett durch dieselbe Pipeline schickt wie eine eigene
 Aufnahme (Codec-Absicherung, Filmstrip, KI-Analyse, Gesichtserkennung),
 mit Job-spezifischen Parametern statt der globalen Settings, und liefert
 das Ergebnis per Webhook-Callback UND per Status-Abfrage zurück.
@@ -82,7 +82,7 @@ def _save_api_keys(keys):
 def generate_api_key(label):
     """Erzeugt einen neuen API-Key, speichert nur dessen Hash. Gibt den
     Klartext-Key EINMALIG zurück -- das ist die einzige Gelegenheit, ihn zu
-    sehen, danach ist er aus IDguard PRO selbst nicht mehr rekonstruierbar."""
+    sehen, danach ist er aus vigil selbst nicht mehr rekonstruierbar."""
     raw_key = "idg_" + secrets.token_urlsafe(32)
     keys = _load_api_keys()
     keys[_hash_key(raw_key)] = {
