@@ -565,3 +565,49 @@ def agent_search():
         return jsonify({"results": [], "error": str(e)})
     results.sort(key=lambda r: r["score"], reverse=True)
     return jsonify({"results": results[:50]})
+
+
+@mam_bp.route("/agent/capabilities", methods=["GET"])
+@requires_api_key
+def agent_capabilities():
+    """One-call orientation for an agent: what's currently allowed, and
+    (only for capabilities that are actually enabled) the concrete data
+    that goes with it -- camera list, pipeline status, changeable settings
+    keys. Deliberately NOT gated behind agent_control_enabled itself: this
+    is read-only self-description, telling an agent what it can do costs
+    nothing and saves it from guessing via trial and error."""
+    config = agent_permissions.load_config()
+    master_on = config.get("agent_control_enabled", False)
+    capabilities = config.get("capabilities", {})
+
+    def cap_info(name):
+        c = capabilities.get(name, {})
+        return {"enabled": master_on and bool(c.get("enabled", False)), "risk": c.get("risk"), "description": c.get("description")}
+
+    response = {
+        "agent_control_enabled": master_on,
+        "capabilities": {
+            "search": cap_info("search"),
+            "cameras_toggle": cap_info("cameras_toggle"),
+            "pipeline_control": cap_info("pipeline_control"),
+            "settings_change": cap_info("settings_change"),
+            "delete": cap_info("delete"),
+            "export": cap_info("export"),
+        },
+    }
+    response["capabilities"]["settings_change"]["allowed_keys"] = sorted(agent_permissions.SETTINGS_ALLOWLIST)
+
+    if response["capabilities"]["cameras_toggle"]["enabled"]:
+        response["cameras"] = [
+            {"name": s.get("name"), "enabled": s.get("enabled", False), "audio_enabled": s.get("audio_enabled", False)}
+            for s in _load_streams()
+        ]
+
+    if response["capabilities"]["pipeline_control"]["enabled"]:
+        try:
+            from helpers import is_pipeline_running
+            response["pipeline_running"] = is_pipeline_running()
+        except Exception:
+            response["pipeline_running"] = None
+
+    return jsonify(response)

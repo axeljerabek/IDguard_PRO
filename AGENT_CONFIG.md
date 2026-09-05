@@ -39,12 +39,21 @@ Both the master switch **and** the specific capability must be `true` for a call
 
 Anything outside this list — MQTT credentials, camera URLs, export paths, watchfolder paths — is rejected with a 403, even if `settings_change` is enabled. A request that mixes an allowed and a disallowed key is rejected entirely; nothing partially applies.
 
+## Orientation endpoint (start here)
+
+```
+GET /api/v1/agent/capabilities
+```
+
+One call, tells an agent everything it needs before doing anything else: which capabilities are currently enabled, the risk level and description of each, which settings keys it's allowed to touch — and, only for capabilities that are actually on, the concrete data that goes with them (camera list if `cameras_toggle` is enabled, pipeline running/stopped if `pipeline_control` is enabled). Always reachable with a valid API key regardless of the master switch — it's read-only self-description, not an action, so there's nothing to gate. Saves an agent from finding out what it can do by trial and error (and the resulting stream of 403s).
+
 ## Endpoints
 
 All under `/api/v1/agent/`, same `Authorization: Bearer <key>` / `X-API-Key` auth as the rest of the External API.
 
 | Method & path | Capability | Notes |
 | :--- | :--- | :--- |
+| `GET /capabilities` | *(always reachable)* | Orientation call — see above. |
 | `GET /cameras` | `cameras_toggle` | Name, enabled, audio_enabled — URL never included. |
 | `POST /cameras/<name>/enable` | `cameras_toggle` | |
 | `POST /cameras/<name>/disable` | `cameras_toggle` | |
@@ -62,6 +71,10 @@ Deliberate. Both are meaningfully higher-stakes than the rest (delete is irrever
 ## Example (curl)
 
 ```bash
+# Start here -- see what's currently allowed
+curl https://your-idguard-host:19473/api/v1/agent/capabilities \
+  -H "Authorization: Bearer idg_xxxxxxxxxxxx"
+
 # Check what's currently allowed to run
 curl https://your-idguard-host:19473/api/v1/agent/pipeline/status \
   -H "Authorization: Bearer idg_xxxxxxxxxxxx"
