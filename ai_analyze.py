@@ -119,12 +119,7 @@ def _describe_ollama_error(e):
 
 
 MAX_FRAMES = int(os.environ.get("AI_ANALYZE_MAX_FRAMES", _settings.get("AI_ANALYZE_MAX_FRAMES", 12)))
-# Ollamas Server-Standard für die Kontextgröße ist oft künstlich klein (klassisch
-# 4096) — viele Modelle vertragen deutlich mehr, wenn man's explizit per Request
-# anfragt ("num_ctx"). Bei wenig VRAM (z.B. NUC mit nur 6GB) ist ein größerer
-# Wert aber ein echter Hardware-Trade-off (mehr Kontext = mehr GPU-Speicher fürs
-# KV-Cache) — deshalb einstellbar statt fix hochgesetzt. 0 = Ollamas eigenen
-# Standard unangetastet lassen (kein num_ctx im Request).
+# Kontextgröße einstellbar statt fix hochgesetzt -- mehr Kontext kostet mehr VRAM (KV-Cache). 0 = Ollama-Standard unangetastet.
 OLLAMA_CONTEXT_SIZE = int(os.environ.get("OLLAMA_CONTEXT_SIZE", _settings.get("OLLAMA_CONTEXT_SIZE", 0)))
 AI_TOPICS_ENABLED = bool(_settings.get("AI_TOPICS_ENABLED", False))
 AI_TOPICS = [t.strip() for t in _settings.get("AI_TOPICS", []) if isinstance(t, str) and t.strip()]
@@ -246,8 +241,18 @@ def _pick_frames(frame_dir, max_frames):
         files.sort()
 
     if len(files) > max_frames:
-        step = len(files) / max_frames
-        files = [files[int(i * step)] for i in range(max_frames)]
+        if max_frames == 1:
+            files = [files[-1]]
+        else:
+            # (len-1)/(max_frames-1) statt len/max_frames: garantiert, dass
+            # sowohl der erste ALS AUCH der letzte Frame ausgewählt werden.
+            # Die vorherige Formel (len/max_frames) erreichte den letzten
+            # Index nie -- verwarf damit systematisch genau den garantierten
+            # Ende-Slot aus capture_filmstrip() (recorder_pipeline.py), noch
+            # bevor er Ollama je erreichte. Bei 64 Bildern/12 Frames gingen
+            # so die letzten 5 Bilder komplett verloren.
+            indices = [round(i * (len(files) - 1) / (max_frames - 1)) for i in range(max_frames)]
+            files = [files[i] for i in indices]
     return files
 
 
@@ -321,13 +326,7 @@ def _classify_topics(images_b64, topics):
                 result = json.loads(resp.read().decode("utf-8"))
             raw = result.get("response", "").strip()
             if not raw:
-                # Reasoning-Modelle wie Qwen3 (Basis dieses Modells) legen ihre
-                # Antwort bei "format": "json" manchmal in den "thinking"-Kanal
-                # statt in "response" -- beobachtet und verifiziert bei Axel
-                # (response war leer, thinking enthielt die korrekte JSON-
-                # Antwort). Als Fallback dort suchen, BEVOR das als Kontext-
-                # Overflow behandelt wird -- eine echte leere Antwort in BEIDEN
-                # Feldern bleibt weiterhin ein plausibles Overflow-Symptom.
+                # Reasoning-Modelle wie Qwen3 legen die Antwort bei format=json manchmal in 'thinking' statt 'response' -- dort als Fallback suchen, bevor es als Overflow gilt.
                 thinking = result.get("thinking", "").strip()
                 if thinking:
                     raw = thinking
@@ -481,13 +480,7 @@ def _analyze_inner(video_basename, base_dir, topics_override=None):
             top_topic = detected_topics[0]["topic"]
             top_topic_score = detected_topics[0]["score"]
 
-    # 1) Eigene JSON-Metadatei — vom Dashboard gelesen. Erst lesen & mergen,
-    # NIE blind überschreiben — sonst geht ein evtl. schon vorhandenes
-    # Transkript (transcribe_audio.py schreibt in dieselbe Datei) verloren,
-    # z.B. wenn ai_analyze.py isoliert nochmal läuft (etwa über einen
-    # gezielten "nur Beschreibung neu"-Befehl, der bewusst NICHT auch
-    # transcribe_audio.py mit aufruft). transcribe_audio.py macht das schon
-    # länger korrekt so — hier hatte genau dasselbe Muster gefehlt.
+    # Eigene JSON-Metadatei -- erst lesen & mergen, nie blind überschreiben, sonst geht ein vorhandenes Transkript verloren.
     meta_path = os.path.join(base_dir, f"{video_basename}.ai.json")
     meta = {}
     if os.path.exists(meta_path):
