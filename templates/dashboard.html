@@ -2078,6 +2078,7 @@
                     <div class="people-lightbox-header-actions">
                         <button type="button" class="btn-name-cluster" onclick="renamePersonPrompt(${personId}, '${escapeHtml(name).replace(/'/g, "\\'")}')"><i class="fa-solid fa-pen"></i> Rename</button>
                         <button type="button" class="btn-delete-outline" onclick="deletePerson(${personId})"><i class="fa-solid fa-trash-can"></i> Un-name person</button>
+                        <button type="button" class="btn-delete-outline" style="color:var(--danger); border-color:var(--danger);" onclick="deletePersonPermanently(${personId}, '${escapeHtml(name).replace(/'/g, "\\'")}')"><i class="fa-solid fa-trash"></i> Delete permanently</button>
                     </div>
                 </div>
                 <div class="face-select-bar">
@@ -2137,6 +2138,7 @@
                 </div>
                 <div class="people-lightbox-faces">${faceThumbs || '<p class="settings-hint">No faces left in this group.</p>'}</div>
                 <div class="cluster-actions" style="margin-top:18px;">
+                    <p class="settings-hint" style="margin-top:0;">Select specific faces above first if only some of them belong together — otherwise the whole group below is used.</p>
                     <div class="cluster-action-group">
                         <input type="text" placeholder="Name this person" id="clusterName_${cid}">
                         <button type="button" class="btn-name-cluster" onclick="nameCluster('${cid}')"><i class="fa-solid fa-user-plus"></i> Save as new</button>
@@ -2396,10 +2398,16 @@
             const input = document.getElementById('clusterName_' + cid);
             const name = input.value.trim();
             if (!name) return;
-            const faceIds = (currentClusters[cid] || []).map(f => f.id);
+            // Falls einzelne Gesichter ausgewählt sind, nur DIESE verwenden --
+            // lässt zu, gemischte Cluster teilweise zu korrigieren, statt
+            // immer den kompletten Cluster benennen zu müssen.
+            const faceIds = selectedFaces.size > 0
+                ? Array.from(selectedFaces)
+                : (currentClusters[cid] || []).map(f => f.id);
             _postForm('/api/create_person', { name: name, face_ids: faceIds }).then(res => {
                 if (res.ok) {
                     showToast('Person "' + name + '" created.');
+                    selectedFaces.clear();
                     if (lightboxContext && lightboxContext.type === 'cluster' && lightboxContext.id === cid) closePeopleLightbox();
                     loadPeopleData();
                 } else {
@@ -2412,10 +2420,17 @@
             const select = document.getElementById('clusterMerge_' + cid);
             const personId = select.value;
             if (!personId) return;
-            const faceIds = (currentClusters[cid] || []).map(f => f.id);
+            // Dasselbe Prinzip wie bei nameCluster: Auswahl bevorzugen, sonst
+            // den ganzen Cluster -- damit lässt sich gezielt nur EIN
+            // fälschlich mit reingerutschtes Gesicht einer anderen,
+            // bestehenden Person zuordnen, statt den ganzen Cluster.
+            const faceIds = selectedFaces.size > 0
+                ? Array.from(selectedFaces)
+                : (currentClusters[cid] || []).map(f => f.id);
             _postForm('/api/assign_to_person', { person_id: personId, face_ids: faceIds }).then(res => {
                 if (res.ok) {
                     showToast('Merged into existing person.');
+                    selectedFaces.clear();
                     if (lightboxContext && lightboxContext.type === 'cluster' && lightboxContext.id === cid) closePeopleLightbox();
                     loadPeopleData();
                 } else {
@@ -2472,6 +2487,23 @@
                 if (res.ok) {
                     if (lightboxContext && lightboxContext.type === 'person' && lightboxContext.id === personId) closePeopleLightbox();
                     loadPeopleData();
+                }
+            });
+        }
+
+        async function deletePersonPermanently(personId, personName) {
+            const ok = await showConfirm(
+                `Permanently delete "${escapeHtml(personName)}" and all of their face data? This removes their recognition data and archived photos entirely — unlike "Un-name", this cannot be undone. Future recordings will no longer be matched to them at all.`,
+                'Delete permanently'
+            );
+            if (!ok) return;
+            _postForm('/api/delete_person_permanently', { person_id: personId }).then(res => {
+                if (res.ok) {
+                    showToast(`"${personName}" permanently deleted.`);
+                    if (lightboxContext && lightboxContext.type === 'person' && lightboxContext.id === personId) closePeopleLightbox();
+                    loadPeopleData();
+                } else {
+                    showToast('⚠️ ' + (res.error || 'Failed to delete permanently.'), 6000);
                 }
             });
         }

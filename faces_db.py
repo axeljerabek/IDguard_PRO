@@ -625,7 +625,10 @@ def set_representative_face(person_id, face_id):
 
 def delete_person(person_id):
     """Löscht die Person selbst; ihre Gesichter bleiben erhalten, werden aber
-    unzugeordnet (landen wieder im Clustering-Pool statt gelöscht zu werden)."""
+    unzugeordnet (landen wieder im Clustering-Pool statt gelöscht zu werden).
+    Das ist die 'Un-name'-Aktion im Dashboard -- für Korrekturen (falsch
+    benannt), nicht zum endgültigen Entsorgen. Siehe delete_person_permanently()
+    für Letzteres."""
     try:
         conn = _connect()
         conn.execute("UPDATE faces SET person_id = NULL WHERE person_id = ?", (person_id,))
@@ -634,3 +637,34 @@ def delete_person(person_id):
         conn.close()
     except Exception as e:
         print(f"⚠️ Konnte Person nicht löschen: {e}")
+
+
+def delete_person_permanently(person_id):
+    """Löscht eine Person UND alle ihre Gesichts-Daten unwiderruflich --
+    Datenbank-Zeilen, Embeddings, UND die permanent archivierten Fotos auf
+    der Platte. Anders als delete_person() (= sanftes 'Un-name', Gesichter
+    bleiben für spätere Neuzuordnung erhalten) ist das hier endgültig --
+    für Personen, die wirklich nicht mehr im System gebraucht werden."""
+    try:
+        conn = _connect()
+        rows = conn.execute("SELECT base_dir, crop_path FROM faces WHERE person_id = ?", (person_id,)).fetchall()
+        conn.execute("DELETE FROM faces WHERE person_id = ?", (person_id,))
+        conn.execute("DELETE FROM people WHERE id = ?", (person_id,))
+        conn.commit()
+        conn.close()
+        people_photos_abs = os.path.abspath(PEOPLE_PHOTOS_DIR)
+        for base_dir, crop_path in rows:
+            full_path = os.path.abspath(os.path.join(base_dir, crop_path))
+            # Sicherheitsnetz: nur Dateien löschen, die wirklich im
+            # permanenten Foto-Ordner liegen -- niemals versehentlich eine
+            # Datei innerhalb eines noch existierenden Video-Ordners
+            # anfassen, die gehört dem Video, nicht der Personenverwaltung.
+            try:
+                if os.path.commonpath([full_path, people_photos_abs]) == people_photos_abs:
+                    os.remove(full_path)
+            except Exception:
+                pass
+        return True, None
+    except Exception as e:
+        print(f"⚠️ Konnte Person nicht endgültig löschen: {e}")
+        return False, str(e)

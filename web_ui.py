@@ -1306,6 +1306,19 @@ def api_delete_person():
     faces_db.delete_person(person_id)
     return json.dumps({'ok': True})
 
+@app.route('/api/delete_person_permanently', methods=['POST'])
+@requires_auth
+def api_delete_person_permanently():
+    _verify_csrf()
+    if faces_db is None:
+        return json.dumps({'ok': False, 'error': 'Face recognition module not available.'})
+    try:
+        person_id = int(request.form.get('person_id'))
+    except (TypeError, ValueError):
+        return json.dumps({'ok': False, 'error': 'Invalid person_id.'})
+    ok, err = faces_db.delete_person_permanently(person_id)
+    return json.dumps({'ok': ok, 'error': err})
+
 @app.route('/api/recluster_faces', methods=['POST'])
 @requires_auth
 def api_recluster_faces():
