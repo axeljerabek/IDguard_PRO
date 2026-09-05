@@ -22,6 +22,11 @@ try:
 except ImportError:
     pose_fall_detection = None  # Optionales Feature — Pipeline läuft unverändert ohne es
 
+try:
+    import loitering_detection
+except ImportError:
+    loitering_detection = None  # Optionales Feature — Pipeline läuft unverändert ohne es
+
 # CPU-Thread-Wildwuchs von PyTorch/OpenBLAS global drosseln
 os.environ["OMP_NUM_THREADS"] = "2"
 os.environ["OPENBLAS_NUM_THREADS"] = "2"
@@ -187,12 +192,19 @@ def _load_settings_dict():
         return {}
 
 def _pose_estimation_settings():
-    """Ob Pose-Estimation/Sturzerkennung aktiviert ist, plus der einstellbare
-    Winkel-Schwellwert. Wird nur beim Kamera-Prozessstart gelesen (Modell-
-    Ladung passiert einmalig), nicht pro Frame -- Änderung braucht wie bei
-    YOLO_VERSION einen Neustart der Kamera."""
+    """Ob Pose-Estimation/Sturzerkennung aktiviert ist, plus die
+    einstellbaren Schwellwerte für alle drei Verhaltens-Auswertungen. Wird
+    nur beim Kamera-Prozessstart gelesen (Modell-Ladung passiert einmalig),
+    nicht pro Frame -- Änderung braucht wie bei YOLO_VERSION einen Neustart
+    der Kamera."""
     s = _load_settings_dict()
-    return bool(s.get('POSE_ESTIMATION_ENABLED', False)), float(s.get('POSE_FALL_ANGLE_THRESHOLD', 55.0))
+    return {
+        "fall_enabled": bool(s.get('POSE_ESTIMATION_ENABLED', False)),
+        "fall_angle_threshold": float(s.get('POSE_FALL_ANGLE_THRESHOLD', 55.0)),
+        "raised_hands_enabled": bool(s.get('POSE_RAISED_HANDS_ENABLED', False)),
+        "loitering_enabled": bool(s.get('POSE_LOITERING_ENABLED', False)),
+        "loitering_seconds": float(s.get('POSE_LOITERING_SECONDS', 30.0)),
+    }
 
 def _write_state(name, state):
     try:
@@ -216,22 +228,20 @@ def _publish_mqtt_recording(name, is_recording):
         pass
 
 
-def _notify_fall(camera_name, fall_info):
-    """Benachrichtigt bei einem bestätigten Sturz -- MQTT und Agent-Webhook,
-    beide bereits selbst fire-and-forget/fehlertolerant; das try/except hier
-    ist nur zusätzliche Absicherung für dieses sensible File, dasselbe
-    Muster wie _publish_mqtt_recording."""
+def _notify_pose_event(event_type, camera_name, description, extra_score=None):
+    """Gemeinsame Benachrichtigung für alle Pose-/Verhaltens-Ereignisse
+    (Sturz, Notsignal, Loitering) -- MQTT und Agent-Webhook, beide bereits
+    selbst fire-and-forget/fehlertolerant; das try/except hier ist nur
+    zusätzliche Absicherung für dieses sensible File, dasselbe Muster wie
+    _publish_mqtt_recording."""
     if mqtt_client is not None:
         try:
-            mqtt_client.publish(f"{camera_name}/fall_detected", fall_info or {}, retain=False)
+            mqtt_client.publish(f"{camera_name}/{event_type}", {"description": description}, retain=False)
         except Exception:
             pass
     try:
         import agent_webhook
-        agent_webhook.notify_event(
-            camera_name, None, f"Possible fall detected ({(fall_info or {}).get('reason', '')})",
-            {}, anomaly=True, anomaly_score=(fall_info or {}).get('angle')
-        )
+        agent_webhook.notify_event(camera_name, None, description, {}, anomaly=True, anomaly_score=extra_score)
     except Exception:
         pass
 
@@ -453,28 +463,48 @@ class CameraAgent(multiprocessing.Process):
         else:
             self.logger.warning("⚠️ No valid YOLO path found; running in VISION-ONLY mode.")
 
-        # Pose-Estimation/Sturzerkennung -- bewusst EIN separates, kleines
-        # Modell statt den Hauptdetektor umzubauen: läuft nur an, wenn
-        # explizit aktiviert, UND nur für Frames, in denen der Hauptdetektor
-        # bereits eine Person gesehen hat (kein zusätzlicher GPU-Aufwand für
-        # leere Szenen). Kein aufwändiger Selbsttest wie beim Hauptmodell --
-        # schlägt das Laden fehl, wird die Funktion einfach übersprungen,
-        # der Rest der Pipeline läuft unverändert weiter.
-        pose_enabled, pose_angle_threshold = _pose_estimation_settings()
+        # Pose-Estimation (Sturz, Notsignal) und Loitering (Positions-
+        # Tracking, kein Pose-Modell nötig) -- alle drei unabhängig
+        # voneinander schaltbar. Pose-Modell läuft nur an, wenn mindestens
+        # eine der beiden Pose-basierten Auswertungen aktiviert ist, UND
+        # nur für Frames, in denen der Hauptdetektor bereits eine Person
+        # gesehen hat (kein zusätzlicher GPU-Aufwand für leere Szenen).
+        # Kein aufwändiger Selbsttest wie beim Hauptmodell -- schlägt das
+        # Laden fehl, werden die Pose-Features einfach übersprungen, der
+        # Rest der Pipeline läuft unverändert weiter.
+        pose_cfg = _pose_estimation_settings()
         pose_detector = None
         fall_tracker = None
-        if pose_enabled and pose_fall_detection is not None:
+        raised_hands_tracker = None
+        loitering_tracker = None
+
+        if (pose_cfg["fall_enabled"] or pose_cfg["raised_hands_enabled"]) and pose_fall_detection is not None:
             try:
                 from ultralytics import YOLO as _YOLO
                 pose_detector = _YOLO("yolo11n-pose.pt")
-                fall_tracker = pose_fall_detection.FallTracker(required_consecutive=5)
-                self.logger.info(f"🧍 [{self.name}] Pose estimation aktiviert (Sturz-Schwellwert {pose_angle_threshold}°).")
+                if pose_cfg["fall_enabled"]:
+                    fall_tracker = pose_fall_detection.FallTracker(required_consecutive=5)
+                if pose_cfg["raised_hands_enabled"]:
+                    raised_hands_tracker = pose_fall_detection.RaisedHandsTracker(required_consecutive=3)
+                self.logger.info(
+                    f"🧍 [{self.name}] Pose estimation aktiviert "
+                    f"(Sturz: {'an' if pose_cfg['fall_enabled'] else 'aus'}, "
+                    f"Notsignal: {'an' if pose_cfg['raised_hands_enabled'] else 'aus'})."
+                )
             except Exception as e:
-                self.logger.warning(f"⚠️ [{self.name}] Pose-Modell konnte nicht geladen werden, Sturzerkennung bleibt aus: {e}")
+                self.logger.warning(f"⚠️ [{self.name}] Pose-Modell konnte nicht geladen werden, Sturz-/Notsignal-Erkennung bleiben aus: {e}")
+
+        if pose_cfg["loitering_enabled"] and loitering_detection is not None:
+            loitering_tracker = loitering_detection.LoiteringTracker(min_duration_sec=pose_cfg["loitering_seconds"])
+            self.logger.info(f"🚶 [{self.name}] Loitering-Erkennung aktiviert ({pose_cfg['loitering_seconds']}s Schwellwert).")
 
         # YOLO läuft in eigenem Thread statt synchron im Encode-Loop -- verzögerte sonst das Encoding bei langsamer Inferenz. Nur boxes/names geteilt, nie das rohe Ultralytics-Objekt.
         _detection_lock = threading.Lock()
-        _latest_detection = {'boxes': None, 'names': None, 'fall_confirmed': False, 'fall_info': None}
+        _latest_detection = {
+            'boxes': None, 'names': None,
+            'fall_confirmed': False, 'fall_info': None,
+            'raised_hands_confirmed': False, 'raised_hands_info': None,
+        }
         _pending_frame_lock = threading.Lock()
         _pending_frame = {'img': None}
         _frame_ready_event = threading.Event()
@@ -484,33 +514,59 @@ class CameraAgent(multiprocessing.Process):
             """Läuft nur, wenn mind. eine 'person'-Box im Hauptergebnis war --
             spart die Pose-Inferenz komplett für leere/objektlose Frames.
             Nimmt die Person mit der höchsten Detection-Confidence, falls
-            mehrere im Bild sind (einfache, aber robuste Wahl ohne Tracking
-            über Frames hinweg)."""
+            mehrere im Bild sind. Berechnet Sturz UND Notsignal aus
+            DENSELBEN Keypoints -- keine zusätzliche Inferenz für die
+            zweite Auswertung, nur eine andere Interpretation derselben
+            Daten. Gibt (fall_info, raised_hands_info) zurück, je nachdem
+            welche der beiden aktiviert ist (sonst None an der Stelle)."""
             person_class_ids = {cid for cid, n in names.items() if n == "person"}
             person_boxes = [b for b in boxes if int(b[5]) in person_class_ids]
             if not person_boxes:
                 if fall_tracker is not None:
-                    fall_tracker.reset()  # keine Person mehr im Bild -- Sturz-Zustand darf nicht "hängen bleiben"
-                return None
+                    fall_tracker.reset()  # keine Person mehr im Bild -- Zustand darf nicht "hängen bleiben"
+                if raised_hands_tracker is not None:
+                    raised_hands_tracker.reset()
+                return None, None
             try:
                 pose_results = pose_detector(img, verbose=False, device=device_target)
                 if pose_results[0].keypoints is None or len(pose_results[0].keypoints.data) == 0:
-                    return None
-                # Beste Person nach Detection-Confidence auswählen
+                    return None, None
+                # Beste Person nach Detection-Confidence auswählen. Keypoints-
+                # Reihenfolge entspricht der Reihenfolge der erkannten Personen
+                # im selben results-Objekt -- nutzt hier einfach die erste
+                # erkannte Person-Pose als Näherung, da eine exakte Box-zu-
+                # Keypoints-Zuordnung über zwei getrennte Modell-Aufrufe
+                # (Haupt- vs. Pose-Modell) ohnehin nicht exakt ist -- für
+                # Ein-Personen-Szenen (der typische Zuhause-Fall) macht das
+                # keinen Unterschied.
                 best_person = max(person_boxes, key=lambda b: b[4])
-                # Keypoints-Reihenfolge entspricht der Reihenfolge der
-                # erkannten Personen im selben results-Objekt -- nutzt hier
-                # einfach die erste erkannte Person-Pose als Näherung, da
-                # eine exakte Box-zu-Keypoints-Zuordnung über zwei getrennte
-                # Modell-Aufrufe (Haupt- vs. Pose-Modell) ohnehin nicht exakt
-                # ist -- für Ein-Personen-Szenen (der typische Fall bei
-                # Sturzerkennung zuhause) macht das keinen Unterschied.
                 keypoints = pose_results[0].keypoints.data[0].cpu().numpy()
                 bbox = tuple(best_person[:4])
-                return pose_fall_detection.detect_fall(keypoints, bbox=bbox, angle_threshold=pose_angle_threshold)
+                fall_info = pose_fall_detection.detect_fall(keypoints, bbox=bbox, angle_threshold=pose_cfg["fall_angle_threshold"]) \
+                    if fall_tracker is not None else None
+                raised_hands_info = pose_fall_detection.detect_raised_hands(keypoints) \
+                    if raised_hands_tracker is not None else None
+                return fall_info, raised_hands_info
             except Exception as e:
                 self.logger.error(f"❌ [{self.name}] Fehler in der Pose-Inferenz: {e}")
+                return None, None
+
+        def _run_loitering_check(boxes, names, frame_width, frame_height):
+            """Unabhängig vom Pose-Modell -- nutzt nur die normalen
+            Detection-Boxen. Bei mehreren Personen wird die dem aktuellen
+            Anker räumlich nächste weiterverfolgt (siehe LoiteringTracker-
+            Docstring); ohne bestehenden Anker einfach die erste."""
+            if loitering_tracker is None:
                 return None
+            person_class_ids = {cid for cid, n in names.items() if n == "person"}
+            person_boxes = [b for b in boxes if int(b[5]) in person_class_ids]
+            if not person_boxes:
+                loitering_tracker.update(None, frame_width, frame_height, time.time())
+                return None
+            chosen = person_boxes[0]
+            center = loitering_detection.box_center(tuple(chosen[:4]))
+            confirmed = loitering_tracker.update(center, frame_width, frame_height, time.time())
+            return confirmed
 
         def _detection_worker():
             while not _detector_stop_event.is_set():
@@ -535,18 +591,36 @@ class CameraAgent(multiprocessing.Process):
 
                 fall_confirmed = False
                 fall_info = None
+                raised_hands_confirmed = False
+                raised_hands_info = None
                 if pose_detector is not None:
-                    fall_info = _run_pose_check(img, boxes, names)
+                    fall_info, raised_hands_info = _run_pose_check(img, boxes, names)
                     if fall_info is not None and fall_tracker is not None:
                         fall_confirmed = fall_tracker.update(fall_info)
                         if fall_confirmed:
                             self.logger.warning(f"🚨 [{self.name}] Möglicher Sturz erkannt ({fall_info['reason']})")
+                    if raised_hands_info is not None and raised_hands_tracker is not None:
+                        raised_hands_confirmed = raised_hands_tracker.update(raised_hands_info)
+                        if raised_hands_confirmed:
+                            self.logger.warning(f"🙌 [{self.name}] Mögliches Notsignal erkannt ({raised_hands_info['reason']})")
+
+                if loitering_tracker is not None:
+                    frame_height, frame_width = img.shape[:2]
+                    loitering_confirmed = bool(_run_loitering_check(boxes, names, frame_width, frame_height))
+                    if loitering_confirmed:
+                        self.logger.warning(f"🚶 [{self.name}] Herumlungern erkannt (Person bleibt seit {pose_cfg['loitering_seconds']}s+ an derselben Stelle).")
+                        _notify_pose_event(
+                            "loitering_detected", self.name,
+                            f"A person has stayed in roughly the same spot for over {int(pose_cfg['loitering_seconds'])}s."
+                        )
 
                 with _detection_lock:
                     _latest_detection['boxes'] = boxes
                     _latest_detection['names'] = names
                     _latest_detection['fall_confirmed'] = fall_confirmed
                     _latest_detection['fall_info'] = fall_info
+                    _latest_detection['raised_hands_confirmed'] = raised_hands_confirmed
+                    _latest_detection['raised_hands_info'] = raised_hands_info
 
         _detection_thread = threading.Thread(target=_detection_worker, daemon=True)
         _detection_thread.start()
@@ -1126,6 +1200,8 @@ class CameraAgent(multiprocessing.Process):
                                     names = _latest_detection['names']
                                     fall_confirmed = _latest_detection.get('fall_confirmed', False)
                                     fall_info = _latest_detection.get('fall_info')
+                                    raised_hands_confirmed = _latest_detection.get('raised_hands_confirmed', False)
+                                    raised_hands_info = _latest_detection.get('raised_hands_info')
                                 target_detected = boxes is not None and len(boxes) > 0
                                 manual_trigger = _check_and_clear_manual_trigger(self.name)
                                 if manual_trigger:
@@ -1134,7 +1210,17 @@ class CameraAgent(multiprocessing.Process):
                                     # Ein bestätigter Sturz ist immer aufnahmewürdig,
                                     # unabhängig davon, ob sich die Person noch bewegt.
                                     target_detected = True
-                                    _notify_fall(self.name, fall_info)
+                                    _notify_pose_event(
+                                        "fall_detected", self.name,
+                                        f"Possible fall detected ({(fall_info or {}).get('reason', '')})",
+                                        extra_score=(fall_info or {}).get('angle')
+                                    )
+                                if raised_hands_confirmed:
+                                    target_detected = True
+                                    _notify_pose_event(
+                                        "raised_hands_detected", self.name,
+                                        f"Possible distress signal detected ({(raised_hands_info or {}).get('reason', '')})"
+                                    )
 
                                 # Erst NACH der Detection: write_shared_frame bekommt die
                                 # Ergebnisse mit, damit die Live-Vorschau (Grid + Lightbox)

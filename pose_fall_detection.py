@@ -21,6 +21,7 @@ import math
 
 KP_NOSE = 0
 KP_LEFT_SHOULDER, KP_RIGHT_SHOULDER = 5, 6
+KP_LEFT_WRIST, KP_RIGHT_WRIST = 9, 10
 KP_LEFT_HIP, KP_RIGHT_HIP = 11, 12
 
 MIN_KEYPOINT_CONFIDENCE = 0.3  # unterhalb dessen gilt ein Keypoint als "nicht gesehen"
@@ -141,6 +142,83 @@ class FallTracker:
             self._confirmed = False
             return False
 
+        if self._consecutive_count >= self.required_consecutive and not self._confirmed:
+            self._confirmed = True
+            return True
+        return False
+
+    def reset(self):
+        self._consecutive_count = 0
+        self._confirmed = False
+
+
+def detect_raised_hands(keypoints, torso_length_ratio=0.15):
+    """Prüft, ob beide Handgelenke deutlich über der Schulterlinie sind --
+    "Hände hoch"/Winken/Notsignal. torso_length_ratio: wie weit über die
+    Schulterlinie die Handgelenke mindestens reichen müssen, als Anteil der
+    Schulter-Hüft-Distanz (skalierungsunabhängig -- eine nahe Person hat
+    einen größeren Torso in Pixeln als eine entfernte, der Anteil bleibt
+    aber vergleichbar).
+
+    Gibt {"raised_hands": bool, "hands_count": 0|1|2, "confidence": ...,
+    "reason": ...} zurück. Nur EINE erhobene Hand wird als niedrigere
+    Konfidenz gewertet (könnte eine normale Geste sein), BEIDE als hoch."""
+    shoulder_mid = _midpoint(keypoints, KP_LEFT_SHOULDER, KP_RIGHT_SHOULDER)
+    hip_mid = _midpoint(keypoints, KP_LEFT_HIP, KP_RIGHT_HIP)
+    if shoulder_mid is None:
+        return {"raised_hands": False, "hands_count": 0, "confidence": "low",
+                "reason": "Shoulders not confidently detected."}
+
+    # Torso-Länge als Skalierungs-Referenz -- falls Hüfte nicht sichtbar
+    # (z.B. durch einen Tisch verdeckt), auf einen Schätzwert relativ zur
+    # Schulterbreite zurückfallen, statt komplett aufzugeben.
+    if hip_mid is not None:
+        torso_length = math.hypot(hip_mid[0] - shoulder_mid[0], hip_mid[1] - shoulder_mid[1])
+    else:
+        shoulder_width = abs(keypoints[KP_RIGHT_SHOULDER][0] - keypoints[KP_LEFT_SHOULDER][0]) \
+            if _kp_ok(keypoints, KP_LEFT_SHOULDER) and _kp_ok(keypoints, KP_RIGHT_SHOULDER) else 50.0
+        torso_length = shoulder_width * 1.5  # grobe Faustregel, keine gemessene Größe
+
+    if torso_length <= 0:
+        return {"raised_hands": False, "hands_count": 0, "confidence": "low",
+                "reason": "Could not establish a body-scale reference."}
+
+    threshold_y = shoulder_mid[1] - torso_length * torso_length_ratio
+    hands_up = 0
+    for wrist_idx in (KP_LEFT_WRIST, KP_RIGHT_WRIST):
+        if _kp_ok(keypoints, wrist_idx) and keypoints[wrist_idx][1] < threshold_y:
+            hands_up += 1
+
+    if hands_up == 2:
+        return {"raised_hands": True, "hands_count": 2, "confidence": "high",
+                "reason": "Both wrists are well above the shoulder line."}
+    if hands_up == 1:
+        return {"raised_hands": False, "hands_count": 1, "confidence": "low",
+                "reason": "Only one wrist raised -- could be an ordinary gesture, not treated as a signal on its own."}
+    return {"raised_hands": False, "hands_count": 0, "confidence": "medium",
+            "reason": "Neither wrist is raised above the shoulder line."}
+
+
+class RaisedHandsTracker:
+    """Wie FallTracker, aber mit kürzerer Bestätigungsdauer -- ein Wink-/
+    Notsignal ist eine bewusste, meist kurze Geste, im Gegensatz zum
+    Sturz muss hier nicht dieselbe lange Bestätigung abgewartet werden,
+    um Alltagsbewegungen (Bücken) auszuschließen. Separate Klasse statt
+    Parameter-Wiederverwendung von FallTracker, damit beide unabhängig
+    konfigurierbar bleiben."""
+
+    def __init__(self, required_consecutive=3):
+        self.required_consecutive = required_consecutive
+        self._consecutive_count = 0
+        self._confirmed = False
+
+    def update(self, raised_hands_result):
+        if raised_hands_result.get("raised_hands"):
+            self._consecutive_count += 1
+        else:
+            self._consecutive_count = 0
+            self._confirmed = False
+            return False
         if self._consecutive_count >= self.required_consecutive and not self._confirmed:
             self._confirmed = True
             return True

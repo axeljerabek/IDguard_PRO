@@ -637,6 +637,24 @@
                             <input type="number" name="POSE_FALL_ANGLE_THRESHOLD" min="20" max="85" step="1" value="{{ settings.get('POSE_FALL_ANGLE_THRESHOLD', 55) }}">
                             <p class="settings-hint" style="margin-top:4px;">Lower = more sensitive (flags more postures as falls, more false positives from bending). Higher = only near-fully-horizontal counts.</p>
                         </div>
+                        <div class="settings-group" style="margin-top:14px;">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" name="POSE_RAISED_HANDS_ENABLED" {% if settings.get('POSE_RAISED_HANDS_ENABLED') %}checked{% endif %} style="width:auto;">
+                                Also detect raised hands (both wrists held above the shoulders) — a possible wave or distress signal
+                            </label>
+                            <p class="settings-hint" style="margin-top:4px;">Uses the same pose model as fall detection, at no extra GPU cost. Only one hand raised is treated as an ordinary gesture and ignored.</p>
+                        </div>
+                        <div class="settings-group" style="margin-top:14px;">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                <input type="checkbox" name="POSE_LOITERING_ENABLED" {% if settings.get('POSE_LOITERING_ENABLED') %}checked{% endif %} style="width:auto;">
+                                Also detect loitering (a person staying in roughly the same spot)
+                            </label>
+                            <p class="settings-hint" style="margin-top:4px;">Position-based, not pose-based — works even without the pose model. Resets if the person leaves the frame or moves on, so a normal walk-through never triggers it.</p>
+                            <div style="margin-top:8px;">
+                                <label>Loitering threshold (seconds)</label>
+                                <input type="number" name="POSE_LOITERING_SECONDS" min="5" max="600" step="5" value="{{ settings.get('POSE_LOITERING_SECONDS', 30) }}">
+                            </div>
+                        </div>
                     </div>
 
                     <div class="settings-section">
