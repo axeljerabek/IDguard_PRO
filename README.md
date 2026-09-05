@@ -1,6 +1,6 @@
 # IDguard PRO
 
-<img src="idguard-logo.svg" alt="IDguard PRO logo" width="800">
+<img src="idguard-logo.svg" alt="IDguard PRO logo" width="200">
 
 IDguard PRO watches your cameras, decides what's actually worth recording, saves the event, and — if you want — tells you afterwards in plain words what happened in it, who was in it, and what was said, in a way you can later search back through. It does that by chaining several small, specialized models together instead of expecting one AI to handle it all: a YOLO model (v10, v12, or v26 — your choice) watches every frame live and spots the moment something worth recording is happening; an audio model (CLAP) can independently trigger a recording on a sound alone, even with nothing visible in frame; the recording itself then saves the event with a short buffer before and after; a vision-language model (via Ollama) looks at the finished clip afterwards and writes a description of what it saw, plus an optional yes/no read on categories you define yourself; a local Whisper model transcribes anything spoken; a face-recognition model groups and (once you name a few) recognizes who's in frame; and a small text-embedding model makes all of that searchable by meaning, not just exact words. Each model only does the one job it's good at, and the handoff between them is automatic. Everything runs on your own hardware, with GPU acceleration end to end — decoding and detection — no cloud involved.
 
@@ -114,6 +114,7 @@ The core mission of IDguard PRO is to act as an intelligent edge-computing senti
 * Delivers the processed video, an arbitrary time-range clip from it (`?start=&end=`, extracted via stream copy — no re-encoding), and the full enriched metadata (description, topics, transcript, faces) once finished.
 * Authenticated separately from the dashboard — generate and revoke API keys from the dashboard's External API card. Keys are stored as a hash, shown in full only once at creation.
 * Off by default (no keys exist until you generate one). See [REMOTE_API.md](./REMOTE_API.md) for the full endpoint reference and example requests.
+* **Agent control (optional, off by default):** an AI agent (Hermes, OpenClaw, etc.) can operate the pipeline directly through the same API — toggle cameras, tune settings, start/stop recording, search — gated by a separate per-capability permission file. Delete and export are intentionally not implemented for agent use yet. See [AGENT_CONFIG.md](./AGENT_CONFIG.md).
 
 ### Export
 * Bundles a recording — video, trigger screenshot, all sidecar metadata (AI description, topics, transcript, XMP), and the full filmstrip folder — into one clearly named folder: `Event_<Camera>_<Timestamp> Topic_<Topic>` (the topic suffix only appears if one was detected).
@@ -202,7 +203,8 @@ Detailed installation steps, including virtual environment setup and dependency 
 * `daily_summary.py`: Optional daily/weekly narrative summary generator — gathers existing AI descriptions for a time period and asks Ollama to summarize them in plain language. Callable from the dashboard or via cron.
 * `mqtt_client.py`: Optional MQTT / Home Assistant integration — publishes per-camera recording state and event summaries, with Home Assistant MQTT Discovery. Fire-and-forget, never blocks the recording pipeline.
 * `anomaly_detection.py`: Optional per-camera anomaly detection (Isolation Forest over the existing search embeddings). Callable from the dashboard or via cron; tagging in `.ai.json` only happens once enabled in Settings.
-* `mam_api.py`: Optional external API for remote control — job submission, status polling, webhook callbacks, video/segment/metadata delivery. Own Flask Blueprint with its own API-key auth, separate from the dashboard session. See [REMOTE_API.md](./REMOTE_API.md).
+* `mam_api.py`: Optional external API for remote control — job submission, status polling, webhook callbacks, video/segment/metadata delivery, plus gated agent-control routes (cameras, settings, pipeline, search). Own Flask Blueprint with its own API-key auth, separate from the dashboard session. See [REMOTE_API.md](./REMOTE_API.md) and [AGENT_CONFIG.md](./AGENT_CONFIG.md).
+* `agent_permissions.py`, `agent_config.json`: Permission gate for agent-control routes — master switch + per-capability toggles, off by default. Settings changes further restricted to a fixed allowlist enforced in code.
 * `postprocess.py`: Entry point for all post-recording processing — runs AI description/topics, transcription, and face recognition sequentially (not in parallel) for a finished recording, specifically so none of them race on the same sidecar metadata file.
 * `ai_analyze.py`: Optional post-recording AI scene analysis and topic classification via Ollama; prompt is built dynamically around configured detection classes and topics; writes dashboard metadata + Immich XMP sidecar; indexes the description and topics for search.
 * `audio_trigger.py`: Optional CLAP-based audio trigger — runs in its own background thread per camera, never blocks recording.

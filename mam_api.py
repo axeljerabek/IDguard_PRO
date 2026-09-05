@@ -32,10 +32,14 @@ from flask import Blueprint, request, jsonify, send_file, g
 DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(DIR)
 try:
-    from config import ALERTS_DIR, SETTINGS_F
+    from config import ALERTS_DIR, SETTINGS_F, STREAMS_F, PROJECT_ROOT
 except ImportError:
     ALERTS_DIR = "./alerts"
     SETTINGS_F = "pipeline_settings.json"
+    STREAMS_F = "streams.json"
+    PROJECT_ROOT = DIR
+
+import agent_permissions
 
 API_KEYS_PATH = os.path.join(DIR, "api_keys.json")
 JOBS_DIR = os.path.join(DIR, ".mam_jobs")
@@ -413,3 +417,151 @@ def get_job_metadata(job_id):
     if job.get("status") != "done":
         return jsonify({"job_id": job_id, "status": job["status"], "error": job.get("error")})
     return jsonify({"job_id": job_id, "status": "done", **job["result"]})
+
+
+# ---------------------------------------------------------------------------
+# Agent control -- separate capability gate on top of the normal API-key
+# check. See agent_config.json / AGENT_CONFIG.md. Off by default; every
+# route below checks its own capability before doing anything.
+# ---------------------------------------------------------------------------
+
+def requires_agent_capability(capability):
+    def decorator(f):
+        @wraps(f)
+        @requires_api_key
+        def wrapped(*args, **kwargs):
+            if not agent_permissions.is_capability_allowed(capability):
+                return jsonify({
+                    "error": f"Agent capability '{capability}' is not enabled. "
+                             f"See agent_config.json / AGENT_CONFIG.md."
+                }), 403
+            return f(*args, **kwargs)
+        return wrapped
+    return decorator
+
+
+def _load_streams():
+    try:
+        with open(STREAMS_F) as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def _save_streams(streams):
+    with open(STREAMS_F, "w") as f:
+        json.dump(streams, f, indent=2)
+
+
+@mam_bp.route("/agent/cameras", methods=["GET"])
+@requires_agent_capability("cameras_toggle")
+def agent_list_cameras():
+    # URL intentionally omitted -- may contain embedded credentials.
+    return jsonify([
+        {"name": s.get("name"), "enabled": s.get("enabled", False), "audio_enabled": s.get("audio_enabled", False)}
+        for s in _load_streams()
+    ])
+
+
+@mam_bp.route("/agent/cameras/<name>/enable", methods=["POST"])
+@requires_agent_capability("cameras_toggle")
+def agent_enable_camera(name):
+    return _set_camera_enabled(name, True)
+
+
+@mam_bp.route("/agent/cameras/<name>/disable", methods=["POST"])
+@requires_agent_capability("cameras_toggle")
+def agent_disable_camera(name):
+    return _set_camera_enabled(name, False)
+
+
+def _set_camera_enabled(name, enabled):
+    streams = _load_streams()
+    for s in streams:
+        if s.get("name") == name:
+            s["enabled"] = enabled
+            _save_streams(streams)
+            return jsonify({"ok": True, "name": name, "enabled": enabled})
+    return jsonify({"error": f"Camera '{name}' not found."}), 404
+
+
+@mam_bp.route("/agent/settings", methods=["GET"])
+@requires_agent_capability("settings_change")
+def agent_get_settings():
+    try:
+        with open(SETTINGS_F) as f:
+            settings = json.load(f)
+    except Exception:
+        settings = {}
+    # Nur die per Allowlist überhaupt änderbaren Werte zurückgeben -- alles
+    # andere (Zugangsdaten, Pfade) geht den Agenten nichts an, auch lesend nicht.
+    return jsonify({k: v for k, v in settings.items() if k in agent_permissions.SETTINGS_ALLOWLIST})
+
+
+@mam_bp.route("/agent/settings", methods=["POST"])
+@requires_agent_capability("settings_change")
+def agent_update_settings():
+    payload = request.get_json(silent=True) or {}
+    rejected = [k for k in payload if k not in agent_permissions.SETTINGS_ALLOWLIST]
+    if rejected:
+        return jsonify({
+            "error": f"Not allowed to change: {rejected}. Only these keys can be changed via the agent API: "
+                     f"{sorted(agent_permissions.SETTINGS_ALLOWLIST)}"
+        }), 403
+    try:
+        with open(SETTINGS_F) as f:
+            settings = json.load(f)
+    except Exception:
+        settings = {}
+    settings.update(payload)
+    with open(SETTINGS_F, "w") as f:
+        json.dump(settings, f, indent=2)
+    return jsonify({"ok": True, "updated": list(payload.keys())})
+
+
+@mam_bp.route("/agent/pipeline/status", methods=["GET"])
+@requires_agent_capability("pipeline_control")
+def agent_pipeline_status():
+    try:
+        from helpers import is_pipeline_running
+        running = is_pipeline_running()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"running": running})
+
+
+@mam_bp.route("/agent/pipeline/start", methods=["POST"])
+@requires_agent_capability("pipeline_control")
+def agent_start_pipeline():
+    try:
+        subprocess.Popen(["/bin/bash", os.path.join(PROJECT_ROOT, "start_detached.sh")], cwd=PROJECT_ROOT)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"ok": True, "status": "starting"})
+
+
+@mam_bp.route("/agent/pipeline/stop", methods=["POST"])
+@requires_agent_capability("pipeline_control")
+def agent_stop_pipeline():
+    try:
+        subprocess.Popen(["/bin/bash", os.path.join(PROJECT_ROOT, "stop.sh")], cwd=PROJECT_ROOT)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"ok": True, "status": "stopping"})
+
+
+@mam_bp.route("/agent/search", methods=["GET"])
+@requires_agent_capability("search")
+def agent_search():
+    query = request.args.get("q", "").strip()
+    if not query:
+        return jsonify({"results": []})
+    results = []
+    try:
+        import search_index
+        for filename, base_dir, description, score in search_index.search(query):
+            results.append({"filename": filename, "base_dir": base_dir, "description": description, "score": score})
+    except Exception as e:
+        return jsonify({"results": [], "error": str(e)})
+    results.sort(key=lambda r: r["score"], reverse=True)
+    return jsonify({"results": results[:50]})

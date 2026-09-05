@@ -1,36 +1,29 @@
 # IDguard PRO — Roadmap
 
-Laufende, priorisierte Liste. Wird Stück für Stück abgearbeitet, nicht alles auf einmal.
+Ongoing, prioritized list. Worked through incrementally, not all at once.
 
 ---
 
-## Tier 3 — Externe API / MAM-Anbindung (großes Subsystem, in Einzelschritte zerlegt)
+## Tier 4 — Agent Control (builds on the External API)
 
-- [ ] Job-Annahme-Endpunkt (Upload/Referenz) mit Auftrags-spezifischen Parametern (Topics, COCO-Klassen, Audio-Trigger-Phrasen) statt globaler Settings
-- [ ] API-Key-Auth für externe Aufrufer, getrennt von der bestehenden Dashboard-Session-Auth
-- [ ] Async-Job-Tracking + passiver Status-Endpunkt (`GET /api/job/<id>`)
-- [ ] Callback/Webhook-Zustellung bei Fertigstellung, inkl. Retry-Logik
-- [ ] Video-**Segment**-Export (Ausschnitt statt ganzes Video) — existiert noch nicht, eigene Teilaufgabe
-- [ ] Auslieferung: Video/Segment + angereicherte Metadaten + Gesichtsdaten über die API
+- [ ] Agent can call the existing External API to toggle cameras, change settings, start/stop the pipeline, and search — through the same endpoints as any other API client
+- [ ] Per-capability permission config (see AGENT_CONFIG.md) — off by default, enabled selectively
+- [ ] Delete and export intentionally excluded from agent capabilities for now
+- [ ] Longer-term: MCP server wrapper around the API for direct agent access
 
-## Tier 4 — Agent-Steuerung (baut auf Tier 3 auf)
+## Low priority / opportunistic
 
-- [ ] Agent kann über dieselben API-Endpunkte aus Tier 3 "manuell" Aufnahmen/Exporte auslösen — kein eigenes Subsystem, sondern Zugriff auf die MAM-API
-- [ ] Perspektivisch: MCP-Server-Wrapper um die API, für direkten Agenten-Zugriff (Claude o.ä.)
+- [ ] **YOLO Pose Estimation** — fall detection, posture classification. Fits the architecture cleanly (YOLO already runs), but self-rated low priority.
+- [ ] *(deferred)* **VAE/autoencoder on raw frames** for anomaly detection — only worth pursuing if the Isolation Forest approach hits real limits. Would be the first custom-trained model in the system, needs a GPU training pipeline, meaningfully more effort.
 
-## Kleine Prio / bei Gelegenheit
+## Open from earlier sessions
 
-- [ ] **YOLO Pose Estimation** — Sturzerkennung, Haltungs-Klassifikation. Fügt sich strukturell nahtlos ein (YOLO läuft eh), aber von dir selbst als niedrige Priorität eingestuft.
-- [ ] *(zurückgestellt)* **VAE/Autoencoder auf Rohbildern** für Anomalie-Erkennung — nur falls der Isolation-Forest-Ansatz in der Praxis an Grenzen stößt. Erstes selbst trainiertes Modell im System, GPU-Trainings-Pipeline, deutlich höherer Aufwand.
-
-## Bereits besprochen, noch offen von früheren Sessions
-
-- [ ] Watchfolder Modus 1 (wachsende Datei live als Stream lesen) — technisch unsicher bei MP4-Quellen (moov-Atom-Problem), nur mit echter Beispieldatei sinnvoll bewertbar
-- [ ] Schutzmechanismus für Encode-Modus-Speicherverbrauch (MJPEG/USB-Kameras, ~1,74GB/Kamera bei 1080p/10s Pre-Roll) — Rückmeldung von Axel noch offen
-- [ ] MJPEG/USB-Kamera-Encoding-Pfad — Kernstück fertig, aber noch nicht produktiv mit echter Hardware getestet
+- [ ] Watchfolder mode 1 (read a growing file as a live stream) — technically uncertain for MP4 sources (moov atom placement); only worth evaluating against a real sample file
+- [ ] Memory-usage safeguard for encode-mode cameras (MJPEG/USB) — ~1.7GB/camera at 1080p/10s pre-roll; flagged, no decision made yet
+- [ ] MJPEG/USB camera encoding path — built and unit-tested, not yet verified against real hardware
 
 ---
 
-## Bereits erledigt (heute)
+## Done
 
-RTMP+RTSP, MJPEG/USB-Encode-Pfad, Watchfolder-Import (Modus 2), HEVC-Retranscode (GPU-beschleunigt), Prozess-Orchestrierung-Fixes (Neustart-Erkennung, systemd-Service, Worker-Benennung), Postprocess-Watchdog (hängendes Ollama/GPU blockiert nicht mehr die ganze Warteschlange), eigenes Notizfeld (XMP-Export), Export-Unterordner für Sammelexporte, Export-Auswahl-Checkboxen (Video/Metadaten/Thumbs), Löschen-nach-Export-Option, Favorite/Sterne-Bewertung (xmp:Rating), Tages-/Wochen-Zusammenfassung per LLM (inkl. Dashboard-Karte + Cronjob-Beispiel), Home Assistant/MQTT-Anbindung (inkl. HA-Discovery, HOME_ASSISTANT.md), Isolation-Forest-Anomalie-Erkennung (inkl. Dashboard-Karte + Cronjob-Beispiel), Logo im README.
+RTMP+RTSP, MJPEG/USB encode path, Watchfolder import (mode 2), HEVC re-transcode (GPU-accelerated), process orchestration fixes (restart detection, systemd service, worker naming), post-process watchdog (a stuck Ollama/GPU no longer blocks the whole queue), per-video notes (XMP export), shared export subfolders, export content checkboxes (video/metadata/thumbs), delete-after-export option, star rating (xmp:Rating), daily/weekly LLM summaries (dashboard card + cron example), Home Assistant/MQTT integration (HA discovery, HOME_ASSISTANT.md), Isolation Forest anomaly detection (dashboard card + cron example), README logo, External API for remote control (job submission, API-key auth, status polling, webhook callbacks with retry, video/segment export, REMOTE_API.md), UI style cleanup (reduced padding/radius, more screen space for media).
