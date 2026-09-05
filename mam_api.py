@@ -663,6 +663,25 @@ def agent_trigger_recording(name):
     return jsonify({"ok": True, "name": name, "status": "trigger_sent"})
 
 
+@mam_bp.route("/agent/cameras/<name>/stop", methods=["POST"])
+@requires_agent_capability("manual_trigger")
+def agent_stop_recording(name):
+    """Beendet eine LAUFENDE Aufnahme für diese Kamera sofort -- das ist NICHT
+    dasselbe wie cameras_toggle/disable: disable setzt nur 'enabled' in
+    streams.json, was ein bereits laufender Worker-Prozess nie erneut
+    liest, eine aktive Aufnahme also unbeeinflusst weiterlaufen lässt.
+    Dieser Endpunkt ist der tatsächlich richtige Weg, eine laufende
+    Aufnahme von außen jetzt zu beenden -- dasselbe Datei-Flag-Muster wie
+    /trigger, nur umgekehrt."""
+    streams = _load_streams()
+    if not any(s.get("name") == name for s in streams):
+        return jsonify({"error": f"Camera '{name}' not found."}), 404
+    stop_dir = os.path.join(ALERTS_DIR, ".stops")
+    os.makedirs(stop_dir, exist_ok=True)
+    open(os.path.join(stop_dir, f"{name}.flag"), "w").close()
+    return jsonify({"ok": True, "name": name, "status": "stop_sent"})
+
+
 @mam_bp.route("/agent/detections", methods=["GET"])
 @requires_agent_capability("manual_trigger")
 def agent_list_detections():

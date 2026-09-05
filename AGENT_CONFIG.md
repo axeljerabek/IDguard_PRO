@@ -84,6 +84,7 @@ All under `/api/v1/agent/`, same `Authorization: Bearer <key>` / `X-API-Key` aut
 | `POST /pipeline/stop` | `pipeline_control` | |
 | `GET /search?q=...` | `search` | Same underlying search as the dashboard. |
 | `POST /cameras/<name>/trigger` | `manual_trigger` | Force-start a recording right now. Rejected (400) if the camera is disabled. |
+| `POST /cameras/<name>/stop` | `manual_trigger` | Ends a currently active recording immediately. **Not the same as `cameras_toggle`/disable** — disable only affects the next pipeline start, it does not stop an already-running recording. |
 | `POST /cameras/<name>/notify_only/enable` | `manual_trigger` | Switch to report-only. Takes effect on next camera process restart. |
 | `POST /cameras/<name>/notify_only/disable` | `manual_trigger` | Back to normal auto-record. |
 | `GET /detections` | `manual_trigger` | Most recent detected classes per camera, most recent first. |

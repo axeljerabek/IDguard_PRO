@@ -204,8 +204,10 @@ def _publish_mqtt_recording(name, is_recording):
 
 
 TRIGGER_DIR = os.path.join(ALERTS_DIR, '.triggers')
+STOP_DIR = os.path.join(ALERTS_DIR, '.stops')
 DETECTION_DIR = os.path.join(ALERTS_DIR, '.detections')
 os.makedirs(TRIGGER_DIR, exist_ok=True)
+os.makedirs(STOP_DIR, exist_ok=True)
 os.makedirs(DETECTION_DIR, exist_ok=True)
 
 
@@ -215,6 +217,23 @@ def _check_and_clear_manual_trigger(name):
     eine Prozess die Datei je liest/löscht, und die schreibende Seite
     (mam_api.py) sie nur einmalig anlegt."""
     path = os.path.join(TRIGGER_DIR, f'{name}.flag')
+    if os.path.exists(path):
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+        return True
+    return False
+
+
+def _check_and_clear_manual_stop(name):
+    """Gegenstück zum Trigger: beendet eine LAUFENDE Aufnahme sofort (statt
+    auf das normale Post-Roll-Ende zu warten). Wichtig, weil 'enabled: false'
+    (cameras_toggle/disable) das NICHT tut -- das wird nur beim
+    Prozessstart gelesen, ein schon laufender Worker merkt eine spätere
+    Änderung dort nie. Das hier ist der tatsächlich richtige Weg, eine
+    laufende Aufnahme von außen zu beenden."""
+    path = os.path.join(STOP_DIR, f'{name}.flag')
     if os.path.exists(path):
         try:
             os.remove(path)
@@ -660,6 +679,27 @@ class CameraAgent(multiprocessing.Process):
                 out_container.mux(packet)
             except Exception as e:
                 self.logger.error(f"❌ Remux error ({packet.stream.type if packet.stream else '?'}): {e}")
+
+        def _finish_recording_now(reason):
+            """Beendet die aktuell laufende Aufnahme sofort und stößt die
+            Nachbearbeitung an -- gemeinsam genutzt vom normalen Post-Roll-
+            Timeout UND vom manuellen Stop (Agent/API), damit beide Wege
+            exakt denselben, bereits bewährten Abschluss-Code durchlaufen
+            statt ihn zu duplizieren."""
+            nonlocal state
+            self.logger.info(f"✅ Session ended for {self.name} ({reason}). Closing file.")
+            close_writer()
+            state = "IDLE"
+            _write_state(self.name, "IDLE")
+            _publish_mqtt_recording(self.name, False)
+            if _postprocessing_enabled():
+                try:
+                    vb = os.path.splitext(os.path.basename(video_file_path))[0]
+                    subprocess.Popen(
+                        [sys.executable, os.path.join(DIR, 'postprocess.py'), vb, ALERTS_DIR]
+                    )
+                except Exception as e:
+                    self.logger.warning(f"⚠️ [{self.name}] Konnte Nachbearbeitung nicht starten: {e}")
 
         def capture_filmstrip(img_bgr, boxes=None, names=None):
             """Wählt im Intervall einen Filmstrip-Slot aus und legt NUR einen
@@ -1175,6 +1215,14 @@ class CameraAgent(multiprocessing.Process):
                                             _write_state(self.name, "IDLE")
                                             _publish_mqtt_recording(self.name, False)
 
+                                if state in ("RECORDING", "POST_ROLL") and _check_and_clear_manual_stop(self.name):
+                                    # Externe Stop-Anforderung (Agent/API) -- beendet die
+                                    # Aufnahme SOFORT, unabhängig davon ob YOLO gerade noch
+                                    # etwas sieht. Das ist der einzige Weg, eine laufende
+                                    # Aufnahme von außen zu beenden -- cameras_toggle/disable
+                                    # setzt nur 'enabled' in streams.json, das ein bereits
+                                    # laufender Worker-Prozess nie erneut liest.
+                                    _finish_recording_now("manual stop")
                                 elif state == "RECORDING":
                                     if target_detected:
                                         capture_filmstrip(img_bgr, boxes, names)
@@ -1201,22 +1249,7 @@ class CameraAgent(multiprocessing.Process):
                                     else:
                                         capture_filmstrip(img_bgr, boxes, names)
                                         if time.time() > post_roll_end_time:
-                                            self.logger.info(f"✅ Session ended for {self.name}. Closing file.")
-                                            close_writer()
-                                            state = "IDLE"
-                                            _write_state(self.name, "IDLE")
-                                            _publish_mqtt_recording(self.name, False)
-                                            if _postprocessing_enabled():
-                                                try:
-                                                    vb = os.path.splitext(os.path.basename(video_file_path))[0]
-                                                    subprocess.Popen(
-                                                        [sys.executable, os.path.join(DIR, 'postprocess.py'), vb, ALERTS_DIR]
-                                                        # stdout/stderr NICHT auf DEVNULL: Fehler (z.B. Ollama nicht
-                                                        # erreichbar) landen so im selben Log wie die restliche Pipeline
-                                                        # statt spurlos zu verschwinden.
-                                                    )
-                                                except Exception as e:
-                                                    self.logger.warning(f"⚠️ [{self.name}] Konnte Nachbearbeitung nicht starten: {e}")
+                                            _finish_recording_now("post-roll timeout")
 
                                 # Begrenzte Menge aus der Encoding-Warteschlange abarbeiten —
                                 # nach JEDEM verarbeiteten Video-Frame, unabhängig vom State-
