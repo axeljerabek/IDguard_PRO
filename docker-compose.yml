@@ -1,4 +1,4 @@
-# IDguard PRO - docker-compose.yml
+# vigil - docker-compose.yml
 #
 # EIN Service, nicht zwei. Das war ursprünglich als zwei getrennte Container
 # aufgeteilt (Pipeline + Dashboard) — das ist falsch und wurde korrigiert:
@@ -24,10 +24,10 @@
 # einfach OLLAMA_URL in den Dashboard-Settings drauf zeigen lassen.
 
 services:
-  idguard:
+  vigil:
     build: .
-    image: idguard-pro:latest
-    container_name: idguard
+    image: vigil:latest
+    container_name: vigil
     command: ["python3", "web_ui.py"]
     restart: unless-stopped
     network_mode: host   # lokale RTMP-Kameras im Heimnetz + Dashboard unter http://<host>:19473

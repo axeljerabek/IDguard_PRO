@@ -1,4 +1,4 @@
-# IDguard PRO - Container-Image
+# vigil - Container-Image
 #
 # Basis: nvidia/cuda "runtime" (nicht "devel") — wir kompilieren nichts,
 # PyTorch bringt seine eigenen CUDA-Bibliotheken über den cu128-Wheel mit.
