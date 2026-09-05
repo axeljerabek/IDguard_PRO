@@ -9,12 +9,55 @@ bleibt "unassigned" bis cluster_faces.py (DBSCAN) es in Gruppen einteilt,
 die der Nutzer im Dashboard benennt oder korrigiert.
 """
 import os
+import shutil
 import sqlite3
 import struct
 import numpy as np
 
 DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(DIR, "faces.db")
+
+try:
+    from config import ALERTS_DIR
+except ImportError:
+    ALERTS_DIR = os.path.join(DIR, "alerts")
+
+# Permanenter Foto-Speicher für benannte Personen -- UNABHÄNGIG vom Ordner
+# des Quellvideos. Vorher lagen Gesichts-Crops nur im videospezifischen
+# Ordner (base_dir/crop_path) -- wurde das Video gelöscht, verschwand damit
+# auch das Foto UND (schlimmer) die Zeile in der faces-Tabelle, was
+# _recompute_centroid() dazu brachte, den Centroid einer Person komplett auf
+# NULL zu setzen, sobald keine ihrer Quellvideos mehr existierten. Damit
+# war die Person zwar noch benannt, aber nie wieder automatisch erkennbar --
+# genau das Problem, das dieser permanente Speicher behebt: sobald ein
+# Gesicht einer Person zugeordnet wird, wird sein Foto hierher kopiert und
+# die Datenbank-Zeile bleibt bestehen, auch wenn das Quellvideo später
+# gelöscht wird.
+PEOPLE_PHOTOS_DIR = os.path.join(ALERTS_DIR, ".people_photos")
+
+
+def _archive_face_photo(base_dir, crop_path, face_id):
+    """Kopiert das Foto eines Gesichts in den permanenten Personen-Speicher,
+    falls es dort nicht schon liegt. Gibt (neuer_base_dir, neuer_crop_path)
+    zurück -- im selben base_dir/crop_path-Format wie der Rest der Tabelle,
+    damit get_face() unverändert funktioniert. Bei einem Fehler (z.B. Quelle
+    schon weg) wird (base_dir, crop_path) unverändert zurückgegeben -- lieber
+    die alte, möglicherweise brüchige Referenz behalten als abzustürzen."""
+    try:
+        os.makedirs(PEOPLE_PHOTOS_DIR, exist_ok=True)
+        source_path = os.path.join(base_dir, crop_path)
+        if not os.path.exists(source_path):
+            return base_dir, crop_path  # nichts zu kopieren, alte Referenz behalten
+        ext = os.path.splitext(crop_path)[1] or ".jpg"
+        new_filename = f"face_{face_id}{ext}"
+        dest_path = os.path.join(PEOPLE_PHOTOS_DIR, new_filename)
+        if os.path.abspath(source_path) == os.path.abspath(dest_path):
+            return PEOPLE_PHOTOS_DIR, new_filename  # schon archiviert
+        shutil.copy2(source_path, dest_path)
+        return PEOPLE_PHOTOS_DIR, new_filename
+    except Exception as e:
+        print(f"⚠️ Konnte Gesichtsfoto {face_id} nicht permanent archivieren: {e}")
+        return base_dir, crop_path
 
 EMBEDDING_DIM = 512  # InsightFace buffalo_*/antelopev2 liefern alle 512-dim Embeddings
 
@@ -108,23 +151,21 @@ def update_base_dir(filename, new_base_dir):
 
 
 def remove_faces_for_video(filename):
-    """Beim endgültigen Löschen eines Videos aufrufen. Sonst blieben
-    verwaiste Gesichts-Datensätze (mit Verweis auf inzwischen gelöschte
-    Crop-Bilder) für immer in der Datenbank — u.U. sogar sichtbar im
-    unzugeordneten Cluster-Pool, für ein Video, das gar nicht mehr
-    existiert. Betroffene Personen-Centroide werden danach neu berechnet,
-    falls eines der gelöschten Gesichter einer Person zugeordnet war."""
+    """Beim endgültigen Löschen eines Videos aufrufen. Wichtig: Gesichter,
+    die bereits einer BENANNTEN Person zugeordnet sind (person_id IS NOT
+    NULL), werden NICHT gelöscht -- ihr Foto wurde beim Zuordnen bereits
+    permanent archiviert (siehe create_person/assign_faces_to_person), aber
+    das eigentliche Embedding lebt in genau dieser Zeile. Würde sie hier mit
+    gelöscht, verlöre die Person ihr Wiedererkennungs-Embedding, sobald alle
+    ihre Quellvideos gelöscht sind -- sie bliebe zwar benannt, würde aber nie
+    wieder automatisch erkannt (das war der eigentliche Bug). Nur
+    unzugeordnete/Cluster-Gesichter (person_id IS NULL) werden wie bisher
+    entfernt, die waren ohnehin nie einer Identität zugewiesen."""
     try:
         conn = _connect()
-        rows = conn.execute(
-            "SELECT DISTINCT person_id FROM faces WHERE filename = ? AND person_id IS NOT NULL", (filename,)
-        ).fetchall()
-        affected_people = [r[0] for r in rows]
-        conn.execute("DELETE FROM faces WHERE filename = ?", (filename,))
+        conn.execute("DELETE FROM faces WHERE filename = ? AND person_id IS NULL", (filename,))
         conn.commit()
         conn.close()
-        for person_id in affected_people:
-            _recompute_centroid(person_id)
     except Exception as e:
         print(f"⚠️ Konnte Gesichter für {filename} nicht löschen: {e}")
 
@@ -202,7 +243,10 @@ def _recompute_centroid(person_id):
 
 def create_person(name, face_ids):
     """Neue Person aus einer Menge von Gesichts-IDs (z.B. beim Benennen
-    eines Clusters). Erste Face-ID wird als Titelbild verwendet."""
+    eines Clusters). Erste Face-ID wird als Titelbild verwendet. Alle
+    zugeordneten Fotos werden sofort permanent archiviert (siehe
+    PEOPLE_PHOTOS_DIR) -- ab diesem Moment übersteht die Person das
+    Löschen ihrer Quellvideos."""
     if not face_ids:
         return None
     try:
@@ -217,6 +261,12 @@ def create_person(name, face_ids):
             [(person_id, fid) for fid in face_ids]
         )
         conn.commit()
+        for fid in face_ids:
+            row = conn.execute("SELECT base_dir, crop_path FROM faces WHERE id = ?", (fid,)).fetchone()
+            if row:
+                new_base_dir, new_crop_path = _archive_face_photo(row[0], row[1], fid)
+                conn.execute("UPDATE faces SET base_dir = ?, crop_path = ? WHERE id = ?", (new_base_dir, new_crop_path, fid))
+        conn.commit()
         conn.close()
         _recompute_centroid(person_id)
         return person_id
@@ -227,7 +277,8 @@ def create_person(name, face_ids):
 
 def assign_faces_to_person(person_id, face_ids):
     """Bestehende Gesichter (z.B. aus einem Cluster) einer bereits benannten
-    Person zuordnen — 'Merge in bestehende Person'."""
+    Person zuordnen — 'Merge in bestehende Person'. Fotos werden dabei
+    ebenfalls permanent archiviert, siehe create_person()."""
     if not face_ids:
         return
     try:
@@ -236,6 +287,12 @@ def assign_faces_to_person(person_id, face_ids):
             "UPDATE faces SET person_id = ?, cluster_id = NULL WHERE id = ?",
             [(person_id, fid) for fid in face_ids]
         )
+        conn.commit()
+        for fid in face_ids:
+            row = conn.execute("SELECT base_dir, crop_path FROM faces WHERE id = ?", (fid,)).fetchone()
+            if row:
+                new_base_dir, new_crop_path = _archive_face_photo(row[0], row[1], fid)
+                conn.execute("UPDATE faces SET base_dir = ?, crop_path = ? WHERE id = ?", (new_base_dir, new_crop_path, fid))
         conn.commit()
         conn.close()
         _recompute_centroid(person_id)
@@ -543,6 +600,27 @@ def rename_person(person_id, new_name):
         conn.close()
     except Exception as e:
         print(f"⚠️ Konnte Person nicht umbenennen: {e}")
+
+
+def set_representative_face(person_id, face_id):
+    """Legt fest, welches Foto als Titelbild der Person angezeigt wird --
+    muss ein Gesicht SEIN, das bereits dieser Person zugeordnet ist (sonst
+    wird ein Foto verwendet, das gar nicht zu ihr gehört). Da Fotos benannter
+    Personen beim Zuordnen bereits permanent archiviert werden, ist jede
+    Auswahl hier dauerhaft sicher vor dem Löschen von Quellvideos."""
+    try:
+        conn = _connect()
+        row = conn.execute("SELECT person_id FROM faces WHERE id = ?", (face_id,)).fetchone()
+        if not row or row[0] != person_id:
+            conn.close()
+            return False, "This face doesn't belong to this person."
+        conn.execute("UPDATE people SET representative_face_id = ? WHERE id = ?", (face_id, person_id))
+        conn.commit()
+        conn.close()
+        return True, None
+    except Exception as e:
+        print(f"⚠️ Konnte Titelbild nicht setzen: {e}")
+        return False, str(e)
 
 
 def delete_person(person_id):

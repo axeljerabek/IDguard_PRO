@@ -1337,6 +1337,23 @@ input:checked + .slider:before { transform: translateX(21px); background: var(--
     cursor: pointer;
     accent-color: var(--primary);
 }
+.face-thumb-star {
+    position: absolute;
+    bottom: -8px;
+    right: -8px;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--primary);
+    color: #fff;
+    border: none;
+    font-size: 0.8rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
 .face-select-bar {
     display: flex;
     align-items: center;

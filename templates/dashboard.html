@@ -2100,6 +2100,7 @@
                             <img src="/face_crop/${f.id}" class="face-thumb" title="${escapeHtml(f.filename)}" onclick="zoomFace('/face_crop/${f.id}')">
                             <input type="checkbox" class="face-select-checkbox" onclick="toggleFaceSelection(${f.id}, this)" title="Select">
                             <button type="button" class="face-thumb-remove" onclick="unassignFace(${f.id}, ${personId})" title="Remove from this person"><i class="fa-solid fa-xmark"></i></button>
+                            <button type="button" class="face-thumb-star" onclick="setRepresentativeFace(${personId}, ${f.id})" title="Use as profile photo"><i class="fa-solid fa-star"></i></button>
                             <div class="face-thumb-meta">${formatFaceMeta(f)}</div>
                         </div>
                     `).join('') || '<p class="settings-hint">No faces left for this person.</p>';
@@ -2450,6 +2451,17 @@
                 if (lightboxContext && lightboxContext.type === 'person' && lightboxContext.id === personId) {
                     renderPersonLightboxContent(personId);
                 }
+            });
+        }
+
+        function setRepresentativeFace(personId, faceId) {
+            _postForm('/api/set_representative_face', { person_id: personId, face_id: faceId }).then(res => {
+                if (!res.ok) {
+                    showToast('⚠️ Could not set profile photo: ' + (res.error || 'unknown error'), 6000);
+                    return;
+                }
+                showToast('Profile photo updated.');
+                renderPeopleGrid();  // Kachel-Ansicht zeigt das neue Titelbild
             });
         }
 

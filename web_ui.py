@@ -1161,6 +1161,20 @@ def api_person_faces(person_id):
         return json.dumps({'faces': [], 'error': 'Face recognition module not available.'})
     return json.dumps({'faces': faces_db.get_faces_for_person(person_id)})
 
+@app.route('/api/set_representative_face', methods=['POST'])
+@requires_auth
+def set_representative_face_route():
+    _verify_csrf()
+    if faces_db is None:
+        return json.dumps({'ok': False, 'error': 'Face recognition module not available.'})
+    try:
+        person_id = int(request.form.get('person_id'))
+        face_id = int(request.form.get('face_id'))
+    except (TypeError, ValueError):
+        return json.dumps({'ok': False, 'error': 'Invalid person_id/face_id.'})
+    ok, err = faces_db.set_representative_face(person_id, face_id)
+    return json.dumps({'ok': ok, 'error': err})
+
 @app.route('/face_crop/<int:face_id>')
 @requires_auth
 def face_crop(face_id):
